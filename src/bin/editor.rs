@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::{collections::HashMap, path::PathBuf};
 
 use eframe::egui::{self, Color32, RichText};
 use opencity::{
@@ -7,6 +7,8 @@ use opencity::{
 
 #[path = "editor/map.rs"]
 mod map;
+#[path = "editor/mcp.rs"]
+mod mcp;
 use map::{SegmentSource, WorldPoint};
 
 const KINDS: [RoadElementKind; 11] = [
@@ -176,254 +178,8 @@ fn default_program() -> Program {
     parse(include_str!("../../examples/default_roads.road")).expect("bundled road library parses")
 }
 
-fn starter_line(
-    program: &mut Program,
-    road: &RoadDefinition,
-    start: WorldPoint,
-    start_ref: Option<&str>,
-    end: WorldPoint,
-    end_ref: Option<&str>,
-    name: String,
-) -> (usize, String) {
-    let first = WorldPoint {
-        x: start.x + (end.x - start.x) / 3.0,
-        y: start.y + (end.y - start.y) / 3.0,
-    };
-    let second = WorldPoint {
-        x: start.x + (end.x - start.x) * 2.0 / 3.0,
-        y: start.y + (end.y - start.y) * 2.0 / 3.0,
-    };
-    let (index, reference) =
-        map::append_connected_curve(program, road, start, start_ref, first, second, end, end_ref);
-    map::set_name(program, SegmentSource::TopLevel(index), name);
-    (index, reference)
-}
-
 fn starter_program() -> Program {
-    let mut program = default_program();
-    let road = |name: &str| {
-        program
-            .statements
-            .iter()
-            .find_map(|statement| match statement {
-                Statement::Road(road) if road.name == name => Some(road.clone()),
-                _ => None,
-            })
-            .expect("starter road type exists")
-    };
-    let highway = road("interstate_three_lane");
-    let main = road("main_street");
-    let neighborhood = road("neighborhood_street");
-    let avenue = road("downtown_avenue");
-    let rural = road("rural_road");
-    let country = road("country_lane");
-    let ramp = road("exit_ramp");
-    let point = |x, y| WorldPoint { x, y };
-
-    // A smooth closed bypass frames the city. Every bend shares the previous
-    // bend's junction, so moving a point keeps the loop connected.
-    let ring = [
-        point(-3.8, -1.5),
-        point(-3.75, 1.35),
-        point(-2.7, 2.45),
-        point(0.0, 2.7),
-        point(2.8, 2.35),
-        point(3.8, 1.15),
-        point(3.9, -1.35),
-        point(2.75, -2.5),
-        point(0.0, -2.75),
-        point(-2.75, -2.45),
-    ];
-    let mut ring_segments = Vec::with_capacity(ring.len());
-    let mut ring_start_ref = None;
-    let mut previous_ref = None;
-    for index in 0..ring.len() {
-        let prior = ring[(index + ring.len() - 1) % ring.len()];
-        let start = ring[index];
-        let end = ring[(index + 1) % ring.len()];
-        let after = ring[(index + 2) % ring.len()];
-        let first = point(
-            start.x + (end.x - prior.x) / 6.0,
-            start.y + (end.y - prior.y) / 6.0,
-        );
-        let second = point(
-            end.x - (after.x - start.x) / 6.0,
-            end.y - (after.y - start.y) / 6.0,
-        );
-        let end_ref = if index + 1 == ring.len() {
-            ring_start_ref.as_deref()
-        } else {
-            None
-        };
-        let (segment, reference) = map::append_connected_curve(
-            &mut program,
-            &highway,
-            start,
-            previous_ref.as_deref(),
-            first,
-            second,
-            end,
-            end_ref,
-        );
-        map::set_name(
-            &mut program,
-            SegmentSource::TopLevel(segment),
-            format!("beltway_{:02}", index + 1),
-        );
-        if index == 0 {
-            ring_start_ref =
-                map::link_endpoint(&mut program, SegmentSource::TopLevel(segment), false)
-                    .map(|(_, reference)| reference);
-        }
-        previous_ref = Some(reference);
-        ring_segments.push(SegmentSource::TopLevel(segment));
-    }
-
-    // Three east-west streets and three north-south streets make four city
-    // blocks. Each crossing uses the same map_point in both streets.
-    let columns = [-2.2, -1.25, 0.0, 1.25, 2.2];
-    let rows = [1.2, 0.0, -1.2];
-    let mut crossings = vec![vec![String::new(); columns.len()]; rows.len()];
-    for (row, y) in rows.iter().enumerate() {
-        let section = if row == 1 { &main } else { &neighborhood };
-        let street = ["cedar", "market", "willow"][row];
-        for column in 0..columns.len() - 1 {
-            let start_ref = (column > 0).then(|| crossings[row][column].as_str());
-            let (_, end_ref) = starter_line(
-                &mut program,
-                section,
-                point(columns[column], *y),
-                start_ref,
-                point(columns[column + 1], *y),
-                None,
-                format!("{street}_{:02}", column + 1),
-            );
-            crossings[row][column + 1] = end_ref;
-        }
-    }
-    let vertical_ends = [1.7, 1.2, 0.0, -1.2, -1.7];
-    for (street_index, column) in [1, 2, 3].into_iter().enumerate() {
-        let section = if street_index == 1 {
-            &avenue
-        } else {
-            &neighborhood
-        };
-        let street = ["oak", "civic", "elm"][street_index];
-        for piece in 0..vertical_ends.len() - 1 {
-            let start_ref = (piece > 0).then(|| crossings[piece - 1][column].as_str());
-            let end_ref = (piece < rows.len()).then(|| crossings[piece][column].as_str());
-            starter_line(
-                &mut program,
-                section,
-                point(columns[column], vertical_ends[piece]),
-                start_ref,
-                point(columns[column], vertical_ends[piece + 1]),
-                end_ref,
-                format!("{street}_{:02}", piece + 1),
-            );
-        }
-    }
-
-    // Market Street reaches an inward-facing exit from the eastern beltway.
-    let (_, market_east_ref) = starter_line(
-        &mut program,
-        &main,
-        point(2.2, 0.0),
-        Some(&crossings[1][4]),
-        point(2.75, 0.2),
-        None,
-        "market_interchange".into(),
-    );
-    let (city_attachment, city_start) =
-        map::create_lane_point(&mut program, ring_segments[5], 8, 0.48).unwrap();
-    let city_exit = map::append_exit(
-        &mut program,
-        &ramp,
-        map::SplitMode::KeepLane,
-        city_start,
-        &city_attachment,
-        point(2.75, 0.2),
-        Some(&market_east_ref),
-    )
-    .unwrap();
-    map::set_name(&mut program, city_exit.entry, "city_exit_entry".into());
-    map::set_name(&mut program, city_exit.full, "city_exit_ramp".into());
-    map::create_two_segment_split(
-        &mut program,
-        &city_attachment,
-        city_exit.entry,
-        city_exit.full,
-        map::SplitMode::KeepLane,
-    );
-
-    // A second access branch leads into a visibly winding country road.
-    let (country_attachment, country_start) =
-        map::create_lane_point(&mut program, ring_segments[6], 2, 0.34).unwrap();
-    let country_exit = map::append_exit(
-        &mut program,
-        &ramp,
-        map::SplitMode::KeepLane,
-        country_start,
-        &country_attachment,
-        point(4.55, -2.05),
-        None,
-    )
-    .unwrap();
-    map::set_name(&mut program, country_exit.entry, "county_exit_entry".into());
-    map::set_name(&mut program, country_exit.full, "county_exit_ramp".into());
-    map::create_two_segment_split(
-        &mut program,
-        &country_attachment,
-        country_exit.entry,
-        country_exit.full,
-        map::SplitMode::KeepLane,
-    );
-    let (rural_one, rural_ref) = map::append_connected_curve(
-        &mut program,
-        &rural,
-        point(4.55, -2.05),
-        Some(&country_exit.end_ref),
-        point(5.15, -2.3),
-        point(5.5, -1.95),
-        point(5.1, -1.4),
-        None,
-    );
-    map::set_name(
-        &mut program,
-        SegmentSource::TopLevel(rural_one),
-        "county_bend".into(),
-    );
-    let (rural_two, second_ref) = map::append_connected_curve(
-        &mut program,
-        &country,
-        point(5.1, -1.4),
-        Some(&rural_ref),
-        point(4.65, -0.95),
-        point(5.65, -0.65),
-        point(5.45, 0.05),
-        None,
-    );
-    map::set_name(
-        &mut program,
-        SegmentSource::TopLevel(rural_two),
-        "orchard_lane".into(),
-    );
-    let (rural_three, _) = map::append_connected_curve(
-        &mut program,
-        &country,
-        point(5.45, 0.05),
-        Some(&second_ref),
-        point(5.3, 0.75),
-        point(4.65, 0.7),
-        point(5.2, 1.4),
-        None,
-    );
-    map::set_name(
-        &mut program,
-        SegmentSource::TopLevel(rural_three),
-        "orchard_hill".into(),
-    );
-    program
+    parse(include_str!("../../examples/starter_city.road")).expect("bundled starter city parses")
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -442,6 +198,11 @@ enum PendingAction {
 
 struct RoadEditor {
     program: Program,
+    saved_program: Program,
+    undo_stack: Vec<Program>,
+    redo_stack: Vec<Program>,
+    history_drag_active: bool,
+    skip_history: bool,
     path: Option<PathBuf>,
     dirty: bool,
     selected_road: Option<usize>,
@@ -471,6 +232,8 @@ struct RoadEditor {
     confirm_delete_road: bool,
     #[cfg(target_os = "macos")]
     native_menu: Option<NativeFileMenu>,
+    mcp: Option<mcp::Bridge>,
+    map_rect: Option<egui::Rect>,
 }
 
 impl RoadEditor {
@@ -483,6 +246,11 @@ impl RoadEditor {
         cc.egui_ctx.set_theme(egui::ThemePreference::System);
         let mut app = Self {
             program: starter_program(),
+            saved_program: starter_program(),
+            undo_stack: Vec::new(),
+            redo_stack: Vec::new(),
+            history_drag_active: false,
+            skip_history: false,
             path: None,
             dirty: false,
             selected_road: Some(0),
@@ -508,12 +276,14 @@ impl RoadEditor {
             dragging_background: false,
             show_source: false,
             status:
-                "Explore the beltway, city grid, and country road | File > New starts a blank map."
+                "Explore the little city and its winding lanes | File > New starts a blank map."
                     .into(),
             pending: None,
             confirm_delete_road: false,
             #[cfg(target_os = "macos")]
             native_menu: NativeFileMenu::install(),
+            mcp: None,
+            map_rect: None,
         };
         if let Some(path) = open_path {
             app.open_path(path);
@@ -526,6 +296,63 @@ impl RoadEditor {
             Statement::Road(road) => Some(road),
             _ => None,
         }
+    }
+
+    fn restore_history(&mut self, undo: bool) -> bool {
+        let target = if undo {
+            &mut self.undo_stack
+        } else {
+            &mut self.redo_stack
+        };
+        if let Some(previous) = target.pop() {
+            let current = std::mem::replace(&mut self.program, previous);
+            let destination = if undo {
+                &mut self.redo_stack
+            } else {
+                &mut self.undo_stack
+            };
+            destination.push(current);
+            self.selected_segment = None;
+            self.selected_endpoint = None;
+            self.lane_end_choice = None;
+            self.map_start = None;
+            self.map_start_ref = None;
+            self.selected_road = self.selected_road.filter(|index| {
+                matches!(
+                    self.program.statements.get(*index),
+                    Some(Statement::Road(_))
+                )
+            });
+            self.road_name_draft = self
+                .road()
+                .map(|road| road.name.clone())
+                .unwrap_or_default();
+            self.dirty = self.program != self.saved_program;
+            self.status = if undo { "Undid edit" } else { "Redid edit" }.into();
+            self.skip_history = true;
+            true
+        } else {
+            false
+        }
+    }
+
+    fn record_history(&mut self, before: Program, dragging: bool) {
+        if self.skip_history {
+            self.skip_history = false;
+        } else if self.program != before {
+            if !self.history_drag_active {
+                self.undo_stack.push(before);
+                if self.undo_stack.len() > 100 {
+                    self.undo_stack.remove(0);
+                }
+                self.redo_stack.clear();
+            }
+            self.history_drag_active = dragging;
+        }
+        if !dragging {
+            self.history_drag_active = false;
+        }
+        self.dirty = self.program != self.saved_program;
     }
 
     fn start_extension(&mut self, source: SegmentSource, is_end: bool) -> bool {
@@ -851,6 +678,10 @@ impl RoadEditor {
                     })
                     .unwrap_or_default();
                 self.program = program;
+                self.saved_program = self.program.clone();
+                self.undo_stack.clear();
+                self.redo_stack.clear();
+                self.skip_history = true;
                 self.fit_scene_once = true;
                 self.path = Some(path.clone());
                 self.dirty = false;
@@ -869,6 +700,7 @@ impl RoadEditor {
         match self.program.write_road_file(&path) {
             Ok(()) => {
                 self.path = Some(path.clone());
+                self.saved_program = self.program.clone();
                 self.dirty = false;
                 self.status = format!("Saved {}", path.display());
             }
@@ -900,6 +732,10 @@ impl RoadEditor {
 
     fn new_document(&mut self) {
         self.program = default_program();
+        self.saved_program = self.program.clone();
+        self.undo_stack.clear();
+        self.redo_stack.clear();
+        self.skip_history = true;
         self.path = None;
         self.selected_road = Some(0);
         self.selected_element = None;
@@ -981,6 +817,19 @@ impl RoadEditor {
                     ui.label(RichText::new("OPEN CITY").strong().color(palette.brand));
                     ui.separator();
                     self.file_menu(ui);
+                    ui.separator();
+                    if ui
+                        .add_enabled(!self.undo_stack.is_empty(), egui::Button::new("Undo"))
+                        .clicked()
+                    {
+                        self.restore_history(true);
+                    }
+                    if ui
+                        .add_enabled(!self.redo_stack.is_empty(), egui::Button::new("Redo"))
+                        .clicked()
+                    {
+                        self.restore_history(false);
+                    }
                     ui.separator();
                     ui.menu_button("Theme", |ui| {
                         let current = ui.options(|options| options.theme_preference);
@@ -1429,6 +1278,29 @@ impl RoadEditor {
     }
 
     fn map_inspector(&mut self, ui: &mut egui::Ui) {
+        let projection = map::project(&self.program);
+        let profiles = paint_profiles(&self.program, &projection);
+        let issues = design_rule_issues(&self.program, &projection, &profiles);
+        ui.collapsing(
+            format!(
+                "Design checks: {} issue{}",
+                issues.len(),
+                if issues.len() == 1 { "" } else { "s" }
+            ),
+            |ui| {
+                if issues.is_empty() {
+                    ui.label("Road-to-road joins are aligned.");
+                }
+                for issue in &issues {
+                    if ui.button(&issue.message).clicked() {
+                        self.map_pan =
+                            egui::vec2(-issue.at.x * self.map_zoom, issue.at.y * self.map_zoom);
+                        self.fit_scene_once = false;
+                    }
+                }
+            },
+        );
+        ui.add_space(10.0);
         let selected = self.selected_segment.and_then(|source| {
             map::project(&self.program)
                 .segments
@@ -1823,6 +1695,7 @@ impl RoadEditor {
             });
             let (rect, response) =
                 ui.allocate_exact_size(ui.available_size(), egui::Sense::click_and_drag());
+            self.map_rect = Some(rect);
             let before = map::project(&self.program);
             if self.fit_scene_once {
                 self.fit_scene_once = false;
@@ -2165,8 +2038,14 @@ impl RoadEditor {
             paint_grid(&painter, rect, self.map_pan, self.map_zoom, palette);
             let projection = map::project(&self.program);
             let profiles = paint_profiles(&self.program, &projection);
+            let issues = design_rule_issues(&self.program, &projection, &profiles);
             let mut draw_order: Vec<_> = (0..projection.segments.len()).collect();
-            draw_order.sort_by_key(|index| profiles[*index].branch_alignment.is_some());
+            draw_order.sort_by_key(|index| {
+                profiles[*index].start_alignment.is_some()
+                    || profiles[*index].merge_alignment.is_some()
+                    || !profiles[*index].start_taper.is_empty()
+                    || !profiles[*index].end_taper.is_empty()
+            });
             for index in draw_order {
                 let segment = &projection.segments[index];
                 let selected = self.selected_segment == Some(segment.source);
@@ -2178,7 +2057,12 @@ impl RoadEditor {
                         Statement::Road(road) if road.name == segment.road_name => Some(road),
                         _ => None,
                     });
-                if let Some(road) = road.filter(|_| profiles[index].branch_alignment.is_some()) {
+                if let Some(road) = road.filter(|_| {
+                    profiles[index].start_alignment.is_some()
+                        || profiles[index].merge_alignment.is_some()
+                        || !profiles[index].start_taper.is_empty()
+                        || !profiles[index].end_taper.is_empty()
+                }) {
                     paint_profiled_road(&painter, rect, self.map_pan, self.map_zoom,
                         segment, road, selected, palette, &profiles[index]);
                 } else {
@@ -2375,13 +2259,14 @@ impl RoadEditor {
                 rect.left_top() + egui::vec2(18.0, 18.0),
                 egui::Align2::LEFT_TOP,
                 format!(
-                    "{} segments  |  {} road types",
+                    "{} segments  |  {} road types  |  {} design issues",
                     projection.segments.len(),
                     self.program
                         .statements
                         .iter()
                         .filter(|statement| matches!(statement, Statement::Road(_)))
-                        .count()
+                        .count(),
+                    issues.len()
                 ),
                 egui::FontId::proportional(13.0),
                 palette.map_subtle,
@@ -2802,7 +2687,65 @@ fn map_element_width(kind: RoadElementKind, zoom: f32) -> f32 {
 
 #[derive(Default)]
 struct PaintProfile {
-    branch_alignment: Option<(map::ExitSide, RoadElementKind)>,
+    start_alignment: Option<usize>,
+    merge_alignment: Option<usize>,
+    start_taper: Vec<usize>,
+    end_taper: Vec<usize>,
+}
+
+#[derive(Clone)]
+struct DesignIssue {
+    code: &'static str,
+    message: String,
+    at: WorldPoint,
+    roads: [String; 2],
+}
+
+fn road_joins(projection: &map::Projection) -> Vec<(usize, usize)> {
+    let mut ends: HashMap<&str, Vec<(usize, bool)>> = HashMap::new();
+    for (index, segment) in projection.segments.iter().enumerate() {
+        if let Some(reference) = segment.start_ref.as_deref() {
+            ends.entry(reference).or_default().push((index, false));
+        }
+        if let Some(reference) = segment.end_ref.as_deref() {
+            ends.entry(reference).or_default().push((index, true));
+        }
+    }
+    ends.into_values()
+        .filter_map(|ends| {
+            if ends.len() != 2 {
+                return None;
+            }
+            match (ends[0], ends[1]) {
+                ((a, true), (b, false)) => Some((a, b)),
+                ((a, false), (b, true)) => Some((b, a)),
+                _ => None,
+            }
+        })
+        .collect()
+}
+
+fn straight_join(incoming: &map::Segment, outgoing: &map::Segment) -> bool {
+    let a = incoming.tangent_at(1.0);
+    let b = outgoing.tangent_at(0.0);
+    let lengths = (a.x * a.x + a.y * a.y).sqrt() * (b.x * b.x + b.y * b.y).sqrt();
+    lengths > 0.000001 && (a.x * b.x + a.y * b.y) / lengths > 0.95
+}
+
+/// Indices of the wider road's elements outside an exact, contiguous match.
+fn extra_elements_at_join(wide: &RoadDefinition, narrow: &RoadDefinition) -> Option<Vec<usize>> {
+    if wide.elements.len() <= narrow.elements.len() {
+        return None;
+    }
+    let start = wide
+        .elements
+        .windows(narrow.elements.len())
+        .position(|window| window == narrow.elements.as_slice())?;
+    Some(
+        (0..wide.elements.len())
+            .filter(|index| *index < start || *index >= start + narrow.elements.len())
+            .collect(),
+    )
 }
 
 fn road_for_segment<'a>(
@@ -2816,6 +2759,26 @@ fn road_for_segment<'a>(
             Statement::Road(road) if road.name == segment.road_name => Some(road),
             _ => None,
         })
+}
+
+fn ramp_element_at_attachment(
+    parent_road: &RoadDefinition,
+    ramp_road: &RoadDefinition,
+    element_index: usize,
+) -> Option<usize> {
+    if element_index >= parent_road.elements.len() || ramp_road.elements.is_empty() {
+        return None;
+    }
+    let outward = &parent_road.elements[element_index..];
+    let inward = &parent_road.elements[..=element_index];
+    let elements = &ramp_road.elements;
+    if elements == outward || elements.iter().rev().eq(inward.iter()) {
+        Some(0)
+    } else if elements == inward || elements.iter().rev().eq(outward.iter()) {
+        Some(elements.len() - 1)
+    } else {
+        None
+    }
 }
 
 fn paint_profiles(program: &Program, projection: &map::Projection) -> Vec<PaintProfile> {
@@ -2846,17 +2809,49 @@ fn paint_profiles(program: &Program, projection: &map::Projection) -> Vec<PaintP
         let Some(ramp_road) = road_for_segment(program, ramp) else {
             continue;
         };
-        let Some(selected) = parent_road.elements.get(split.element_index) else {
+        profiles[ramp_index].start_alignment =
+            ramp_element_at_attachment(parent_road, ramp_road, split.element_index);
+    }
+    for (index, segment) in projection.segments.iter().enumerate() {
+        let Some((parent_name, element_index, _)) = segment
+            .end_ref
+            .as_deref()
+            .and_then(|reference| map::lane_attachment(program, reference))
+        else {
             continue;
         };
-        let side = if ramp_road.elements == parent_road.elements[split.element_index..] {
-            Some(map::ExitSide::Right)
-        } else if ramp_road.elements == parent_road.elements[..=split.element_index] {
-            Some(map::ExitSide::Left)
-        } else {
-            None
+        let Some(parent) = projection
+            .segments
+            .iter()
+            .find(|candidate| candidate.name.as_deref() == Some(&parent_name))
+        else {
+            continue;
         };
-        profiles[ramp_index].branch_alignment = side.map(|side| (side, selected.kind));
+        let (Some(parent_road), Some(ramp_road)) = (
+            road_for_segment(program, parent),
+            road_for_segment(program, segment),
+        ) else {
+            continue;
+        };
+        profiles[index].merge_alignment =
+            ramp_element_at_attachment(parent_road, ramp_road, element_index);
+    }
+    for (incoming, outgoing) in road_joins(projection) {
+        let a = &projection.segments[incoming];
+        let b = &projection.segments[outgoing];
+        if !straight_join(a, b) {
+            continue;
+        }
+        let (Some(a_road), Some(b_road)) =
+            (road_for_segment(program, a), road_for_segment(program, b))
+        else {
+            continue;
+        };
+        if let Some(extra) = extra_elements_at_join(a_road, b_road) {
+            profiles[incoming].end_taper = extra;
+        } else if let Some(extra) = extra_elements_at_join(b_road, a_road) {
+            profiles[outgoing].start_taper = extra;
+        }
     }
     profiles
 }
@@ -2879,23 +2874,85 @@ fn section_widths(
     profile: &PaintProfile,
     t: f32,
 ) -> (Vec<f32>, f32) {
-    let widths: Vec<_> = road
+    let mut widths: Vec<_> = road
         .elements
         .iter()
         .map(|element| map_element_width(element.kind, zoom))
         .collect();
+    let smooth = |value: f32| {
+        let x = value.clamp(0.0, 1.0);
+        x * x * (3.0 - 2.0 * x)
+    };
+    for index in &profile.start_taper {
+        widths[*index] *= smooth(t / 0.25);
+    }
+    for index in &profile.end_taper {
+        widths[*index] *= smooth((1.0 - t) / 0.25);
+    }
     let total: f32 = widths.iter().sum();
     let start_offset = profile
-        .branch_alignment
-        .map(|(side, selected)| {
-            let delta = (total - map_element_width(selected, zoom)) / 2.0;
-            match side {
-                map::ExitSide::Right => delta,
-                map::ExitSide::Left => -delta,
-            }
+        .start_alignment
+        .and_then(|index| {
+            widths
+                .get(index)
+                .map(|selected| total / 2.0 - widths[..index].iter().sum::<f32>() - selected / 2.0)
         })
         .unwrap_or(0.0);
-    (widths, -total / 2.0 + start_offset * (1.0 - t).powi(2))
+    let end_offset = profile
+        .merge_alignment
+        .and_then(|index| {
+            widths
+                .get(index)
+                .map(|selected| total / 2.0 - widths[..index].iter().sum::<f32>() - selected / 2.0)
+        })
+        .unwrap_or(0.0);
+    (
+        widths,
+        -total / 2.0 + start_offset * (1.0 - t).powi(2) + end_offset * t.powi(2),
+    )
+}
+
+fn section_edges(road: &RoadDefinition, profile: &PaintProfile, t: f32) -> (f32, f32) {
+    let (widths, left) = section_widths(road, 1.0, profile, t);
+    (left, left + widths.iter().sum::<f32>())
+}
+
+fn design_rule_issues(
+    program: &Program,
+    projection: &map::Projection,
+    profiles: &[PaintProfile],
+) -> Vec<DesignIssue> {
+    let mut issues = Vec::new();
+    for (incoming, outgoing) in road_joins(projection) {
+        let a = &projection.segments[incoming];
+        let b = &projection.segments[outgoing];
+        if !straight_join(a, b) {
+            continue;
+        }
+        let (Some(a_road), Some(b_road)) =
+            (road_for_segment(program, a), road_for_segment(program, b))
+        else {
+            continue;
+        };
+        let (a_left, a_right) = section_edges(a_road, &profiles[incoming], 1.0);
+        let (b_left, b_right) = section_edges(b_road, &profiles[outgoing], 0.0);
+        if (a_left - b_left).abs() > 0.005 || (a_right - b_right).abs() > 0.005 {
+            issues.push(DesignIssue {
+                code: "road_edge_mismatch",
+                message: format!(
+                    "Road edges do not meet: {} → {}",
+                    a.name.as_deref().unwrap_or(&a.road_name),
+                    b.name.as_deref().unwrap_or(&b.road_name)
+                ),
+                at: a.end,
+                roads: [
+                    a.name.clone().unwrap_or_else(|| a.road_name.clone()),
+                    b.name.clone().unwrap_or_else(|| b.road_name.clone()),
+                ],
+            });
+        }
+    }
+    issues
 }
 
 fn paint_profiled_road(
@@ -3138,6 +3195,11 @@ impl eframe::App for RoadEditor {
 
     fn ui(&mut self, root: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let ctx = root.ctx().clone();
+        if self.mcp.is_some() {
+            ctx.request_repaint_after(std::time::Duration::from_millis(50));
+        }
+        self.handle_mcp(&ctx);
+        let before = self.program.clone();
         // Native menu events arrive outside egui's input stream.
         #[cfg(target_os = "macos")]
         ctx.request_repaint_after(std::time::Duration::from_millis(100));
@@ -3165,6 +3227,21 @@ impl eframe::App for RoadEditor {
         if let Some(action) = shortcut {
             self.file_action(action);
         }
+        let history_shortcut = ctx.input_mut(|input| {
+            let command = egui::Modifiers::COMMAND;
+            if input.consume_key(command | egui::Modifiers::SHIFT, egui::Key::Z)
+                || (cfg!(not(target_os = "macos")) && input.consume_key(command, egui::Key::Y))
+            {
+                Some(false)
+            } else if input.consume_key(command, egui::Key::Z) {
+                Some(true)
+            } else {
+                None
+            }
+        });
+        if let Some(undo) = history_shortcut {
+            self.restore_history(undo);
+        }
         self.top_bar(root);
         self.sidebar(root);
         self.inspector(root);
@@ -3183,6 +3260,9 @@ impl eframe::App for RoadEditor {
         }
         self.pending_dialog(&ctx);
         self.delete_dialog(&ctx);
+        let dragging = ctx.input(|input| input.pointer.primary_down())
+            && (self.dragging_endpoint.is_some() || self.dragging_control.is_some());
+        self.record_history(before, dragging);
     }
 }
 
@@ -3355,7 +3435,13 @@ impl NativeFileMenu {
 }
 
 fn main() -> eframe::Result {
-    let path = std::env::args_os().nth(1).map(PathBuf::from);
+    let mut args = std::env::args_os().skip(1);
+    let first = args.next();
+    if matches!(first.as_deref(), Some(value) if value == "mcp" || value == "--mcp") {
+        mcp::run_stdio();
+        return Ok(());
+    }
+    let path = first.map(PathBuf::from);
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_inner_size([1200.0, 760.0])
@@ -3365,7 +3451,14 @@ fn main() -> eframe::Result {
     eframe::run_native(
         "OpenCity Roads",
         options,
-        Box::new(move |cc| Ok(Box::new(RoadEditor::new(cc, path.clone())))),
+        Box::new(move |cc| {
+            let mut app = RoadEditor::new(cc, path.clone());
+            match mcp::Bridge::listen(&cc.egui_ctx) {
+                Ok(bridge) => app.mcp = Some(bridge),
+                Err(error) => eprintln!("OpenCity MCP: {error}"),
+            }
+            Ok(Box::new(app))
+        }),
     )
 }
 
@@ -3376,6 +3469,11 @@ mod tests {
     fn sample_editor() -> RoadEditor {
         RoadEditor {
             program: parse(include_str!("../../examples/city.road")).unwrap(),
+            saved_program: parse(include_str!("../../examples/city.road")).unwrap(),
+            undo_stack: Vec::new(),
+            redo_stack: Vec::new(),
+            history_drag_active: false,
+            skip_history: false,
             path: None,
             dirty: false,
             selected_road: Some(0),
@@ -3405,7 +3503,139 @@ mod tests {
             confirm_delete_road: false,
             #[cfg(target_os = "macos")]
             native_menu: None,
+            mcp: None,
+            map_rect: None,
         }
+    }
+
+    #[test]
+    fn history_groups_drag_and_tracks_saved_state() {
+        let mut editor = sample_editor();
+        let original = editor.program.clone();
+        editor.add_road();
+        editor.record_history(original.clone(), true);
+        let first_edit = editor.program.clone();
+        editor.add_road();
+        editor.record_history(first_edit, true);
+        assert_eq!(editor.undo_stack.len(), 1);
+        editor.record_history(editor.program.clone(), false);
+        editor.restore_history(true);
+        assert_eq!(editor.program, original);
+        assert!(!editor.dirty);
+        editor.restore_history(false);
+        assert!(editor.dirty);
+    }
+
+    #[test]
+    fn mcp_edits_share_history_and_reject_invalid_move() {
+        let mut editor = sample_editor();
+        let original = editor.program.clone();
+        let result = editor
+            .call_mcp(
+                "add_road",
+                &serde_json::json!({
+                    "road_type":"normal_road","start_x":0,"start_y":0,"end_x":3,"end_y":1
+                }),
+            )
+            .unwrap();
+        let index = result["segment_index"].as_u64().unwrap();
+        editor.record_history(original.clone(), false);
+        let before_move = editor.program.clone();
+        assert!(editor
+            .call_mcp(
+                "move_road",
+                &serde_json::json!({
+                    "segment_index":index,"dx":1,"dy":2
+                })
+            )
+            .is_ok());
+        let moved = map::project(&editor.program)
+            .segments
+            .into_iter()
+            .find(|segment| segment.source == SegmentSource::TopLevel(index as usize))
+            .unwrap();
+        assert_eq!(moved.start, WorldPoint { x: 1.0, y: 2.0 });
+        assert_eq!(moved.end, WorldPoint { x: 4.0, y: 3.0 });
+        editor.record_history(before_move.clone(), false);
+        assert_eq!(editor.undo_stack.len(), 2);
+        editor.restore_history(true);
+        assert_eq!(editor.program, before_move);
+        assert!(editor
+            .call_mcp(
+                "move_road",
+                &serde_json::json!({
+                    "segment_index":index,"dx":"bad","dy":2
+                })
+            )
+            .is_err());
+        assert_eq!(editor.program, before_move);
+        editor.restore_history(true);
+        assert_eq!(editor.program, original);
+    }
+
+    #[test]
+    fn mcp_document_replacement_is_validated_and_undoable() {
+        let mut editor = sample_editor();
+        let original = editor.program.clone();
+        let source = format!(
+            "{}\nneighborhood_street(0, 0, 1, 1);\n",
+            default_program().to_road_source()
+        );
+        let result = editor
+            .call_mcp("replace_document", &serde_json::json!({"source": source}))
+            .unwrap();
+        assert_eq!(result["segments"], 1);
+        editor.record_history(original.clone(), false);
+        assert!(editor.dirty);
+        let replacement = editor.program.clone();
+        assert!(editor
+            .call_mcp(
+                "replace_document",
+                &serde_json::json!({"source": "road broken:"})
+            )
+            .is_err());
+        assert_eq!(editor.program, replacement);
+        editor.restore_history(true);
+        assert_eq!(editor.program, original);
+    }
+
+    #[test]
+    fn mcp_add_road_reuses_a_named_junction() {
+        let mut editor = sample_editor();
+        editor.program =
+            parse("road lane: sidewalk-carlane-sidewalk; end; a = map_point(0, 0);").unwrap();
+        let result = editor
+            .call_mcp(
+                "add_road",
+                &serde_json::json!({
+                    "road_type":"lane", "name":"curved_lane", "start_ref":"a",
+                    "start_x":0, "start_y":0, "end_x":2, "end_y":1,
+                    "control1_x":0.5, "control1_y":0, "control2_x":1.5, "control2_y":1
+                }),
+            )
+            .unwrap();
+        let segment = map::project(&editor.program)
+            .segments
+            .into_iter()
+            .find(|segment| {
+                segment.source
+                    == SegmentSource::TopLevel(result["segment_index"].as_u64().unwrap() as usize)
+            })
+            .unwrap();
+        assert_eq!(segment.name.as_deref(), Some("curved_lane"));
+        assert_eq!(segment.start_ref.as_deref(), Some("a"));
+        assert_eq!(segment.controls[0], WorldPoint { x: 0.5, y: 0.0 });
+        let before = editor.program.clone();
+        assert!(editor
+            .call_mcp(
+                "add_road",
+                &serde_json::json!({
+                    "road_type":"lane", "start_ref":"a", "start_x":1, "start_y":0,
+                    "end_x":3, "end_y":1
+                })
+            )
+            .is_err());
+        assert_eq!(editor.program, before);
     }
 
     #[test]
@@ -3439,11 +3669,104 @@ mod tests {
     }
 
     #[test]
-    fn starter_map_has_a_closed_beltway_grid_interchanges_and_country_route() {
+    fn all_cloverleaf_ramp_mouths_align_with_the_highway_shoulder() {
+        let program = parse(include_str!("../../examples/cloverleaf_town.road")).unwrap();
+        let projection = map::project(&program);
+        let profiles = paint_profiles(&program, &projection);
+        let mut exits = 0;
+        let mut merges = 0;
+        for (index, segment) in projection.segments.iter().enumerate() {
+            if segment.road_name != "ramp_mouth" {
+                continue;
+            }
+            let road = road_for_segment(&program, segment).unwrap();
+            for (reference, selected, t) in [
+                (
+                    segment.start_ref.as_deref(),
+                    profiles[index].start_alignment,
+                    0.0,
+                ),
+                (
+                    segment.end_ref.as_deref(),
+                    profiles[index].merge_alignment,
+                    1.0,
+                ),
+            ] {
+                if reference
+                    .and_then(|name| map::lane_attachment(&program, name))
+                    .is_none()
+                {
+                    continue;
+                }
+                assert_eq!(
+                    selected,
+                    Some(0),
+                    "{} at t={t}",
+                    segment.name.as_deref().unwrap()
+                );
+                let (_, left_edge) = section_widths(road, 100.0, &profiles[index], t);
+                assert!(
+                    (left_edge + map_element_width(RoadElementKind::CarLane, 100.0) / 2.0).abs()
+                        < 0.0001,
+                    "{} at t={t}: ramp lane misses the receiving lane",
+                    segment.name.as_deref().unwrap()
+                );
+                if t == 0.0 {
+                    exits += 1;
+                } else {
+                    merges += 1;
+                }
+            }
+        }
+        assert_eq!((exits, merges), (8, 9));
+    }
+
+    #[test]
+    fn cloverleaf_road_joins_taper_without_edge_mismatches() {
+        let program = parse(include_str!("../../examples/cloverleaf_town.road")).unwrap();
+        let projection = map::project(&program);
+        let profiles = paint_profiles(&program, &projection);
+        let tapered = profiles
+            .iter()
+            .map(|profile| {
+                usize::from(!profile.start_taper.is_empty())
+                    + usize::from(!profile.end_taper.is_empty())
+            })
+            .sum::<usize>();
+        assert!(
+            tapered >= 17,
+            "expected every cloverleaf ramp seam to taper"
+        );
+        let issues = design_rule_issues(&program, &projection, &profiles);
+        assert!(
+            issues.is_empty(),
+            "{}",
+            issues
+                .iter()
+                .map(|issue| issue.message.as_str())
+                .collect::<Vec<_>>()
+                .join("; ")
+        );
+    }
+
+    #[test]
+    fn design_check_finds_a_straight_misaligned_join() {
+        let program = parse("road narrow: carlane; end; road wide: verge-carlane-verge; end; p0 = map_point(0, 0); seam = map_point(1, 0); p1 = map_point(2, 0); a = narrow(p0, 0.3, 0, 0.7, 0, seam); b = wide(seam, 1.3, 0, 1.7, 0, p1);").unwrap();
+        let projection = map::project(&program);
+        let mut profiles = paint_profiles(&program, &projection);
+        assert!(design_rule_issues(&program, &projection, &profiles).is_empty());
+        profiles[1].start_taper.clear();
+        let issues = design_rule_issues(&program, &projection, &profiles);
+        assert_eq!(issues.len(), 1);
+        assert_eq!(issues[0].code, "road_edge_mismatch");
+    }
+
+    #[test]
+    fn starter_city_is_an_organic_connected_neighborhood() {
         let program = starter_program();
         let projection = map::project(&program);
         assert_eq!(projection.unresolved, 0);
-        assert_eq!(projection.segments.len(), 42);
+        assert_eq!(projection.segments.len(), 30);
         let named = |name: &str| {
             projection
                 .segments
@@ -3451,34 +3774,24 @@ mod tests {
                 .find(|segment| segment.name.as_deref() == Some(name))
                 .unwrap()
         };
-        assert_eq!(named("beltway_10").end_ref, named("beltway_01").start_ref);
-        assert_eq!(named("market_02").end_ref, named("civic_02").end_ref);
-        assert_eq!(named("civic_02").end_ref, named("civic_03").start_ref);
         assert_eq!(
-            named("county_exit_ramp").end_ref,
-            named("county_bend").start_ref
+            named("market_northwest").end_ref,
+            named("market_north").start_ref
         );
         assert_eq!(
-            named("county_bend").end_ref,
-            named("orchard_lane").start_ref
+            named("market_southwest").end_ref,
+            named("market_northwest").start_ref
         );
+        assert_eq!(named("west_road").end_ref, named("mill_street").start_ref);
+        assert_eq!(named("harbor_street").end_ref, named("east_road").start_ref);
         assert_eq!(
-            named("orchard_lane").end_ref,
-            named("orchard_hill").start_ref
+            named("southwest_lane").end_ref,
+            named("sw_shortcut").start_ref
         );
-        let splits = map::lane_splits(&program);
-        assert_eq!(splits.len(), 2);
-        assert!(splits.iter().any(|split| split.parent == "beltway_06"
-            && split.full_ramp.as_deref() == Some("city_exit_ramp")));
-        assert!(splits.iter().any(|split| split.parent == "beltway_07"
-            && split.full_ramp.as_deref() == Some("county_exit_ramp")));
-        let country_bend = named("county_bend");
-        let first = country_bend.controls[0];
-        let start = country_bend.start;
-        let end = country_bend.end;
-        let cross =
-            (first.x - start.x) * (end.y - start.y) - (first.y - start.y) * (end.x - start.x);
-        assert!(cross.abs() > 0.05);
+        assert!(projection
+            .segments
+            .iter()
+            .all(|segment| !segment.road_name.contains("highway")));
         assert_eq!(parse(&program.to_road_source()).unwrap(), program);
     }
 
