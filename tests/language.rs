@@ -65,3 +65,10 @@ fn rejects_bad_syntax_with_location() {
     assert!(parse("lane(0,);").is_err());
     assert!(parse("lane($x);").is_err());
 }
+
+#[test]
+fn parses_negative_map_coordinates_without_confusing_road_separators() {
+    let source = "road lane: shoulder-carlane-verge; end; lane(-1.25, 2, 3, -4.5);";
+    let program = parse(source).unwrap();
+    assert_eq!(parse(&program.to_road_source()).unwrap(), program);
+}

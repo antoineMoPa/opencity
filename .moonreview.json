@@ -1,0 +1,8 @@
+{
+  "build": "cargo build --features editor --bin editor",
+  "run": "cargo run --features editor --bin editor",
+  "indent": {
+    "spaces": 4
+  },
+  "day_ends_at": "16:30"
+}

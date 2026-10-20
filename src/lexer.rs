@@ -133,6 +133,22 @@ pub fn tokenize(source: &str) -> Result<Vec<Token>, SyntaxError> {
                 offset += 1;
                 TokenKind::Comma
             }
+            b'-' if bytes.get(offset + 1).is_some_and(u8::is_ascii_digit) => {
+                offset += 2;
+                while offset < bytes.len() && bytes[offset].is_ascii_digit() {
+                    offset += 1;
+                }
+                if offset + 1 < bytes.len()
+                    && bytes[offset] == b'.'
+                    && bytes[offset + 1].is_ascii_digit()
+                {
+                    offset += 1;
+                    while offset < bytes.len() && bytes[offset].is_ascii_digit() {
+                        offset += 1;
+                    }
+                }
+                TokenKind::Number
+            }
             b'-' => {
                 offset += 1;
                 TokenKind::Hyphen
