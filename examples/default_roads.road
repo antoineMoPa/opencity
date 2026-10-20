@@ -37,6 +37,9 @@ end;
 road divided_highway:
     verge-shoulder-carlane-carlane-middle-carlane-carlane-shoulder-verge;
 end;
+road exit_ramp:
+    verge-shoulder-carlane-shoulder-verge;
+end;
 road interstate_three_lane:
     verge-shoulder-carlane-carlane-carlane-middle-carlane-carlane-carlane-shoulder-verge;
 end;
