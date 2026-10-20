@@ -1,0 +1,9 @@
+[package]
+name = "opencity"
+version = "0.1.0"
+edition = "2021"
+description = "Parser and writer for the OpenCity road definition language"
+license = "Apache-2.0"
+
+[lib]
+path = "src/lib.rs"
