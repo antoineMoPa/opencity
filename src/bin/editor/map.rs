@@ -3,7 +3,7 @@
 
 use std::collections::HashSet;
 
-use opencity::{Argument, Call, Program, RoadDefinition, Statement};
+use opencity::{Argument, Call, Program, RoadDefinition, RoadElement, RoadElementKind, Statement};
 
 #[derive(Clone, Copy)]
 pub enum ElementEdit {
@@ -16,6 +16,29 @@ pub enum ElementEdit {
 pub enum SplitMode {
     Dedicated,
     KeepLane,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ExitSide {
+    Left,
+    Right,
+}
+
+impl ExitSide {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Left => "left",
+            Self::Right => "right",
+        }
+    }
+}
+
+pub struct ExitPlacement {
+    pub entry: SegmentSource,
+    pub full: SegmentSource,
+    pub through: Option<SegmentSource>,
+    pub end_ref: String,
+    pub side: ExitSide,
 }
 
 impl SplitMode {
@@ -39,6 +62,7 @@ impl SplitMode {
 pub struct LaneSplit {
     pub parent: String,
     pub ramp: String,
+    pub full_ramp: Option<String>,
     pub element_index: usize,
     pub t: f32,
     pub mode: SplitMode,
@@ -461,6 +485,7 @@ pub fn element_world_width(kind: opencity::RoadElementKind) -> f32 {
         RoadElementKind::Middle => 0.025,
         RoadElementKind::Verge => 0.035,
         RoadElementKind::BuildingEdge => 0.012,
+        RoadElementKind::Barrier => 0.008,
     }
 }
 
@@ -624,7 +649,7 @@ pub fn lane_splits(program: &Program) -> Vec<LaneSplit> {
             let Statement::Call(call) = statement else {
                 return None;
             };
-            if call.name != "lane_split" || call.args.len() != 3 {
+            if call.name != "lane_split" || !matches!(call.args.len(), 3 | 4) {
                 return None;
             }
             let (
@@ -647,6 +672,14 @@ pub fn lane_splits(program: &Program) -> Vec<LaneSplit> {
             Some(LaneSplit {
                 parent: parent.clone(),
                 ramp: ramp.clone(),
+                full_ramp: if call.args.len() == 4 {
+                    let Argument::Identifier(full) = &call.args[3] else {
+                        return None;
+                    };
+                    Some(full.clone())
+                } else {
+                    None
+                },
                 element_index,
                 t,
                 mode: SplitMode::from_identifier(mode)?,
@@ -673,6 +706,7 @@ pub fn lane_splits(program: &Program) -> Vec<LaneSplit> {
         splits.push(LaneSplit {
             parent,
             ramp: ramp.clone(),
+            full_ramp: None,
             element_index,
             t,
             mode: SplitMode::Dedicated,
@@ -710,13 +744,54 @@ pub fn create_lane_split(
     true
 }
 
+pub fn create_two_segment_split(
+    program: &mut Program,
+    reference: &str,
+    entry_source: SegmentSource,
+    full_source: SegmentSource,
+    mode: SplitMode,
+) -> bool {
+    let Some((parent, _, _)) = lane_attachment(program, reference) else {
+        return false;
+    };
+    let projection = project(program);
+    let Some(entry) = projection
+        .segments
+        .iter()
+        .find(|segment| segment.source == entry_source)
+        .and_then(|segment| segment.name.clone())
+    else {
+        return false;
+    };
+    let Some(full) = projection
+        .segments
+        .iter()
+        .find(|segment| segment.source == full_source)
+        .and_then(|segment| segment.name.clone())
+    else {
+        return false;
+    };
+    program.statements.push(Statement::Call(Call {
+        assigns: vec![],
+        name: "lane_split".into(),
+        args: vec![
+            Argument::Identifier(parent),
+            Argument::Identifier(entry),
+            Argument::Identifier(mode.identifier().into()),
+            Argument::Identifier(full),
+        ],
+    }));
+    true
+}
+
+#[cfg(test)]
 pub fn set_split_mode(program: &mut Program, ramp: &str, mode: SplitMode) -> bool {
     for statement in &mut program.statements {
         let Statement::Call(call) = statement else {
             continue;
         };
         if call.name == "lane_split"
-            && call.args.len() == 3
+            && matches!(call.args.len(), 3 | 4)
             && matches!(call.args.get(1), Some(Argument::Identifier(name)) if name == ramp)
         {
             call.args[2] = Argument::Identifier(mode.identifier().into());
@@ -1058,6 +1133,434 @@ pub fn append_connected(
     (index, end_name)
 }
 
+pub fn append_connected_curve(
+    program: &mut Program,
+    road: &RoadDefinition,
+    start: WorldPoint,
+    start_ref: Option<&str>,
+    first: WorldPoint,
+    second: WorldPoint,
+    end: WorldPoint,
+    end_ref: Option<&str>,
+) -> (usize, String) {
+    let (index, end_name) = append_connected(program, road, start, start_ref, end, end_ref);
+    let source = SegmentSource::TopLevel(index);
+    set_control_direct(program, source, false, first);
+    set_control_direct(program, source, true, second);
+    (index, end_name)
+}
+
+pub fn link_endpoint(
+    program: &mut Program,
+    source: SegmentSource,
+    is_end: bool,
+) -> Option<(WorldPoint, String)> {
+    let SegmentSource::TopLevel(index) = source else {
+        return None;
+    };
+    let segment = project(program)
+        .segments
+        .into_iter()
+        .find(|segment| segment.source == source)?;
+    let point = if is_end { segment.end } else { segment.start };
+    let reference = if is_end {
+        segment.end_ref.as_deref()
+    } else {
+        segment.start_ref.as_deref()
+    };
+    if let Some(reference) = reference {
+        return Some((point, reference.to_owned()));
+    }
+    let start_ref = ensure_point(program, segment.start, segment.start_ref.as_deref());
+    let end_ref = ensure_point(program, segment.end, segment.end_ref.as_deref());
+    let Statement::Call(call) = program.statements.get_mut(index)? else {
+        return None;
+    };
+    call.args = vec![
+        Argument::Identifier(start_ref.clone()),
+        number_arg(segment.controls[0].x),
+        number_arg(segment.controls[0].y),
+        number_arg(segment.controls[1].x),
+        number_arg(segment.controls[1].y),
+        Argument::Identifier(end_ref.clone()),
+    ];
+    Some((point, if is_end { end_ref } else { start_ref }))
+}
+
+pub fn rotate_endpoint(
+    program: &mut Program,
+    source: SegmentSource,
+    is_end: bool,
+    angle_degrees: f32,
+) -> bool {
+    let Some(segment) = project(program)
+        .segments
+        .into_iter()
+        .find(|segment| segment.source == source && segment.source.editable())
+    else {
+        return false;
+    };
+    let anchor = if is_end { segment.end } else { segment.start };
+    let control = if is_end {
+        segment.controls[1]
+    } else {
+        segment.controls[0]
+    };
+    let vector = WorldPoint {
+        x: control.x - anchor.x,
+        y: control.y - anchor.y,
+    };
+    let angle = angle_degrees.to_radians();
+    let rotated = WorldPoint {
+        x: anchor.x + vector.x * angle.cos() - vector.y * angle.sin(),
+        y: anchor.y + vector.x * angle.sin() + vector.y * angle.cos(),
+    };
+    set_control(program, source, is_end, rotated)
+}
+
+fn road_with_elements(
+    program: &mut Program,
+    base: &str,
+    elements: Vec<RoadElement>,
+) -> RoadDefinition {
+    let mut name = base.to_owned();
+    let mut suffix = 2;
+    loop {
+        if let Some(existing) = program
+            .statements
+            .iter()
+            .find_map(|statement| match statement {
+                Statement::Road(road) if road.name == name => Some(road),
+                _ => None,
+            })
+        {
+            if existing.elements == elements {
+                return existing.clone();
+            }
+        } else if name_available(program, &name, None) {
+            let road = RoadDefinition { name, elements };
+            program.statements.push(Statement::Road(road.clone()));
+            return road;
+        }
+        name = format!("{base}_{suffix}");
+        suffix += 1;
+    }
+}
+
+fn split_elements(
+    parent: &RoadDefinition,
+    selected: usize,
+    side: ExitSide,
+) -> (Vec<RoadElement>, Vec<RoadElement>) {
+    match side {
+        ExitSide::Right => (
+            parent.elements[..selected].to_vec(),
+            parent.elements[selected..].to_vec(),
+        ),
+        ExitSide::Left => (
+            parent.elements[selected + 1..].to_vec(),
+            parent.elements[..=selected].to_vec(),
+        ),
+    }
+}
+
+fn point_between(first: WorldPoint, second: WorldPoint, t: f32) -> WorldPoint {
+    WorldPoint {
+        x: first.x + (second.x - first.x) * t,
+        y: first.y + (second.y - first.y) * t,
+    }
+}
+
+fn append_remaining_after_split(
+    program: &mut Program,
+    parent: &Segment,
+    road: &RoadDefinition,
+    attachment: &str,
+    t: f32,
+    shift: f32,
+) -> Option<SegmentSource> {
+    let SegmentSource::TopLevel(parent_index) = parent.source else {
+        return None;
+    };
+    let (start, start_ref) = link_endpoint(program, parent.source, false)?;
+    let (_, end_ref) = link_endpoint(program, parent.source, true)?;
+    let a = point_between(start, parent.controls[0], t);
+    let b = point_between(parent.controls[0], parent.controls[1], t);
+    let c = point_between(parent.controls[1], parent.end, t);
+    let d = point_between(a, b, t);
+    let e = point_between(b, c, t);
+    let split_point = point_between(d, e, t);
+    let split_ref = ensure_point(program, split_point, None);
+    let Statement::Call(parent_call) = program.statements.get_mut(parent_index)? else {
+        return None;
+    };
+    parent_call.args = vec![
+        Argument::Identifier(start_ref),
+        number_arg(a.x),
+        number_arg(a.y),
+        number_arg(d.x),
+        number_arg(d.y),
+        Argument::Identifier(split_ref),
+    ];
+    for statement in &mut program.statements {
+        let Statement::Call(call) = statement else {
+            continue;
+        };
+        if call.name == "lane_point" && call.assigns.first().is_some_and(|name| name == attachment)
+        {
+            call.args[2] = number_arg(1.0);
+            break;
+        }
+    }
+    let tangent = parent.tangent_at(t);
+    let length = (tangent.x * tangent.x + tangent.y * tangent.y)
+        .sqrt()
+        .max(0.0001);
+    let offset = WorldPoint {
+        x: tangent.y / length * shift,
+        y: -tangent.x / length * shift,
+    };
+    let segment_start = split_point.translated(offset);
+    let (index, _) = append_connected(
+        program,
+        road,
+        segment_start,
+        None,
+        parent.end,
+        Some(&end_ref),
+    );
+    set_control_direct(
+        program,
+        SegmentSource::TopLevel(index),
+        false,
+        e.translated(offset),
+    );
+    set_control_direct(program, SegmentSource::TopLevel(index), true, c);
+    Some(SegmentSource::TopLevel(index))
+}
+
+fn end_parent_at_split(
+    program: &mut Program,
+    parent: &Segment,
+    attachment: &str,
+    t: f32,
+) -> Option<()> {
+    let SegmentSource::TopLevel(parent_index) = parent.source else {
+        return None;
+    };
+    let (_, start_ref) = link_endpoint(program, parent.source, false)?;
+    let a = point_between(parent.start, parent.controls[0], t);
+    let b = point_between(parent.controls[0], parent.controls[1], t);
+    let c = point_between(parent.controls[1], parent.end, t);
+    let d = point_between(a, b, t);
+    let e = point_between(b, c, t);
+    let split_ref = ensure_point(program, point_between(d, e, t), None);
+    let Statement::Call(call) = program.statements.get_mut(parent_index)? else {
+        return None;
+    };
+    call.args = vec![
+        Argument::Identifier(start_ref),
+        number_arg(a.x),
+        number_arg(a.y),
+        number_arg(d.x),
+        number_arg(d.y),
+        Argument::Identifier(split_ref),
+    ];
+    for statement in &mut program.statements {
+        let Statement::Call(call) = statement else {
+            continue;
+        };
+        if call.name == "lane_point" && call.assigns.first().is_some_and(|name| name == attachment)
+        {
+            call.args[2] = number_arg(1.0);
+            break;
+        }
+    }
+    Some(())
+}
+
+pub fn append_exit(
+    program: &mut Program,
+    _full_road: &RoadDefinition,
+    mode: SplitMode,
+    start: WorldPoint,
+    start_ref: &str,
+    end: WorldPoint,
+    end_ref: Option<&str>,
+) -> Option<ExitPlacement> {
+    let (parent_name, element_index, mut split_t) = lane_attachment(program, start_ref)?;
+    let projection = project(program);
+    let parent = projection
+        .segments
+        .iter()
+        .find(|segment| segment.name.as_deref() == Some(&parent_name))?;
+    let parent_road = program
+        .statements
+        .iter()
+        .find_map(|statement| match statement {
+            Statement::Road(road) if road.name == parent.road_name => Some(road.clone()),
+            _ => None,
+        })?;
+    let start = if mode == SplitMode::Dedicated && split_t <= 0.001 {
+        split_t = 0.002;
+        let shifted = element_position(parent, &parent_road, element_index, split_t)?;
+        let shifted_direction = element_direction(parent, &parent_road, element_index, split_t)?;
+        for statement in &mut program.statements {
+            let Statement::Call(call) = statement else {
+                continue;
+            };
+            if call.name == "lane_point"
+                && call.assigns.first().is_some_and(|name| name == start_ref)
+            {
+                call.args[2] = number_arg(split_t);
+                call.args[3] = number_arg(shifted.x);
+                call.args[4] = number_arg(shifted.y);
+                call.args[5] = number_arg(shifted_direction.x);
+                call.args[6] = number_arg(shifted_direction.y);
+                break;
+            }
+        }
+        shifted
+    } else {
+        start
+    };
+    let direction = attachment_direction(program, start_ref)?;
+    let cross = direction.x * (end.y - start.y) - direction.y * (end.x - start.x);
+    let side = if cross < -0.0001 {
+        ExitSide::Right
+    } else if cross > 0.0001 {
+        ExitSide::Left
+    } else if element_index >= parent_road.elements.len() / 2 {
+        ExitSide::Right
+    } else {
+        ExitSide::Left
+    };
+    let (remaining, carried) = split_elements(&parent_road, element_index, side);
+    let entry_road = road_with_elements(
+        program,
+        &format!("{}_exit_{}", parent_road.name, side.label()),
+        carried.clone(),
+    );
+    let through_road = if mode == SplitMode::Dedicated && !remaining.is_empty() {
+        let mut elements = remaining;
+        match side {
+            ExitSide::Right => elements.push(RoadElement {
+                kind: RoadElementKind::Barrier,
+                catch: None,
+            }),
+            ExitSide::Left => elements.insert(
+                0,
+                RoadElement {
+                    kind: RoadElementKind::Barrier,
+                    catch: None,
+                },
+            ),
+        }
+        Some(road_with_elements(
+            program,
+            &format!("{}_after_exit_{}", parent_road.name, side.label()),
+            elements,
+        ))
+    } else if mode == SplitMode::KeepLane {
+        Some(parent_road.clone())
+    } else {
+        None
+    };
+    let distance = ((end.x - start.x).powi(2) + (end.y - start.y).powi(2)).sqrt();
+    let control1 = WorldPoint {
+        x: start.x + direction.x * distance / 3.0,
+        y: start.y + direction.y * distance / 3.0,
+    };
+    let end_direction = junction_direction(program, end_ref, end, false);
+    let control2 = if let Some(direction) = end_direction {
+        WorldPoint {
+            x: end.x - direction.x * distance / 3.0,
+            y: end.y - direction.y * distance / 3.0,
+        }
+    } else {
+        point_between(start, end, 2.0 / 3.0)
+    };
+    let split = 0.38;
+    let a = point_between(start, control1, split);
+    let b = point_between(control1, control2, split);
+    let c = point_between(control2, end, split);
+    let d = point_between(a, b, split);
+    let e = point_between(b, c, split);
+    let middle = point_between(d, e, split);
+    let (entry_index, middle_ref) =
+        append_connected(program, &entry_road, start, Some(start_ref), middle, None);
+    set_control_direct(program, SegmentSource::TopLevel(entry_index), false, a);
+    set_control_direct(program, SegmentSource::TopLevel(entry_index), true, d);
+    let (full_index, final_ref) = append_connected(
+        program,
+        &entry_road,
+        middle,
+        Some(&middle_ref),
+        end,
+        end_ref,
+    );
+    set_control_direct(program, SegmentSource::TopLevel(full_index), false, e);
+    set_control_direct(program, SegmentSource::TopLevel(full_index), true, c);
+    let through = if split_t >= 0.999 {
+        through_road.as_ref().map(|road| {
+            let tangent = parent.tangent_at(1.0);
+            let length = (tangent.x * tangent.x + tangent.y * tangent.y)
+                .sqrt()
+                .max(0.0001);
+            let normal = WorldPoint {
+                x: tangent.y / length,
+                y: -tangent.x / length,
+            };
+            let carried_width: f32 = carried
+                .iter()
+                .map(|element| element_world_width(element.kind))
+                .sum();
+            let barrier_width = element_world_width(RoadElementKind::Barrier);
+            let shift = match mode {
+                SplitMode::KeepLane => 0.0,
+                SplitMode::Dedicated => match side {
+                    ExitSide::Right => -(carried_width - barrier_width) / 2.0,
+                    ExitSide::Left => (carried_width - barrier_width) / 2.0,
+                },
+            };
+            let through_start = WorldPoint {
+                x: parent.end.x + normal.x * shift,
+                y: parent.end.y + normal.y * shift,
+            };
+            let through_end = WorldPoint {
+                x: through_start.x + tangent.x / length * distance * 0.65,
+                y: through_start.y + tangent.y / length * distance * 0.65,
+            };
+            SegmentSource::TopLevel(append(program, road, through_start, through_end))
+        })
+    } else if mode == SplitMode::Dedicated && split_t > 0.001 {
+        if through_road.is_none() {
+            end_parent_at_split(program, parent, start_ref, split_t);
+        }
+        through_road.as_ref().and_then(|road| {
+            let carried_width: f32 = carried
+                .iter()
+                .map(|element| element_world_width(element.kind))
+                .sum();
+            let barrier_width = element_world_width(RoadElementKind::Barrier);
+            let shift = match side {
+                ExitSide::Right => -(carried_width - barrier_width) / 2.0,
+                ExitSide::Left => (carried_width - barrier_width) / 2.0,
+            };
+            append_remaining_after_split(program, parent, road, start_ref, split_t, shift)
+        })
+    } else {
+        None
+    };
+    Some(ExitPlacement {
+        through,
+        entry: SegmentSource::TopLevel(entry_index),
+        full: SegmentSource::TopLevel(full_index),
+        end_ref: final_ref,
+        side,
+    })
+}
+
 pub fn set_name(program: &mut Program, source: SegmentSource, name: String) -> bool {
     let SegmentSource::TopLevel(index) = source else {
         return false;
@@ -1100,7 +1603,10 @@ pub fn set_name(program: &mut Program, source: SegmentSource, name: String) -> b
                     }
                 }
             } else if call.name == "lane_split" {
-                for argument in call.args.iter_mut().take(2) {
+                for (index, argument) in call.args.iter_mut().enumerate() {
+                    if index == 2 {
+                        continue;
+                    }
                     if let Argument::Identifier(road) = argument {
                         if *road == old_name {
                             *road = name.clone();
@@ -1110,6 +1616,47 @@ pub fn set_name(program: &mut Program, source: SegmentSource, name: String) -> b
             }
         }
     }
+    true
+}
+
+pub fn set_road_type(program: &mut Program, source: SegmentSource, road_name: &str) -> bool {
+    let SegmentSource::TopLevel(index) = source else {
+        return false;
+    };
+    let Some(road) = program
+        .statements
+        .iter()
+        .find_map(|statement| match statement {
+            Statement::Road(road) if road.name == road_name => Some(road),
+            _ => None,
+        })
+    else {
+        return false;
+    };
+    let element_count = road.elements.len();
+    let Some(segment_name) = project(program)
+        .segments
+        .into_iter()
+        .find(|segment| segment.source == source)
+        .and_then(|segment| segment.name)
+    else {
+        return false;
+    };
+    if program.statements.iter().any(|statement| match statement {
+        Statement::Call(call) if call.name == "lane_point" =>
+            matches!(call.args.first(), Some(Argument::Identifier(parent)) if parent == &segment_name)
+                && call.args.get(1).and_then(number).is_some_and(|element| element as usize >= element_count),
+        _ => false,
+    }) {
+        return false;
+    }
+    let Some(Statement::Call(call)) = program.statements.get_mut(index) else {
+        return false;
+    };
+    if call.name == road_name {
+        return false;
+    }
+    call.name = road_name.to_owned();
     true
 }
 
@@ -1380,8 +1927,8 @@ pub fn remove(program: &mut Program, source: SegmentSource) -> bool {
     if let Some(name) = removed_name {
         program.statements.retain(|statement| {
             !matches!(statement,
-            Statement::Call(call) if call.name == "lane_split" && call.args.iter().take(2)
-                .any(|arg| matches!(arg, Argument::Identifier(road) if road == &name)))
+            Statement::Call(call) if call.name == "lane_split" && call.args.iter().enumerate()
+                .any(|(index, arg)| index != 2 && matches!(arg, Argument::Identifier(road) if road == &name)))
         });
     }
     prune_unused_points(program);
@@ -1444,6 +1991,368 @@ pub fn remove_unused_point(program: &mut Program, name: &str) {
 mod tests {
     use super::*;
     use opencity::parse;
+
+    #[test]
+    fn extending_and_joining_old_endpoints_creates_shared_junctions() {
+        let mut program = parse("road street: verge-carlane-verge; end;").unwrap();
+        let road = match &program.statements[0] {
+            Statement::Road(road) => road.clone(),
+            _ => unreachable!(),
+        };
+        let first = append(
+            &mut program,
+            &road,
+            WorldPoint { x: 0.0, y: 0.0 },
+            WorldPoint { x: 2.0, y: 0.0 },
+        );
+        let second = append(
+            &mut program,
+            &road,
+            WorldPoint { x: 4.0, y: 1.0 },
+            WorldPoint { x: 6.0, y: 1.0 },
+        );
+        let (start, start_ref) =
+            link_endpoint(&mut program, SegmentSource::TopLevel(first), true).unwrap();
+        let (end, end_ref) =
+            link_endpoint(&mut program, SegmentSource::TopLevel(second), false).unwrap();
+        let (bridge, _) = append_connected(
+            &mut program,
+            &road,
+            start,
+            Some(&start_ref),
+            end,
+            Some(&end_ref),
+        );
+        let projection = project(&program);
+        let first_segment = projection
+            .segments
+            .iter()
+            .find(|s| s.source == SegmentSource::TopLevel(first))
+            .unwrap();
+        let bridge_segment = projection
+            .segments
+            .iter()
+            .find(|s| s.source == SegmentSource::TopLevel(bridge))
+            .unwrap();
+        let second_segment = projection
+            .segments
+            .iter()
+            .find(|s| s.source == SegmentSource::TopLevel(second))
+            .unwrap();
+        assert_eq!(first_segment.end_ref, bridge_segment.start_ref);
+        assert_eq!(second_segment.start_ref, bridge_segment.end_ref);
+        assert_eq!(bridge_segment.road_name, road.name);
+        let first_tangent = WorldPoint {
+            x: first_segment.end.x - first_segment.controls[1].x,
+            y: first_segment.end.y - first_segment.controls[1].y,
+        };
+        let bridge_tangent = WorldPoint {
+            x: bridge_segment.controls[0].x - bridge_segment.start.x,
+            y: bridge_segment.controls[0].y - bridge_segment.start.y,
+        };
+        assert!(
+            (first_tangent.x * bridge_tangent.y - first_tangent.y * bridge_tangent.x).abs()
+                < 0.0001
+        );
+        assert!(set_connected_endpoint(
+            &mut program,
+            SegmentSource::TopLevel(first),
+            true,
+            WorldPoint { x: 2.0, y: 0.5 }
+        ));
+        let projection = project(&program);
+        let bridge_segment = projection
+            .segments
+            .iter()
+            .find(|s| s.source == SegmentSource::TopLevel(bridge))
+            .unwrap();
+        assert_eq!(bridge_segment.start, WorldPoint { x: 2.0, y: 0.5 });
+        assert_eq!(parse(&program.to_road_source()).unwrap(), program);
+    }
+
+    #[test]
+    fn rotating_an_endpoint_preserves_handle_length_and_connected_tangent() {
+        let mut program = parse("road street: verge-carlane-verge; end;").unwrap();
+        let road = match &program.statements[0] {
+            Statement::Road(road) => road.clone(),
+            _ => unreachable!(),
+        };
+        let first = append(
+            &mut program,
+            &road,
+            WorldPoint { x: 0.0, y: 0.0 },
+            WorldPoint { x: 2.0, y: 0.0 },
+        );
+        let (start, reference) =
+            link_endpoint(&mut program, SegmentSource::TopLevel(first), true).unwrap();
+        let (second, _) = append_connected(
+            &mut program,
+            &road,
+            start,
+            Some(&reference),
+            WorldPoint { x: 4.0, y: 0.0 },
+            None,
+        );
+        assert!(rotate_endpoint(
+            &mut program,
+            SegmentSource::TopLevel(first),
+            true,
+            15.0
+        ));
+        let projection = project(&program);
+        let first_segment = projection
+            .segments
+            .iter()
+            .find(|s| s.source == SegmentSource::TopLevel(first))
+            .unwrap();
+        let second_segment = projection
+            .segments
+            .iter()
+            .find(|s| s.source == SegmentSource::TopLevel(second))
+            .unwrap();
+        let incoming = WorldPoint {
+            x: first_segment.end.x - first_segment.controls[1].x,
+            y: first_segment.end.y - first_segment.controls[1].y,
+        };
+        let outgoing = WorldPoint {
+            x: second_segment.controls[0].x - second_segment.start.x,
+            y: second_segment.controls[0].y - second_segment.start.y,
+        };
+        assert!((incoming.x - outgoing.x).abs() < 0.0001);
+        assert!((incoming.y - outgoing.y).abs() < 0.0001);
+        assert!((incoming.x.powi(2) + incoming.y.powi(2) - (2.0 / 3.0_f32).powi(2)).abs() < 0.0001);
+    }
+
+    #[test]
+    fn exits_carry_selected_elements_and_leave_a_divided_through_road() {
+        for (element_index, target_y, side) in
+            [(3, -2.0, ExitSide::Right), (1, 2.0, ExitSide::Left)]
+        {
+            let mut program = parse("road highway: verge-carlane-middle-carlane-verge; end; road ramp: verge-shoulder-carlane-shoulder-verge; end;").unwrap();
+            let highway = match &program.statements[0] {
+                Statement::Road(road) => road.clone(),
+                _ => unreachable!(),
+            };
+            let ramp = match &program.statements[1] {
+                Statement::Road(road) => road.clone(),
+                _ => unreachable!(),
+            };
+            let parent = append(
+                &mut program,
+                &highway,
+                WorldPoint { x: 0.0, y: 0.0 },
+                WorldPoint { x: 4.0, y: 0.0 },
+            );
+            let (attachment, start) = create_lane_point(
+                &mut program,
+                SegmentSource::TopLevel(parent),
+                element_index,
+                0.5,
+            )
+            .unwrap();
+            let exit = append_exit(
+                &mut program,
+                &ramp,
+                SplitMode::Dedicated,
+                start,
+                &attachment,
+                WorldPoint {
+                    x: 6.0,
+                    y: target_y,
+                },
+                None,
+            )
+            .unwrap();
+            assert_eq!(exit.side, side);
+            let projection = project(&program);
+            let entry = projection
+                .segments
+                .iter()
+                .find(|segment| segment.source == exit.entry)
+                .unwrap();
+            let full = projection
+                .segments
+                .iter()
+                .find(|segment| segment.source == exit.full)
+                .unwrap();
+            let entry_road = program
+                .statements
+                .iter()
+                .find_map(|statement| match statement {
+                    Statement::Road(road) if road.name == entry.road_name => Some(road),
+                    _ => None,
+                })
+                .unwrap();
+            assert_eq!(full.road_name, entry.road_name);
+            match side {
+                ExitSide::Right => assert_eq!(entry_road.elements, highway.elements[3..]),
+                ExitSide::Left => assert_eq!(entry_road.elements, highway.elements[..=1]),
+            }
+            let through = projection
+                .segments
+                .iter()
+                .find(|segment| Some(segment.source) == exit.through)
+                .unwrap();
+            let through_road = program
+                .statements
+                .iter()
+                .find_map(|statement| match statement {
+                    Statement::Road(road) if road.name == through.road_name => Some(road),
+                    _ => None,
+                })
+                .unwrap();
+            assert_eq!(
+                through_road
+                    .elements
+                    .iter()
+                    .filter(|element| element.kind == RoadElementKind::Barrier)
+                    .count(),
+                1
+            );
+            assert_eq!(
+                entry_road.elements.len() + through_road.elements.len(),
+                highway.elements.len() + 1
+            );
+            assert_eq!(
+                projection
+                    .segments
+                    .iter()
+                    .find(|segment| segment.source == SegmentSource::TopLevel(parent))
+                    .unwrap()
+                    .end,
+                WorldPoint { x: 2.0, y: 0.0 }
+            );
+            assert_eq!(entry.end_ref, full.start_ref);
+            assert_eq!(entry.end, full.start);
+            let incoming = WorldPoint {
+                x: entry.end.x - entry.controls[1].x,
+                y: entry.end.y - entry.controls[1].y,
+            };
+            let outgoing = WorldPoint {
+                x: full.controls[0].x - full.start.x,
+                y: full.controls[0].y - full.start.y,
+            };
+            let cross = incoming.x * outgoing.y - incoming.y * outgoing.x;
+            assert!(cross.abs() < 0.00001);
+            assert!(create_two_segment_split(
+                &mut program,
+                &attachment,
+                exit.entry,
+                exit.full,
+                SplitMode::Dedicated
+            ));
+            let split = &lane_splits(&program)[0];
+            assert_eq!(split.full_ramp.as_deref(), full.name.as_deref());
+            assert_eq!(parse(&program.to_road_source()).unwrap(), program);
+            assert!(set_name(&mut program, exit.full, "renamed_exit".into()));
+            assert_eq!(
+                lane_splits(&program)[0].full_ramp.as_deref(),
+                Some("renamed_exit")
+            );
+            let entry_name = lane_splits(&program)[0].ramp.clone();
+            assert!(set_split_mode(
+                &mut program,
+                &entry_name,
+                SplitMode::KeepLane
+            ));
+            assert_eq!(lane_splits(&program)[0].mode, SplitMode::KeepLane);
+            assert_eq!(parse(&program.to_road_source()).unwrap(), program);
+            assert!(set_road_type(
+                &mut program,
+                exit.through.unwrap(),
+                &ramp.name
+            ));
+            assert_eq!(
+                project(&program)
+                    .segments
+                    .iter()
+                    .find(|segment| Some(segment.source) == exit.through)
+                    .unwrap()
+                    .road_name,
+                ramp.name
+            );
+        }
+    }
+
+    #[test]
+    fn an_exit_carrying_the_whole_section_ends_the_parent_at_the_split() {
+        let mut program = parse("road path: sidewalk; end;").unwrap();
+        let road = match &program.statements[0] {
+            Statement::Road(road) => road.clone(),
+            _ => unreachable!(),
+        };
+        let parent = append(
+            &mut program,
+            &road,
+            WorldPoint { x: 0.0, y: 0.0 },
+            WorldPoint { x: 4.0, y: 0.0 },
+        );
+        let (attachment, start) =
+            create_lane_point(&mut program, SegmentSource::TopLevel(parent), 0, 0.5).unwrap();
+        let exit = append_exit(
+            &mut program,
+            &road,
+            SplitMode::Dedicated,
+            start,
+            &attachment,
+            WorldPoint { x: 4.0, y: -2.0 },
+            None,
+        )
+        .unwrap();
+        assert!(exit.through.is_none());
+        let projection = project(&program);
+        assert_eq!(
+            projection
+                .segments
+                .iter()
+                .find(|segment| segment.source == SegmentSource::TopLevel(parent))
+                .unwrap()
+                .end,
+            WorldPoint { x: 2.0, y: 0.0 }
+        );
+        assert_eq!(projection.unresolved, 0);
+    }
+
+    #[test]
+    fn a_start_end_exit_transfers_elements_without_a_zero_length_segment() {
+        let mut program = parse("road highway: carlane-carlane-sidewalk; end;").unwrap();
+        let road = match &program.statements[0] {
+            Statement::Road(road) => road.clone(),
+            _ => unreachable!(),
+        };
+        let parent = append(
+            &mut program,
+            &road,
+            WorldPoint { x: 0.0, y: 0.0 },
+            WorldPoint { x: 4.0, y: 0.0 },
+        );
+        let (attachment, start) =
+            create_lane_point(&mut program, SegmentSource::TopLevel(parent), 1, 0.0).unwrap();
+        let exit = append_exit(
+            &mut program,
+            &road,
+            SplitMode::Dedicated,
+            start,
+            &attachment,
+            WorldPoint { x: 3.0, y: -2.0 },
+            None,
+        )
+        .unwrap();
+        assert!(exit.through.is_some());
+        let projection = project(&program);
+        assert_eq!(projection.unresolved, 0);
+        assert!(
+            projection
+                .segments
+                .iter()
+                .find(|segment| segment.source == SegmentSource::TopLevel(parent))
+                .unwrap()
+                .end
+                .x
+                > 0.0
+        );
+        assert_eq!(lane_attachment(&program, &attachment).unwrap().2, 1.0);
+    }
 
     #[test]
     fn sample_block_instance_is_visible_without_changing_it() {

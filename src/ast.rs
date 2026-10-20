@@ -35,6 +35,7 @@ pub enum RoadElementKind {
     BuildingEdge,
     Shoulder,
     Verge,
+    Barrier,
 }
 
 impl RoadElementKind {
@@ -50,6 +51,7 @@ impl RoadElementKind {
             "buildingedge" => Self::BuildingEdge,
             "shoulder" => Self::Shoulder,
             "verge" => Self::Verge,
+            "barrier" => Self::Barrier,
             _ => return None,
         })
     }
@@ -66,6 +68,7 @@ impl RoadElementKind {
             Self::BuildingEdge => "buildingedge",
             Self::Shoulder => "shoulder",
             Self::Verge => "verge",
+            Self::Barrier => "barrier",
         }
     }
 }

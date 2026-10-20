@@ -9,7 +9,7 @@ use opencity::{
 mod map;
 use map::{SegmentSource, WorldPoint};
 
-const KINDS: [RoadElementKind; 10] = [
+const KINDS: [RoadElementKind; 11] = [
     RoadElementKind::BuildingEdge,
     RoadElementKind::Sidewalk,
     RoadElementKind::BikeLane,
@@ -20,6 +20,7 @@ const KINDS: [RoadElementKind; 10] = [
     RoadElementKind::Middle,
     RoadElementKind::Shoulder,
     RoadElementKind::Verge,
+    RoadElementKind::Barrier,
 ];
 
 #[derive(Clone, Copy)]
@@ -175,6 +176,256 @@ fn default_program() -> Program {
     parse(include_str!("../../examples/default_roads.road")).expect("bundled road library parses")
 }
 
+fn starter_line(
+    program: &mut Program,
+    road: &RoadDefinition,
+    start: WorldPoint,
+    start_ref: Option<&str>,
+    end: WorldPoint,
+    end_ref: Option<&str>,
+    name: String,
+) -> (usize, String) {
+    let first = WorldPoint {
+        x: start.x + (end.x - start.x) / 3.0,
+        y: start.y + (end.y - start.y) / 3.0,
+    };
+    let second = WorldPoint {
+        x: start.x + (end.x - start.x) * 2.0 / 3.0,
+        y: start.y + (end.y - start.y) * 2.0 / 3.0,
+    };
+    let (index, reference) =
+        map::append_connected_curve(program, road, start, start_ref, first, second, end, end_ref);
+    map::set_name(program, SegmentSource::TopLevel(index), name);
+    (index, reference)
+}
+
+fn starter_program() -> Program {
+    let mut program = default_program();
+    let road = |name: &str| {
+        program
+            .statements
+            .iter()
+            .find_map(|statement| match statement {
+                Statement::Road(road) if road.name == name => Some(road.clone()),
+                _ => None,
+            })
+            .expect("starter road type exists")
+    };
+    let highway = road("interstate_three_lane");
+    let main = road("main_street");
+    let neighborhood = road("neighborhood_street");
+    let avenue = road("downtown_avenue");
+    let rural = road("rural_road");
+    let country = road("country_lane");
+    let ramp = road("exit_ramp");
+    let point = |x, y| WorldPoint { x, y };
+
+    // A smooth closed bypass frames the city. Every bend shares the previous
+    // bend's junction, so moving a point keeps the loop connected.
+    let ring = [
+        point(-3.8, -1.5),
+        point(-3.75, 1.35),
+        point(-2.7, 2.45),
+        point(0.0, 2.7),
+        point(2.8, 2.35),
+        point(3.8, 1.15),
+        point(3.9, -1.35),
+        point(2.75, -2.5),
+        point(0.0, -2.75),
+        point(-2.75, -2.45),
+    ];
+    let mut ring_segments = Vec::with_capacity(ring.len());
+    let mut ring_start_ref = None;
+    let mut previous_ref = None;
+    for index in 0..ring.len() {
+        let prior = ring[(index + ring.len() - 1) % ring.len()];
+        let start = ring[index];
+        let end = ring[(index + 1) % ring.len()];
+        let after = ring[(index + 2) % ring.len()];
+        let first = point(
+            start.x + (end.x - prior.x) / 6.0,
+            start.y + (end.y - prior.y) / 6.0,
+        );
+        let second = point(
+            end.x - (after.x - start.x) / 6.0,
+            end.y - (after.y - start.y) / 6.0,
+        );
+        let end_ref = if index + 1 == ring.len() {
+            ring_start_ref.as_deref()
+        } else {
+            None
+        };
+        let (segment, reference) = map::append_connected_curve(
+            &mut program,
+            &highway,
+            start,
+            previous_ref.as_deref(),
+            first,
+            second,
+            end,
+            end_ref,
+        );
+        map::set_name(
+            &mut program,
+            SegmentSource::TopLevel(segment),
+            format!("beltway_{:02}", index + 1),
+        );
+        if index == 0 {
+            ring_start_ref =
+                map::link_endpoint(&mut program, SegmentSource::TopLevel(segment), false)
+                    .map(|(_, reference)| reference);
+        }
+        previous_ref = Some(reference);
+        ring_segments.push(SegmentSource::TopLevel(segment));
+    }
+
+    // Three east-west streets and three north-south streets make four city
+    // blocks. Each crossing uses the same map_point in both streets.
+    let columns = [-2.2, -1.25, 0.0, 1.25, 2.2];
+    let rows = [1.2, 0.0, -1.2];
+    let mut crossings = vec![vec![String::new(); columns.len()]; rows.len()];
+    for (row, y) in rows.iter().enumerate() {
+        let section = if row == 1 { &main } else { &neighborhood };
+        let street = ["cedar", "market", "willow"][row];
+        for column in 0..columns.len() - 1 {
+            let start_ref = (column > 0).then(|| crossings[row][column].as_str());
+            let (_, end_ref) = starter_line(
+                &mut program,
+                section,
+                point(columns[column], *y),
+                start_ref,
+                point(columns[column + 1], *y),
+                None,
+                format!("{street}_{:02}", column + 1),
+            );
+            crossings[row][column + 1] = end_ref;
+        }
+    }
+    let vertical_ends = [1.7, 1.2, 0.0, -1.2, -1.7];
+    for (street_index, column) in [1, 2, 3].into_iter().enumerate() {
+        let section = if street_index == 1 {
+            &avenue
+        } else {
+            &neighborhood
+        };
+        let street = ["oak", "civic", "elm"][street_index];
+        for piece in 0..vertical_ends.len() - 1 {
+            let start_ref = (piece > 0).then(|| crossings[piece - 1][column].as_str());
+            let end_ref = (piece < rows.len()).then(|| crossings[piece][column].as_str());
+            starter_line(
+                &mut program,
+                section,
+                point(columns[column], vertical_ends[piece]),
+                start_ref,
+                point(columns[column], vertical_ends[piece + 1]),
+                end_ref,
+                format!("{street}_{:02}", piece + 1),
+            );
+        }
+    }
+
+    // Market Street reaches an inward-facing exit from the eastern beltway.
+    let (_, market_east_ref) = starter_line(
+        &mut program,
+        &main,
+        point(2.2, 0.0),
+        Some(&crossings[1][4]),
+        point(2.75, 0.2),
+        None,
+        "market_interchange".into(),
+    );
+    let (city_attachment, city_start) =
+        map::create_lane_point(&mut program, ring_segments[5], 8, 0.48).unwrap();
+    let city_exit = map::append_exit(
+        &mut program,
+        &ramp,
+        map::SplitMode::KeepLane,
+        city_start,
+        &city_attachment,
+        point(2.75, 0.2),
+        Some(&market_east_ref),
+    )
+    .unwrap();
+    map::set_name(&mut program, city_exit.entry, "city_exit_entry".into());
+    map::set_name(&mut program, city_exit.full, "city_exit_ramp".into());
+    map::create_two_segment_split(
+        &mut program,
+        &city_attachment,
+        city_exit.entry,
+        city_exit.full,
+        map::SplitMode::KeepLane,
+    );
+
+    // A second access branch leads into a visibly winding country road.
+    let (country_attachment, country_start) =
+        map::create_lane_point(&mut program, ring_segments[6], 2, 0.34).unwrap();
+    let country_exit = map::append_exit(
+        &mut program,
+        &ramp,
+        map::SplitMode::KeepLane,
+        country_start,
+        &country_attachment,
+        point(4.55, -2.05),
+        None,
+    )
+    .unwrap();
+    map::set_name(&mut program, country_exit.entry, "county_exit_entry".into());
+    map::set_name(&mut program, country_exit.full, "county_exit_ramp".into());
+    map::create_two_segment_split(
+        &mut program,
+        &country_attachment,
+        country_exit.entry,
+        country_exit.full,
+        map::SplitMode::KeepLane,
+    );
+    let (rural_one, rural_ref) = map::append_connected_curve(
+        &mut program,
+        &rural,
+        point(4.55, -2.05),
+        Some(&country_exit.end_ref),
+        point(5.15, -2.3),
+        point(5.5, -1.95),
+        point(5.1, -1.4),
+        None,
+    );
+    map::set_name(
+        &mut program,
+        SegmentSource::TopLevel(rural_one),
+        "county_bend".into(),
+    );
+    let (rural_two, second_ref) = map::append_connected_curve(
+        &mut program,
+        &country,
+        point(5.1, -1.4),
+        Some(&rural_ref),
+        point(4.65, -0.95),
+        point(5.65, -0.65),
+        point(5.45, 0.05),
+        None,
+    );
+    map::set_name(
+        &mut program,
+        SegmentSource::TopLevel(rural_two),
+        "orchard_lane".into(),
+    );
+    let (rural_three, _) = map::append_connected_curve(
+        &mut program,
+        &country,
+        point(5.45, 0.05),
+        Some(&second_ref),
+        point(5.3, 0.75),
+        point(4.65, 0.7),
+        point(5.2, 1.4),
+        None,
+    );
+    map::set_name(
+        &mut program,
+        SegmentSource::TopLevel(rural_three),
+        "orchard_hill".into(),
+    );
+    program
+}
+
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum FileAction {
     New,
@@ -196,6 +447,8 @@ struct RoadEditor {
     selected_road: Option<usize>,
     selected_element: Option<usize>,
     selected_segment: Option<SegmentSource>,
+    selected_endpoint: Option<(SegmentSource, bool)>,
+    lane_end_choice: Option<ElementEndCandidate>,
     segment_name_draft: String,
     road_name_draft: String,
     new_kind: RoadElementKind,
@@ -205,10 +458,10 @@ struct RoadEditor {
     map_start_ref: Option<String>,
     branch_element: usize,
     branch_t: f32,
-    branch_road_name: String,
     branch_mode: map::SplitMode,
     map_pan: egui::Vec2,
     map_zoom: f32,
+    fit_scene_once: bool,
     dragging_endpoint: Option<(SegmentSource, bool)>,
     dragging_control: Option<(SegmentSource, bool)>,
     dragging_background: bool,
@@ -229,31 +482,34 @@ impl RoadEditor {
             .set_visuals_of(egui::Theme::Light, editor_visuals(egui::Theme::Light));
         cc.egui_ctx.set_theme(egui::ThemePreference::System);
         let mut app = Self {
-            program: default_program(),
+            program: starter_program(),
             path: None,
             dirty: false,
             selected_road: Some(0),
             selected_element: None,
             selected_segment: None,
+            selected_endpoint: None,
+            lane_end_choice: None,
             segment_name_draft: String::new(),
             road_name_draft: "neighborhood_street".into(),
             new_kind: RoadElementKind::CarLane,
             view: View::Map,
-            map_tool: MapTool::Draw,
+            map_tool: MapTool::Select,
             map_start: None,
             map_start_ref: None,
             branch_element: usize::MAX,
             branch_t: 0.75,
-            branch_road_name: "exit_ramp".into(),
             branch_mode: map::SplitMode::Dedicated,
             map_pan: egui::Vec2::ZERO,
-            map_zoom: 100.0,
+            map_zoom: 75.0,
+            fit_scene_once: true,
             dragging_endpoint: None,
             dragging_control: None,
             dragging_background: false,
             show_source: false,
-            status: "Click two points to place a neighborhood street, or choose another road type."
-                .into(),
+            status:
+                "Explore the beltway, city grid, and country road | File > New starts a blank map."
+                    .into(),
             pending: None,
             confirm_delete_road: false,
             #[cfg(target_os = "macos")]
@@ -270,6 +526,67 @@ impl RoadEditor {
             Statement::Road(road) => Some(road),
             _ => None,
         }
+    }
+
+    fn start_extension(&mut self, source: SegmentSource, is_end: bool) -> bool {
+        let projection = map::project(&self.program);
+        let Some(segment) = projection
+            .segments
+            .iter()
+            .find(|segment| segment.source == source)
+        else {
+            return false;
+        };
+        let Some(road_index) = self.program.statements.iter().position(|statement|
+            matches!(statement, Statement::Road(road) if road.name == segment.road_name)) else { return false };
+        let Some((point, reference)) = map::link_endpoint(&mut self.program, source, is_end) else {
+            return false;
+        };
+        self.selected_road = Some(road_index);
+        self.road_name_draft = segment.road_name.clone();
+        self.map_tool = MapTool::Draw;
+        self.map_start = Some(point);
+        self.map_start_ref = Some(reference);
+        self.selected_endpoint = None;
+        self.dirty = true;
+        self.status =
+            "Continuing road | click another road end to join, or click the map to extend".into();
+        true
+    }
+
+    fn start_branch(&mut self, source: SegmentSource, element: usize, t: f32) -> bool {
+        let Some((reference, position)) =
+            map::create_lane_point(&mut self.program, source, element, t)
+        else {
+            return false;
+        };
+        if let Some((index, name)) = map::project(&self.program)
+            .segments
+            .iter()
+            .find(|segment| segment.source == source)
+            .and_then(|segment| {
+                self.program
+                    .statements
+                    .iter()
+                    .enumerate()
+                    .find_map(|(index, statement)| match statement {
+                        Statement::Road(road) if road.name == segment.road_name => {
+                            Some((index, road.name.clone()))
+                        }
+                        _ => None,
+                    })
+            })
+        {
+            self.selected_road = Some(index);
+            self.road_name_draft = name;
+        }
+        self.map_tool = MapTool::Draw;
+        self.map_start = Some(position);
+        self.map_start_ref = Some(reference);
+        self.selected_endpoint = None;
+        self.dirty = true;
+        self.status = "Branch started | click an endpoint to place the exit or merge".into();
+        true
     }
 
     fn road_mut(&mut self) -> Option<&mut RoadDefinition> {
@@ -424,6 +741,8 @@ impl RoadEditor {
             .position(|statement| matches!(statement, Statement::Road(_)));
         self.selected_element = None;
         self.selected_segment = None;
+        self.selected_endpoint = None;
+        self.lane_end_choice = None;
         self.road_name_draft = self
             .road()
             .map(|road| road.name.clone())
@@ -516,6 +835,8 @@ impl RoadEditor {
                     .position(|statement| matches!(statement, Statement::Road(_)));
                 self.selected_element = None;
                 self.selected_segment = None;
+                self.selected_endpoint = None;
+                self.lane_end_choice = None;
                 self.segment_name_draft.clear();
                 self.map_start = None;
                 self.map_start_ref = None;
@@ -530,6 +851,7 @@ impl RoadEditor {
                     })
                     .unwrap_or_default();
                 self.program = program;
+                self.fit_scene_once = true;
                 self.path = Some(path.clone());
                 self.dirty = false;
                 self.confirm_delete_road = false;
@@ -582,20 +904,26 @@ impl RoadEditor {
         self.selected_road = Some(0);
         self.selected_element = None;
         self.selected_segment = None;
+        self.selected_endpoint = None;
+        self.lane_end_choice = None;
         self.segment_name_draft.clear();
         self.road_name_draft = "neighborhood_street".into();
         self.view = View::Map;
         self.map_tool = MapTool::Draw;
         self.map_start = None;
         self.map_start_ref = None;
+        self.branch_element = usize::MAX;
+        self.branch_t = 0.75;
+        self.branch_mode = map::SplitMode::Dedicated;
         self.map_pan = egui::Vec2::ZERO;
         self.map_zoom = 100.0;
+        self.fit_scene_once = false;
         self.dragging_endpoint = None;
         self.dragging_control = None;
         self.dragging_background = false;
         self.dirty = false;
         self.confirm_delete_road = false;
-        self.status = "New document".into();
+        self.status = "New blank map".into();
     }
 
     fn pick_open(&mut self) {
@@ -909,6 +1237,8 @@ impl RoadEditor {
                                     self.branch_element = usize::MAX;
                                 }
                                 self.selected_segment = Some(segment.source);
+                                self.selected_endpoint = None;
+                                self.lane_end_choice = None;
                                 self.segment_name_draft = segment.name.clone().unwrap_or_default();
                                 self.map_tool = MapTool::Select;
                                 self.map_start = None;
@@ -1165,33 +1495,65 @@ impl RoadEditor {
             self.dirty = true;
         }
         ui.add_space(8.0);
-        ui.label(format!(
-            "Cross section: {}",
-            preset_label(&segment.road_name)
-        ));
-        if let Some(split) = map::lane_splits(&self.program)
-            .into_iter()
-            .find(|split| segment.name.as_deref() == Some(&split.ramp))
+        ui.label("Cross section");
+        let mut chosen_section = segment.road_name.clone();
+        let sections: Vec<_> = self
+            .program
+            .statements
+            .iter()
+            .filter_map(|statement| match statement {
+                Statement::Road(road) => Some(road.name.clone()),
+                _ => None,
+            })
+            .collect();
+        egui::ComboBox::from_id_salt("placed-road-section")
+            .selected_text(preset_label(&chosen_section))
+            .show_ui(ui, |ui| {
+                for name in &sections {
+                    ui.selectable_value(&mut chosen_section, name.clone(), preset_label(name));
+                }
+            });
+        if chosen_section != segment.road_name
+            && map::set_road_type(&mut self.program, segment.source, &chosen_section)
         {
+            self.dirty = true;
+        }
+        if let Some((source, is_end)) = self
+            .selected_endpoint
+            .filter(|(source, _)| *source == segment.source)
+        {
+            ui.label(if is_end {
+                "Far end selected"
+            } else {
+                "Start end selected"
+            });
+            ui.horizontal(|ui| {
+                if ui.button("Extend / join (E)").clicked() {
+                    self.start_extension(source, is_end);
+                }
+                if ui.button("Rotate (R)").clicked()
+                    && map::rotate_endpoint(&mut self.program, source, is_end, -15.0)
+                {
+                    self.dirty = true;
+                }
+            });
+            ui.label(RichText::new("Shift+R rotates the other way. Click another end while extending to join the roads.")
+                .small().color(ui.visuals().weak_text_color()));
+        }
+        if let Some(split) = map::lane_splits(&self.program).into_iter().find(|split| {
+            segment.name.as_deref() == Some(&split.ramp)
+                || segment.name.as_deref() == split.full_ramp.as_deref()
+        }) {
             ui.label(format!(
                 "Exit from {} | element {}",
                 split.parent,
                 split.element_index + 1
             ));
-            let mut keep_lane = split.mode == map::SplitMode::KeepLane;
-            if ui
-                .checkbox(&mut keep_lane, "Keep lane on through road")
-                .changed()
-            {
-                let mode = if keep_lane {
-                    map::SplitMode::KeepLane
-                } else {
-                    map::SplitMode::Dedicated
-                };
-                if map::set_split_mode(&mut self.program, &split.ramp, mode) {
-                    self.dirty = true;
-                }
-            }
+            ui.label(if split.mode == map::SplitMode::KeepLane {
+                "Optional branch: the through road retains its cross section."
+            } else {
+                "Dedicated branch: the outer elements belong to this road."
+            });
         }
         ui.add_space(8.0);
         if segment.source.editable() {
@@ -1391,36 +1753,8 @@ impl RoadEditor {
                             self.branch_t = 1.0;
                         }
                     });
-                    let road_choices: Vec<_> = self
-                        .program
-                        .statements
-                        .iter()
-                        .enumerate()
-                        .filter_map(|(index, statement)| match statement {
-                            Statement::Road(road) => Some((index, road.name.clone())),
-                            _ => None,
-                        })
-                        .collect();
-                    if !road_choices
-                        .iter()
-                        .any(|(_, name)| *name == self.branch_road_name)
-                    {
-                        self.branch_road_name = road_choices
-                            .first()
-                            .map(|(_, name)| name.clone())
-                            .unwrap_or_default();
-                    }
-                    egui::ComboBox::from_id_salt("branch-road-type")
-                        .selected_text(preset_label(&self.branch_road_name))
-                        .show_ui(ui, |ui| {
-                            for (_, name) in &road_choices {
-                                ui.selectable_value(
-                                    &mut self.branch_road_name,
-                                    name.clone(),
-                                    preset_label(name),
-                                );
-                            }
-                        });
+                    ui.label(RichText::new("The selected element and every element toward this side continue into the exit. The through road keeps the remaining elements and gains a divider wall.")
+                        .small().color(ui.visuals().weak_text_color()));
                     let mut keep_lane = self.branch_mode == map::SplitMode::KeepLane;
                     if ui
                         .checkbox(&mut keep_lane, "Keep lane on through road")
@@ -1434,35 +1768,15 @@ impl RoadEditor {
                     }
                     ui.label(
                         RichText::new(if keep_lane {
-                            "The interstate keeps this lane; the ramp grows beside it."
+                            "The through road keeps its full cross section; the branch copies the outer elements."
                         } else {
-                            "This lane leaves the interstate and becomes the ramp."
+                            "The outer elements move to the branch; the through road uses the remaining elements."
                         })
                         .small()
                         .color(ui.visuals().weak_text_color()),
                     );
                     if ui.button("Start branch here").clicked() {
-                        if let Some((reference, position)) = map::create_lane_point(
-                            &mut self.program,
-                            segment.source,
-                            self.branch_element,
-                            self.branch_t,
-                        ) {
-                            if let Some((index, name)) = road_choices
-                                .into_iter()
-                                .find(|(_, name)| *name == self.branch_road_name)
-                            {
-                                self.selected_road = Some(index);
-                                self.road_name_draft = name;
-                            }
-                            self.map_tool = MapTool::Draw;
-                            self.map_start = Some(position);
-                            self.map_start_ref = Some(reference);
-                            self.dirty = true;
-                            self.status =
-                                "Branch started | click an endpoint to place the exit or merge"
-                                    .into();
-                        }
+                        self.start_branch(segment.source, self.branch_element, self.branch_t);
                     }
                 }
             }
@@ -1499,9 +1813,9 @@ impl RoadEditor {
                 ui.heading("Map");
                 ui.label(
                     RichText::new(if self.map_tool == MapTool::Draw {
-                        "Click start and end, including colored element ends | drag empty map to pan | Enter or Esc finishes"
+                        "Click freely or pick a road/lane end | hold Shift for grid snap | drag empty map to pan | Enter or Esc finishes"
                     } else {
-                        "Select a road | branch from its cross section in Inspector | drag points to edit"
+                        "Drag points freely; hold Shift for grid snap | E extends, R rotates | green marker starts an exit"
                     })
                     .small()
                     .color(ui.visuals().weak_text_color()),
@@ -1509,18 +1823,42 @@ impl RoadEditor {
             });
             let (rect, response) =
                 ui.allocate_exact_size(ui.available_size(), egui::Sense::click_and_drag());
+            let before = map::project(&self.program);
+            if self.fit_scene_once {
+                self.fit_scene_once = false;
+                if !before.segments.is_empty() {
+                    let mut min = WorldPoint { x: f32::INFINITY, y: f32::INFINITY };
+                    let mut max = WorldPoint { x: f32::NEG_INFINITY, y: f32::NEG_INFINITY };
+                    for segment in &before.segments {
+                        for point in [segment.start, segment.controls[0], segment.controls[1], segment.end] {
+                            min.x = min.x.min(point.x);
+                            min.y = min.y.min(point.y);
+                            max.x = max.x.max(point.x);
+                            max.y = max.y.max(point.y);
+                        }
+                    }
+                    let width = (max.x - min.x).max(0.1);
+                    let height = (max.y - min.y).max(0.1);
+                    self.map_zoom = ((rect.width() - 76.0).max(80.0) / width)
+                        .min((rect.height() - 76.0).max(80.0) / height)
+                        .clamp(18.0, 120.0);
+                    self.map_pan = egui::vec2(
+                        -(min.x + max.x) * self.map_zoom / 2.0,
+                        (min.y + max.y) * self.map_zoom / 2.0,
+                    );
+                }
+            }
             if response.hovered() {
                 let scroll = ui.input(|input| input.smooth_scroll_delta.y);
                 if scroll != 0.0 {
                     let pointer = ui.ctx().pointer_hover_pos().unwrap_or(rect.center());
                     let anchored = world_of(rect, self.map_pan, self.map_zoom, pointer);
-                    self.map_zoom = (self.map_zoom * (1.0 + scroll * 0.002)).clamp(32.0, 420.0);
+                    self.map_zoom = (self.map_zoom * (1.0 + scroll * 0.002)).clamp(18.0, 420.0);
                     self.map_pan = pointer
                         - rect.center()
                         - egui::vec2(anchored.x * self.map_zoom, -anchored.y * self.map_zoom);
                 }
             }
-            let before = map::project(&self.program);
             let junctions = junction_candidates(&before);
             let element_ends = element_end_candidates(&before, &self.program);
             if response.drag_started_by(egui::PointerButton::Primary) {
@@ -1547,11 +1885,15 @@ impl RoadEditor {
                     } else {
                         None
                     };
-                    if let Some((source, _)) = self.dragging_endpoint {
+                    if let Some((source, is_end)) = self.dragging_endpoint {
                         self.selected_segment = Some(source);
+                        self.selected_endpoint = Some((source, is_end));
+                        self.lane_end_choice = None;
                     }
                     if let Some((source, _)) = self.dragging_control {
                         self.selected_segment = Some(source);
+                        self.selected_endpoint = None;
+                        self.lane_end_choice = None;
                     }
                     if let Some(segment) = before
                         .segments
@@ -1593,6 +1935,7 @@ impl RoadEditor {
                 self.dragging_control = None;
                 self.dragging_background = false;
                 self.map_tool = MapTool::Select;
+                self.lane_end_choice = None;
             }
             if self.map_tool == MapTool::Select
                 && self.selected_segment.is_some()
@@ -1603,9 +1946,25 @@ impl RoadEditor {
             {
                 if map::remove(&mut self.program, self.selected_segment.unwrap()) {
                     self.selected_segment = None;
+                    self.selected_endpoint = None;
+                    self.lane_end_choice = None;
                     self.segment_name_draft.clear();
                     self.dirty = true;
                     self.status = "Road placement removed".into();
+                }
+            }
+            if self.map_tool == MapTool::Select && !ui.ctx().egui_wants_keyboard_input() {
+                if let Some((source, is_end)) = self.selected_endpoint {
+                    if ui.input(|input| input.key_pressed(egui::Key::E)) {
+                        self.start_extension(source, is_end);
+                    } else if let Some(reverse) = ui.input(|input| input.key_pressed(egui::Key::R)
+                        .then_some(input.modifiers.shift)) {
+                        if map::rotate_endpoint(&mut self.program, source, is_end,
+                            if reverse { 15.0 } else { -15.0 }) {
+                            self.dirty = true;
+                            self.status = "Rotated road end tangent 15° | Shift+R reverses direction".into();
+                        }
+                    }
                 }
             }
             if let Some(pointer) = ui
@@ -1613,22 +1972,31 @@ impl RoadEditor {
                 .pointer_hover_pos()
                 .filter(|point| rect.contains(*point))
             {
+                let pointer_world = world_of(rect, self.map_pan, self.map_zoom, pointer);
+                let free_point = if ui.input(|input| input.modifiers.shift) {
+                    grid_point(pointer_world)
+                } else {
+                    pointer_world
+                };
                 if self.map_tool == MapTool::Draw
                     && response.clicked_by(egui::PointerButton::Primary)
                 {
-                    let element_end =
-                        element_end_near(&element_ends, rect, self.map_pan, self.map_zoom, pointer);
-                    let picked = element_end
-                        .map(|candidate| (candidate.position, None))
-                        .or_else(|| {
-                            junction_near(&junctions, rect, self.map_pan, self.map_zoom, pointer)
+                    let target_endpoint = endpoint_near(&before.segments, &self.program,
+                        rect, self.map_pan, self.map_zoom, pointer)
+                        .filter(|(source, is_end)| {
+                            let segment = before.segments.iter().find(|segment| segment.source == *source).unwrap();
+                            let point = if *is_end { segment.end } else { segment.start };
+                            pointer.distance(screen_of(rect, self.map_pan, self.map_zoom, point)) <= 9.0
                         });
-                    let (point, mut point_ref) = picked.unwrap_or_else(|| {
-                        (
-                            snap_point(world_of(rect, self.map_pan, self.map_zoom, pointer)),
-                            None,
-                        )
-                    });
+                    let element_end = if target_endpoint.is_none() {
+                        element_end_near(&element_ends, rect, self.map_pan, self.map_zoom, pointer)
+                    } else { None };
+                    let picked = target_endpoint.and_then(|(source, is_end)|
+                        map::link_endpoint(&mut self.program, source, is_end)
+                            .map(|(point, reference)| (point, Some(reference))))
+                        .or_else(|| element_end.map(|candidate| (candidate.position, None)))
+                        .or_else(|| junction_near(&junctions, rect, self.map_pan, self.map_zoom, pointer));
+                    let (point, mut point_ref) = picked.unwrap_or((free_point, None));
                     if self.map_start != Some(point) {
                         if let Some(candidate) = element_end {
                             point_ref = map::create_lane_point(
@@ -1644,19 +2012,39 @@ impl RoadEditor {
                         if start != point {
                             if let Some(road) = self.road().cloned() {
                                 let branch_ref = self.map_start_ref.clone();
-                                let (index, end_ref) = map::append_connected(
-                                    &mut self.program,
-                                    &road,
-                                    start,
-                                    self.map_start_ref.as_deref(),
-                                    point,
-                                    point_ref.as_deref(),
-                                );
-                                if let Some(reference) = branch_ref.as_deref() {
-                                    map::create_lane_split(&mut self.program, reference,
-                                        SegmentSource::TopLevel(index), self.branch_mode);
-                                }
+                                let exit = branch_ref.as_deref()
+                                    .filter(|reference| map::anchored_reference(&self.program, reference))
+                                    .and_then(|reference| map::append_exit(
+                                        &mut self.program, &road, self.branch_mode, start, reference, point,
+                                        point_ref.as_deref()));
+                                let (index, end_ref, exit_side, through_added) = if let Some(exit) = exit {
+                                    map::create_two_segment_split(&mut self.program,
+                                        branch_ref.as_deref().unwrap(), exit.entry, exit.full,
+                                        self.branch_mode);
+                                    let SegmentSource::TopLevel(index) = exit.full else { unreachable!() };
+                                    (index, exit.end_ref, Some(exit.side), exit.through.is_some())
+                                } else {
+                                    let (index, end_ref) = map::append_connected(
+                                        &mut self.program, &road, start,
+                                        self.map_start_ref.as_deref(), point,
+                                        point_ref.as_deref());
+                                    if let Some(reference) = branch_ref.as_deref() {
+                                        map::create_lane_split(&mut self.program, reference,
+                                            SegmentSource::TopLevel(index), self.branch_mode);
+                                    }
+                                    (index, end_ref, None, false)
+                                };
                                 self.selected_segment = Some(SegmentSource::TopLevel(index));
+                                if exit_side.is_some() {
+                                    let segment_road = map::project(&self.program).segments.into_iter()
+                                        .find(|segment| segment.source == SegmentSource::TopLevel(index))
+                                        .map(|segment| segment.road_name);
+                                    if let Some(name) = segment_road {
+                                        self.selected_road = self.program.statements.iter().position(
+                                            |statement| matches!(statement, Statement::Road(road) if road.name == name));
+                                        self.road_name_draft = name;
+                                    }
+                                }
                                 self.segment_name_draft = map::project(&self.program)
                                     .segments
                                     .into_iter()
@@ -1668,10 +2056,16 @@ impl RoadEditor {
                                 self.map_start = Some(point);
                                 self.map_start_ref = Some(end_ref);
                                 self.dirty = true;
-                                self.status = format!(
-                                    "Placed {} | click another endpoint or press Enter/Esc",
-                                    preset_label(&road.name)
-                                );
+                                self.status = if let Some(side) = exit_side {
+                                    if through_added {
+                                        format!("Placed {} exit and a divided through road | click another endpoint or press Enter/Esc", side.label())
+                                    } else {
+                                        format!("Placed {} branch with carried cross section | click another endpoint or press Enter/Esc", side.label())
+                                    }
+                                } else {
+                                    format!("Placed {} | click another endpoint or press Enter/Esc",
+                                        preset_label(&road.name))
+                                };
                             }
                         }
                     } else {
@@ -1681,6 +2075,49 @@ impl RoadEditor {
                 }
                 if self.map_tool == MapTool::Select {
                     if response.clicked_by(egui::PointerButton::Primary) {
+                        let picked_endpoint = endpoint_near(&before.segments, &self.program,
+                            rect, self.map_pan, self.map_zoom, pointer)
+                            .filter(|(source, is_end)| {
+                                let segment = before.segments.iter()
+                                    .find(|segment| segment.source == *source).unwrap();
+                                let point = if *is_end { segment.end } else { segment.start };
+                                pointer.distance(screen_of(rect, self.map_pan, self.map_zoom, point)) <= 9.0
+                            });
+                        let branch_marker = self.selected_segment.and_then(|source| {
+                            let segment = before.segments.iter().find(|segment| segment.source == source)?;
+                            let road = self.program.statements.iter().find_map(|statement| match statement {
+                                Statement::Road(road) if road.name == segment.road_name => Some(road), _ => None,
+                            })?;
+                            let point = map::element_position(segment, road, self.branch_element, self.branch_t)?;
+                            (pointer.distance(screen_of(rect, self.map_pan, self.map_zoom, point)) <= 10.0)
+                                .then_some((source, self.branch_element, self.branch_t))
+                        });
+                        if let Some((source, is_end)) = picked_endpoint {
+                            self.lane_end_choice = None;
+                            if self.selected_segment != Some(source) {
+                                self.branch_element = usize::MAX;
+                            }
+                            self.selected_segment = Some(source);
+                            self.selected_endpoint = Some((source, is_end));
+                            self.segment_name_draft = before.segments.iter()
+                                .find(|segment| segment.source == source)
+                                .and_then(|segment| segment.name.clone()).unwrap_or_default();
+                            self.status = "Road end selected | E extends or joins; R rotates the tangent".into();
+                        } else if let Some((source, element, t)) = branch_marker {
+                            self.lane_end_choice = None;
+                            self.start_branch(source, element, t);
+                        } else if let Some(candidate) = element_end_near(&element_ends, rect,
+                            self.map_pan, self.map_zoom, pointer) {
+                            self.branch_element = candidate.element_index;
+                            self.branch_t = candidate.t;
+                            self.selected_segment = Some(candidate.source);
+                            self.selected_endpoint = None;
+                            self.lane_end_choice = Some(candidate);
+                            self.segment_name_draft = before.segments.iter()
+                                .find(|segment| segment.source == candidate.source)
+                                .and_then(|segment| segment.name.clone()).unwrap_or_default();
+                        } else {
+                        self.lane_end_choice = None;
                         let selected = segment_near(
                             &before.segments,
                             &self.program,
@@ -1693,26 +2130,24 @@ impl RoadEditor {
                             self.branch_element = usize::MAX;
                         }
                         self.selected_segment = selected;
+                        self.selected_endpoint = None;
                         self.segment_name_draft = before
                             .segments
                             .iter()
                             .find(|segment| Some(segment.source) == self.selected_segment)
                             .and_then(|segment| segment.name.clone())
                             .unwrap_or_default();
+                        }
                     }
                     if response.dragged_by(egui::PointerButton::Primary) {
                         if let Some((source, is_end)) = self.dragging_endpoint {
-                            let point =
-                                snap_point(world_of(rect, self.map_pan, self.map_zoom, pointer));
-                            if map::set_connected_endpoint(&mut self.program, source, is_end, point)
+                            if map::set_connected_endpoint(&mut self.program, source, is_end, free_point)
                             {
                                 self.dirty = true;
                             }
                         }
                         if let Some((source, second)) = self.dragging_control {
-                            let point =
-                                snap_point(world_of(rect, self.map_pan, self.map_zoom, pointer));
-                            if map::set_control(&mut self.program, source, second, point) {
+                            if map::set_control(&mut self.program, source, second, free_point) {
                                 self.dirty = true;
                             }
                         }
@@ -1731,7 +2166,7 @@ impl RoadEditor {
             let projection = map::project(&self.program);
             let profiles = paint_profiles(&self.program, &projection);
             let mut draw_order: Vec<_> = (0..projection.segments.len()).collect();
-            draw_order.sort_by_key(|index| profiles[*index].ramp.is_some());
+            draw_order.sort_by_key(|index| profiles[*index].branch_alignment.is_some());
             for index in draw_order {
                 let segment = &projection.segments[index];
                 let selected = self.selected_segment == Some(segment.source);
@@ -1743,8 +2178,7 @@ impl RoadEditor {
                         Statement::Road(road) if road.name == segment.road_name => Some(road),
                         _ => None,
                     });
-                if let Some(road) = road.filter(|_| profiles[index].ramp.is_some()
-                    || !profiles[index].through.is_empty()) {
+                if let Some(road) = road.filter(|_| profiles[index].branch_alignment.is_some()) {
                     paint_profiled_road(&painter, rect, self.map_pan, self.map_zoom,
                         segment, road, selected, palette, &profiles[index]);
                 } else {
@@ -1752,13 +2186,17 @@ impl RoadEditor {
                         segment, road, selected, palette);
                 }
                 let midpoint = screen_of(rect, self.map_pan, self.map_zoom, segment.point_at(0.5));
-                painter.text(
-                    midpoint + egui::vec2(0.0, -22.0),
-                    egui::Align2::CENTER_BOTTOM,
-                    segment.name.as_deref().unwrap_or(&segment.road_name),
-                    egui::FontId::proportional(12.0),
-                    palette.map_text,
-                );
+                let screen_length = screen_of(rect, self.map_pan, self.map_zoom, segment.start)
+                    .distance(screen_of(rect, self.map_pan, self.map_zoom, segment.end));
+                if selected || screen_length > 100.0 {
+                    painter.text(
+                        midpoint + egui::vec2(0.0, -22.0),
+                        egui::Align2::CENTER_BOTTOM,
+                        segment.name.as_deref().unwrap_or(&segment.road_name),
+                        egui::FontId::proportional(12.0),
+                        palette.map_text,
+                    );
+                }
                 if selected {
                     for point in [segment.start, segment.end]
                         .map(|point| screen_of(rect, self.map_pan, self.map_zoom, point))
@@ -1811,11 +2249,18 @@ impl RoadEditor {
                                 7.0,
                                 egui::Stroke::new(2.0, palette.map_text),
                             );
+                            if ui.ctx().pointer_hover_pos().is_some_and(|pointer|
+                                pointer.distance(point) <= 12.0) {
+                                ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+                                painter.text(point + egui::vec2(12.0, -12.0),
+                                    egui::Align2::LEFT_BOTTOM, "Click to branch here",
+                                    egui::FontId::proportional(11.0), palette.map_text);
+                            }
                         }
                     }
                 }
             }
-            if self.map_tool == MapTool::Draw {
+            if matches!(self.map_tool, MapTool::Draw | MapTool::Select) {
                 if let Some(pointer) = ui
                     .ctx()
                     .pointer_hover_pos()
@@ -1851,13 +2296,14 @@ impl RoadEditor {
                         );
                     }
                     if let Some(candidate) = hovered_end {
+                        ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
                         let screen =
                             screen_of(rect, self.map_pan, self.map_zoom, candidate.position);
                         painter.text(
                             screen + egui::vec2(11.0, -12.0),
                             egui::Align2::LEFT_BOTTOM,
                             format!(
-                                "{} {} end",
+                                "{} {} end | click for options",
                                 kind_label(candidate.kind),
                                 candidate.element_index + 1
                             ),
@@ -1902,9 +2348,14 @@ impl RoadEditor {
                     .filter(|point| rect.contains(*point))
                 {
                     let stroke = egui::Stroke::new(3.0, palette.map_preview);
-                    let end =
-                        element_end_near(&element_ends, rect, self.map_pan, self.map_zoom, pointer)
+                    let end = endpoint_near(&projection.segments, &self.program,
+                            rect, self.map_pan, self.map_zoom, pointer)
+                        .and_then(|(source, is_end)| projection.segments.iter()
+                            .find(|segment| segment.source == source)
+                            .map(|segment| if is_end { segment.end } else { segment.start }))
+                        .or_else(|| element_end_near(&element_ends, rect, self.map_pan, self.map_zoom, pointer)
                             .map(|candidate| candidate.position)
+                        )
                             .or_else(|| {
                                 junction_near(
                                     &junctions,
@@ -1970,6 +2421,38 @@ impl RoadEditor {
                     egui::FontId::proportional(14.0),
                     palette.map_subtle,
                 );
+            }
+            if let Some(choice) = self.lane_end_choice {
+                let anchor = screen_of(rect, self.map_pan, self.map_zoom, choice.position);
+                painter.circle_stroke(anchor, 8.0, egui::Stroke::new(2.5, palette.map_selected));
+                let menu_pos = egui::pos2(
+                    (anchor.x + 12.0).min(rect.right() - 190.0),
+                    (anchor.y + 12.0).min(rect.bottom() - 150.0),
+                );
+                let mut action = None;
+                egui::Area::new(egui::Id::new("lane_end_choice"))
+                    .order(egui::Order::Foreground)
+                    .fixed_pos(menu_pos)
+                    .show(ui.ctx(), |ui| {
+                        egui::Frame::popup(ui.style()).show(ui, |ui| {
+                            ui.label(format!("{} {} end", kind_label(choice.kind), choice.element_index + 1));
+                            if ui.button("Continue full road").clicked() { action = Some(0); }
+                            if ui.button("Exit / merge from this lane").clicked() { action = Some(1); }
+                            if ui.button("Join full road to another end").clicked() { action = Some(2); }
+                        });
+                    });
+                if let Some(action) = action {
+                    self.lane_end_choice = None;
+                    match action {
+                        1 => { self.start_branch(choice.source, choice.element_index, choice.t); }
+                        2 => {
+                            if self.start_extension(choice.source, choice.t >= 0.5) {
+                                self.status = "Join roads | click another road end with the same cross section".into();
+                            }
+                        }
+                        _ => { self.start_extension(choice.source, choice.t >= 0.5); }
+                    }
+                }
             }
         });
     }
@@ -2131,7 +2614,7 @@ fn world_of(rect: egui::Rect, pan: egui::Vec2, zoom: f32, point: egui::Pos2) -> 
     }
 }
 
-fn snap_point(point: WorldPoint) -> WorldPoint {
+fn grid_point(point: WorldPoint) -> WorldPoint {
     WorldPoint {
         x: (point.x * 4.0).round() / 4.0,
         y: (point.y * 4.0).round() / 4.0,
@@ -2314,37 +2797,25 @@ fn control_near(
 }
 
 fn map_element_width(kind: RoadElementKind, zoom: f32) -> f32 {
-    let meters = match kind {
-        RoadElementKind::CarLane | RoadElementKind::BusLane => 0.045,
-        RoadElementKind::ParkingLane | RoadElementKind::Sidewalk | RoadElementKind::BikeLane => {
-            0.032
-        }
-        RoadElementKind::BusStop | RoadElementKind::Shoulder => 0.028,
-        RoadElementKind::Middle => 0.025,
-        RoadElementKind::Verge => 0.035,
-        RoadElementKind::BuildingEdge => 0.012,
-    };
-    (meters * zoom).max(1.5)
-}
-
-#[derive(Clone, Copy)]
-struct ThroughEffect {
-    element_index: usize,
-    left_side: bool,
-    split_t: f32,
-    depth: usize,
-}
-
-#[derive(Clone, Copy)]
-struct RampEffect {
-    mode: map::SplitMode,
-    element_index: usize,
+    map::element_world_width(kind) * zoom
 }
 
 #[derive(Default)]
 struct PaintProfile {
-    through: Vec<ThroughEffect>,
-    ramp: Option<RampEffect>,
+    branch_alignment: Option<(map::ExitSide, RoadElementKind)>,
+}
+
+fn road_for_segment<'a>(
+    program: &'a Program,
+    segment: &map::Segment,
+) -> Option<&'a RoadDefinition> {
+    program
+        .statements
+        .iter()
+        .find_map(|statement| match statement {
+            Statement::Road(road) if road.name == segment.road_name => Some(road),
+            _ => None,
+        })
 }
 
 fn paint_profiles(program: &Program, projection: &map::Projection) -> Vec<PaintProfile> {
@@ -2354,11 +2825,10 @@ fn paint_profiles(program: &Program, projection: &map::Projection) -> Vec<PaintP
         .map(|_| PaintProfile::default())
         .collect();
     for split in map::lane_splits(program) {
-        let Some((parent_index, parent)) = projection
+        let Some(parent) = projection
             .segments
             .iter()
-            .enumerate()
-            .find(|(_, segment)| segment.name.as_deref() == Some(&split.parent))
+            .find(|segment| segment.name.as_deref() == Some(&split.parent))
         else {
             continue;
         };
@@ -2370,89 +2840,25 @@ fn paint_profiles(program: &Program, projection: &map::Projection) -> Vec<PaintP
         else {
             continue;
         };
-        let Some(parent_road) = program
-            .statements
-            .iter()
-            .find_map(|statement| match statement {
-                Statement::Road(road) if road.name == parent.road_name => Some(road),
-                _ => None,
-            })
-        else {
+        let Some(parent_road) = road_for_segment(program, parent) else {
             continue;
         };
-        let Some(ramp_road) = program
-            .statements
-            .iter()
-            .find_map(|statement| match statement {
-                Statement::Road(road) if road.name == ramp.road_name => Some(road),
-                _ => None,
-            })
-        else {
+        let Some(ramp_road) = road_for_segment(program, ramp) else {
             continue;
         };
-        if split.element_index >= parent_road.elements.len() {
+        let Some(selected) = parent_road.elements.get(split.element_index) else {
             continue;
-        }
-        let selected = ramp_road
-            .elements
-            .iter()
-            .position(|element| {
-                matches!(
-                    element.kind,
-                    RoadElementKind::CarLane | RoadElementKind::BusLane | RoadElementKind::BikeLane
-                )
-            })
-            .unwrap_or(0);
-        profiles[ramp_index].ramp = Some(RampEffect {
-            mode: split.mode,
-            element_index: selected,
-        });
-        if split.mode == map::SplitMode::KeepLane {
-            continue;
-        }
-        let effect = ThroughEffect {
-            element_index: split.element_index,
-            left_side: split.element_index < parent_road.elements.len() / 2,
-            split_t: split.t,
-            depth: 0,
         };
-        profiles[parent_index].through.push(effect);
-        let mut current = parent_index;
-        for depth in 1..projection.segments.len() {
-            let previous = &projection.segments[current];
-            let next = projection
-                .segments
-                .iter()
-                .enumerate()
-                .find(|(index, candidate)| {
-                    *index != current
-                        && *index != ramp_index
-                        && candidate.road_name == parent.road_name
-                        && (previous.end_ref.as_ref().is_some_and(|reference| {
-                            candidate.start_ref.as_ref() == Some(reference)
-                        }) || candidate.start == previous.end)
-                })
-                .map(|(index, _)| index);
-            let Some(next) = next else { break };
-            if profiles[next]
-                .through
-                .iter()
-                .any(|existing| existing.element_index == effect.element_index)
-            {
-                break;
-            }
-            profiles[next]
-                .through
-                .push(ThroughEffect { depth, ..effect });
-            current = next;
-        }
+        let side = if ramp_road.elements == parent_road.elements[split.element_index..] {
+            Some(map::ExitSide::Right)
+        } else if ramp_road.elements == parent_road.elements[..=split.element_index] {
+            Some(map::ExitSide::Left)
+        } else {
+            None
+        };
+        profiles[ramp_index].branch_alignment = side.map(|side| (side, selected.kind));
     }
     profiles
-}
-
-fn smooth_fraction(value: f32) -> f32 {
-    let value = value.clamp(0.0, 1.0);
-    value * value * (3.0 - 2.0 * value)
 }
 
 fn screen_normal_at(segment: &map::Segment, t: f32) -> egui::Vec2 {
@@ -2473,39 +2879,23 @@ fn section_widths(
     profile: &PaintProfile,
     t: f32,
 ) -> (Vec<f32>, f32) {
-    let original: Vec<_> = road
+    let widths: Vec<_> = road
         .elements
         .iter()
         .map(|element| map_element_width(element.kind, zoom))
         .collect();
-    let mut widths = original.clone();
-    let mut left_shift = 0.0;
-    for effect in &profile.through {
-        let progress = match effect.depth {
-            0 => (t - effect.split_t) / 0.25,
-            1 => (1.0 - effect.split_t + t) / 0.25,
-            _ => 1.0,
-        };
-        if let Some(width) = widths.get_mut(effect.element_index) {
-            let removed = *width * smooth_fraction(progress);
-            *width -= removed;
-            if effect.left_side {
-                left_shift += removed;
+    let total: f32 = widths.iter().sum();
+    let start_offset = profile
+        .branch_alignment
+        .map(|(side, selected)| {
+            let delta = (total - map_element_width(selected, zoom)) / 2.0;
+            match side {
+                map::ExitSide::Right => delta,
+                map::ExitSide::Left => -delta,
             }
-        }
-    }
-    if let Some(ramp) = profile.ramp {
-        let growth = smooth_fraction(t / 0.25);
-        for (index, width) in widths.iter_mut().enumerate() {
-            if index != ramp.element_index || ramp.mode == map::SplitMode::KeepLane {
-                *width *= growth;
-            }
-        }
-        let active: f32 = widths.iter().sum();
-        return (widths, -active / 2.0);
-    }
-    let total: f32 = original.iter().sum();
-    (widths, -total / 2.0 + left_shift)
+        })
+        .unwrap_or(0.0);
+    (widths, -total / 2.0 + start_offset * (1.0 - t).powi(2))
 }
 
 fn paint_profiled_road(
@@ -2820,6 +3210,7 @@ fn kind_label(kind: RoadElementKind) -> &'static str {
         RoadElementKind::Middle => "Median",
         RoadElementKind::Shoulder => "Shoulder",
         RoadElementKind::Verge => "Verge",
+        RoadElementKind::Barrier => "Divider wall",
     }
 }
 
@@ -2835,6 +3226,7 @@ fn kind_short(kind: RoadElementKind) -> &'static str {
         RoadElementKind::Middle => "MID",
         RoadElementKind::Shoulder => "SHLD",
         RoadElementKind::Verge => "VERGE",
+        RoadElementKind::Barrier => "WALL",
     }
 }
 
@@ -2851,6 +3243,7 @@ fn kind_color(kind: RoadElementKind, theme: egui::Theme) -> Color32 {
             RoadElementKind::Middle => Color32::from_rgb(106, 94, 65),
             RoadElementKind::Shoulder => Color32::from_rgb(93, 103, 102),
             RoadElementKind::Verge => Color32::from_rgb(71, 115, 77),
+            RoadElementKind::Barrier => Color32::from_rgb(165, 170, 162),
         },
         egui::Theme::Light => match kind {
             RoadElementKind::BuildingEdge => Color32::from_rgb(190, 198, 205),
@@ -2863,6 +3256,7 @@ fn kind_color(kind: RoadElementKind, theme: egui::Theme) -> Color32 {
             RoadElementKind::Middle => Color32::from_rgb(204, 191, 148),
             RoadElementKind::Shoulder => Color32::from_rgb(182, 196, 195),
             RoadElementKind::Verge => Color32::from_rgb(158, 200, 160),
+            RoadElementKind::Barrier => Color32::from_rgb(107, 115, 112),
         },
     }
 }
@@ -2879,6 +3273,7 @@ fn element_width(kind: RoadElementKind) -> f32 {
         RoadElementKind::Middle => 78.0,
         RoadElementKind::Shoulder => 76.0,
         RoadElementKind::Verge => 86.0,
+        RoadElementKind::Barrier => 30.0,
     }
 }
 
@@ -2986,6 +3381,8 @@ mod tests {
             selected_road: Some(0),
             selected_element: None,
             selected_segment: None,
+            selected_endpoint: None,
+            lane_end_choice: None,
             segment_name_draft: String::new(),
             road_name_draft: "normal_road".into(),
             new_kind: RoadElementKind::BikeLane,
@@ -2995,10 +3392,10 @@ mod tests {
             map_start_ref: None,
             branch_element: usize::MAX,
             branch_t: 0.75,
-            branch_road_name: "exit_ramp".into(),
             branch_mode: map::SplitMode::Dedicated,
             map_pan: egui::Vec2::ZERO,
             map_zoom: 100.0,
+            fit_scene_once: false,
             dragging_endpoint: None,
             dragging_control: None,
             dragging_background: false,
@@ -3039,6 +3436,161 @@ mod tests {
         assert!(program.statements.len() >= 12);
         assert_eq!(categories.len(), 3);
         assert_eq!(parse(&program.to_road_source()).unwrap(), program);
+    }
+
+    #[test]
+    fn starter_map_has_a_closed_beltway_grid_interchanges_and_country_route() {
+        let program = starter_program();
+        let projection = map::project(&program);
+        assert_eq!(projection.unresolved, 0);
+        assert_eq!(projection.segments.len(), 42);
+        let named = |name: &str| {
+            projection
+                .segments
+                .iter()
+                .find(|segment| segment.name.as_deref() == Some(name))
+                .unwrap()
+        };
+        assert_eq!(named("beltway_10").end_ref, named("beltway_01").start_ref);
+        assert_eq!(named("market_02").end_ref, named("civic_02").end_ref);
+        assert_eq!(named("civic_02").end_ref, named("civic_03").start_ref);
+        assert_eq!(
+            named("county_exit_ramp").end_ref,
+            named("county_bend").start_ref
+        );
+        assert_eq!(
+            named("county_bend").end_ref,
+            named("orchard_lane").start_ref
+        );
+        assert_eq!(
+            named("orchard_lane").end_ref,
+            named("orchard_hill").start_ref
+        );
+        let splits = map::lane_splits(&program);
+        assert_eq!(splits.len(), 2);
+        assert!(splits.iter().any(|split| split.parent == "beltway_06"
+            && split.full_ramp.as_deref() == Some("city_exit_ramp")));
+        assert!(splits.iter().any(|split| split.parent == "beltway_07"
+            && split.full_ramp.as_deref() == Some("county_exit_ramp")));
+        let country_bend = named("county_bend");
+        let first = country_bend.controls[0];
+        let start = country_bend.start;
+        let end = country_bend.end;
+        let cross =
+            (first.x - start.x) * (end.y - start.y) - (first.y - start.y) * (end.x - start.x);
+        assert!(cross.abs() > 0.05);
+        assert_eq!(parse(&program.to_road_source()).unwrap(), program);
+    }
+
+    #[test]
+    fn exit_carries_sidewalk_without_shrinking_any_band() {
+        let mut program =
+            parse("road boulevard: middle-carlane-carlane-sidewalk-verge; end;").unwrap();
+        let road = match &program.statements[0] {
+            Statement::Road(road) => road.clone(),
+            _ => unreachable!(),
+        };
+        let parent = map::append(
+            &mut program,
+            &road,
+            WorldPoint { x: 0.0, y: 0.0 },
+            WorldPoint { x: 4.0, y: 0.0 },
+        );
+        let (attachment, start) =
+            map::create_lane_point(&mut program, SegmentSource::TopLevel(parent), 2, 0.5).unwrap();
+        let exit = map::append_exit(
+            &mut program,
+            &road,
+            map::SplitMode::Dedicated,
+            start,
+            &attachment,
+            WorldPoint { x: 5.0, y: -1.5 },
+            None,
+        )
+        .unwrap();
+        assert!(map::create_two_segment_split(
+            &mut program,
+            &attachment,
+            exit.entry,
+            exit.full,
+            map::SplitMode::Dedicated,
+        ));
+        let projection = map::project(&program);
+        let profiles = paint_profiles(&program, &projection);
+        let entry_index = projection
+            .segments
+            .iter()
+            .position(|segment| segment.source == exit.entry)
+            .unwrap();
+        let through = projection
+            .segments
+            .iter()
+            .find(|segment| Some(segment.source) == exit.through)
+            .unwrap();
+        let entry_road = road_for_segment(&program, &projection.segments[entry_index]).unwrap();
+        let through_road = road_for_segment(&program, through).unwrap();
+        assert_eq!(entry_road.elements, road.elements[2..]);
+        assert_eq!(
+            through_road
+                .elements
+                .iter()
+                .map(|element| element.kind)
+                .collect::<Vec<_>>(),
+            vec![
+                RoadElementKind::Middle,
+                RoadElementKind::CarLane,
+                RoadElementKind::Barrier
+            ]
+        );
+        let (start_widths, _) = section_widths(entry_road, 100.0, &profiles[entry_index], 0.0);
+        let (end_widths, _) = section_widths(entry_road, 100.0, &profiles[entry_index], 1.0);
+        assert_eq!(start_widths, end_widths);
+        assert!(start_widths.iter().all(|width| *width > 0.0));
+        let parent_segment = projection
+            .segments
+            .iter()
+            .find(|segment| segment.source == SegmentSource::TopLevel(parent))
+            .unwrap();
+        let rect = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(800.0, 600.0));
+        let zoom = 100.0;
+        let parent_normal = screen_normal_at(parent_segment, 1.0);
+        let parent_center = screen_of(rect, egui::Vec2::ZERO, zoom, parent_segment.end);
+        let parent_widths: Vec<_> = road
+            .elements
+            .iter()
+            .map(|element| map_element_width(element.kind, zoom))
+            .collect();
+        let parent_left = parent_center - parent_normal * (parent_widths.iter().sum::<f32>() / 2.0);
+        let entry_segment = &projection.segments[entry_index];
+        let entry_center = screen_of(rect, egui::Vec2::ZERO, zoom, entry_segment.start);
+        let (_, entry_offset) = section_widths(entry_road, zoom, &profiles[entry_index], 0.0);
+        let entry_left = entry_center + screen_normal_at(entry_segment, 0.0) * entry_offset;
+        let expected_entry_left =
+            parent_left + parent_normal * parent_widths[..2].iter().sum::<f32>();
+        assert!(entry_left.distance(expected_entry_left) < 0.01);
+        let through_center = screen_of(rect, egui::Vec2::ZERO, zoom, through.start);
+        let through_width: f32 = through_road
+            .elements
+            .iter()
+            .map(|element| map_element_width(element.kind, zoom))
+            .sum();
+        let through_left = through_center - screen_normal_at(through, 0.0) * (through_width / 2.0);
+        assert!(through_left.distance(parent_left) < 0.01);
+        assert_eq!(parse(&program.to_road_source()).unwrap(), program);
+    }
+
+    #[test]
+    fn file_new_clears_the_demo_and_keeps_the_road_library() {
+        let mut editor = sample_editor();
+        editor.program = starter_program();
+        editor.selected_endpoint = Some((map::project(&editor.program).segments[0].source, true));
+        editor.dirty = true;
+        editor.new_document();
+        assert!(map::project(&editor.program).segments.is_empty());
+        assert_eq!(editor.program, default_program());
+        assert!(matches!(editor.map_tool, MapTool::Draw));
+        assert!(editor.selected_endpoint.is_none());
+        assert!(!editor.dirty);
     }
 
     #[test]
@@ -3153,85 +3705,6 @@ mod tests {
         let pointer = screen_of(rect, egui::Vec2::ZERO, 420.0, target.position);
         let picked = element_end_near(&candidates, rect, egui::Vec2::ZERO, 420.0, pointer).unwrap();
         assert_eq!((picked.element_index, picked.t), (3, 1.0));
-    }
-
-    #[test]
-    fn dedicated_exit_removes_through_lane_and_keep_lane_preserves_it() {
-        for mode in [map::SplitMode::Dedicated, map::SplitMode::KeepLane] {
-            let mut program = parse("road highway: verge-carlane-middle-carlane-verge; end; road ramp: shoulder-carlane-shoulder; end;").unwrap();
-            let parent_road = match &program.statements[0] {
-                Statement::Road(road) => road.clone(),
-                _ => unreachable!(),
-            };
-            let ramp_road = match &program.statements[1] {
-                Statement::Road(road) => road.clone(),
-                _ => unreachable!(),
-            };
-            let (parent, through_junction) = map::append_connected(
-                &mut program,
-                &parent_road,
-                WorldPoint { x: 0.0, y: 0.0 },
-                None,
-                WorldPoint { x: 4.0, y: 0.0 },
-                None,
-            );
-            let (attachment, position) =
-                map::create_lane_point(&mut program, SegmentSource::TopLevel(parent), 3, 1.0)
-                    .unwrap();
-            let (ramp, _) = map::append_connected(
-                &mut program,
-                &ramp_road,
-                position,
-                Some(&attachment),
-                WorldPoint { x: 6.0, y: -2.0 },
-                None,
-            );
-            assert_eq!(
-                map::lane_splits(&program)[0].mode,
-                map::SplitMode::Dedicated
-            );
-            assert!(map::create_lane_split(
-                &mut program,
-                &attachment,
-                SegmentSource::TopLevel(ramp),
-                mode
-            ));
-            let (through, _) = map::append_connected(
-                &mut program,
-                &parent_road,
-                WorldPoint { x: 4.0, y: 0.0 },
-                Some(&through_junction),
-                WorldPoint { x: 8.0, y: 0.0 },
-                None,
-            );
-            let projection = map::project(&program);
-            let profiles = paint_profiles(&program, &projection);
-            let through_index = projection
-                .segments
-                .iter()
-                .position(|segment| segment.source == SegmentSource::TopLevel(through))
-                .unwrap();
-            let ramp_index = projection
-                .segments
-                .iter()
-                .position(|segment| segment.source == SegmentSource::TopLevel(ramp))
-                .unwrap();
-            let through_widths =
-                section_widths(&parent_road, 100.0, &profiles[through_index], 0.5).0;
-            let ramp_start = section_widths(&ramp_road, 100.0, &profiles[ramp_index], 0.0).0;
-            assert!(ramp_start[0] < 0.001 && ramp_start[2] < 0.001);
-            if mode == map::SplitMode::Dedicated {
-                assert!(through_widths[3] < 0.001);
-                assert!(ramp_start[1] > 4.0);
-            } else {
-                assert!(through_widths[3] > 4.0);
-                assert!(ramp_start[1] < 0.001);
-            }
-            assert_eq!(map::lane_splits(&program).len(), 1);
-            assert_eq!(parse(&program.to_road_source()).unwrap(), program);
-            assert!(map::remove(&mut program, SegmentSource::TopLevel(ramp)));
-            assert!(map::lane_splits(&program).is_empty());
-        }
     }
 
     #[test]
