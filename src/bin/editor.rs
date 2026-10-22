@@ -1,4 +1,4 @@
-use std::{collections::HashMap, path::PathBuf};
+use std::{collections::HashMap, path::PathBuf, sync::Arc};
 
 use eframe::egui::{self, Color32, RichText};
 use opencity::{
@@ -6,10 +6,14 @@ use opencity::{
     LandscapeKind, Program, RoadDefinition, RoadElement, RoadElementKind, Statement,
 };
 
+#[path = "editor/glb.rs"]
+mod glb;
 #[path = "editor/map.rs"]
 mod map;
 #[path = "editor/mcp.rs"]
 mod mcp;
+#[path = "editor/scene3d.rs"]
+mod scene3d;
 use map::{SegmentSource, WorldPoint};
 
 const KINDS: [RoadElementKind; 13] = [
@@ -134,6 +138,14 @@ struct CopiedSegment {
     end_z: f32,
 }
 
+struct SceneCache {
+    program: Program,
+    theme: egui::Theme,
+    selected: Vec<SegmentSource>,
+    selected_landscape: Option<String>,
+    scene: Arc<scene3d::Scene>,
+}
+
 fn landscape_label(kind: LandscapeKind) -> &'static str {
     match kind {
         LandscapeKind::Land => "Land boundary",
@@ -232,6 +244,26 @@ enum PendingAction {
     Open,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum IsoPrimaryDrag {
+    Orbit,
+    Pan,
+    Box,
+    Edit,
+}
+
+fn iso_primary_drag(modifiers: egui::Modifiers, b_down: bool) -> IsoPrimaryDrag {
+    if modifiers.ctrl {
+        IsoPrimaryDrag::Orbit
+    } else if modifiers.shift {
+        IsoPrimaryDrag::Pan
+    } else if modifiers.alt || b_down {
+        IsoPrimaryDrag::Box
+    } else {
+        IsoPrimaryDrag::Edit
+    }
+}
+
 struct RoadEditor {
     program: Program,
     saved_program: Program,
@@ -254,11 +286,17 @@ struct RoadEditor {
     view: View,
     map_tool: MapTool,
     camera_view: CameraView,
+    render_format: eframe::wgpu::TextureFormat,
+    scene_cache: Option<SceneCache>,
+    top_camera: (egui::Vec2, f32),
+    iso_camera: (egui::Vec2, f32),
     orbit_angle: f32,
     orbit_target: WorldPoint,
     selected_segments: Vec<SegmentSource>,
     clipboard: Vec<CopiedSegment>,
     box_start: Option<egui::Pos2>,
+    iso_drag_pan: bool,
+    iso_drag_orbit: bool,
     map_start: Option<WorldPoint>,
     map_start_ref: Option<String>,
     landscape_points: Vec<WorldPoint>,
@@ -284,6 +322,223 @@ struct RoadEditor {
 }
 
 impl RoadEditor {
+    fn scene_geometry(&mut self, palette: EditorPalette) -> Arc<scene3d::Scene> {
+        let mut selected = self.selected_segments.clone();
+        if let Some(source) = self.selected_segment {
+            if !selected.contains(&source) {
+                selected.push(source);
+            }
+        }
+        if let Some(cache) = &self.scene_cache {
+            if cache.program == self.program
+                && cache.theme == palette.theme
+                && cache.selected == selected
+                && cache.selected_landscape == self.selected_landscape
+            {
+                return Arc::clone(&cache.scene);
+            }
+        }
+        let projection = map::project(&self.program);
+        let scene = Arc::new(scene3d::build_scene(
+            &self.program,
+            &projection,
+            palette,
+            &selected,
+            self.selected_landscape.as_deref(),
+        ));
+        self.scene_cache = Some(SceneCache {
+            program: self.program.clone(),
+            theme: palette.theme,
+            selected,
+            selected_landscape: self.selected_landscape.clone(),
+            scene: Arc::clone(&scene),
+        });
+        scene
+    }
+
+    fn set_camera_view(&mut self, view: CameraView) {
+        if self.camera_view == view {
+            return;
+        }
+        match self.camera_view {
+            CameraView::Top => self.top_camera = (self.map_pan, self.map_zoom),
+            CameraView::Isometric => self.iso_camera = (self.map_pan, self.map_zoom),
+        }
+        (self.map_pan, self.map_zoom) = match view {
+            CameraView::Top => self.top_camera,
+            CameraView::Isometric => self.iso_camera,
+        };
+        self.camera_view = view;
+        if view == CameraView::Isometric {
+            self.focus_orbit_on_selection();
+        }
+    }
+
+    fn focus_orbit_on_selection(&mut self) {
+        let projection = map::project(&self.program);
+        if let Some(segment) = projection
+            .segments
+            .iter()
+            .find(|segment| Some(segment.source) == self.selected_segment)
+        {
+            self.orbit_target = segment.point_at(0.5);
+        } else if let Some(intersection) =
+            self.selected_intersection.as_deref().and_then(|reference| {
+                map::intersections(&self.program, &projection)
+                    .into_iter()
+                    .find(|item| item.point_ref == reference)
+            })
+        {
+            self.orbit_target = intersection.position;
+        } else if let Some(feature) = self.selected_landscape.as_ref().and_then(|name| {
+            project_landscape_features(&self.program)
+                .features
+                .into_iter()
+                .find(|feature| feature.name.as_ref() == Some(name))
+        }) {
+            if !feature.points.is_empty() {
+                let (x, y) = feature
+                    .points
+                    .iter()
+                    .fold((0.0, 0.0), |(x, y), point| (x + point[0], y + point[1]));
+                self.orbit_target = WorldPoint {
+                    x: x / feature.points.len() as f32,
+                    y: y / feature.points.len() as f32,
+                };
+            }
+        } else if let Some(instance) = self.selected_block_instance {
+            let segments: Vec<_> = projection
+                .segments
+                .iter()
+                .filter(|segment| {
+                    matches!(segment.source,
+                SegmentSource::BlockInstance { instance: index, .. } if index == instance)
+                })
+                .collect();
+            if !segments.is_empty() {
+                let (x, y) = segments.iter().fold((0.0, 0.0), |(x, y), segment| {
+                    let middle = segment.point_at(0.5);
+                    (x + middle.x, y + middle.y)
+                });
+                self.orbit_target = WorldPoint {
+                    x: x / segments.len() as f32,
+                    y: y / segments.len() as f32,
+                };
+            }
+        }
+    }
+
+    fn copy_selection(&mut self) {
+        let projection = map::project(&self.program);
+        let sources: Vec<_> = if self.selected_segments.is_empty() {
+            self.selected_segment.into_iter().collect()
+        } else {
+            self.selected_segments.clone()
+        };
+        self.clipboard = projection
+            .segments
+            .iter()
+            .filter(|segment| sources.contains(&segment.source))
+            .map(|segment| CopiedSegment {
+                road_name: segment.road_name.clone(),
+                name: segment.name.clone(),
+                points: [
+                    segment.start,
+                    segment.controls[0],
+                    segment.controls[1],
+                    segment.end,
+                ],
+                start_z: segment.start_z,
+                end_z: segment.end_z,
+            })
+            .collect();
+        self.status = format!("Copied {} segment(s)", self.clipboard.len());
+    }
+
+    fn paste_selection(&mut self) {
+        let mut pasted = Vec::new();
+        for segment in self.clipboard.clone() {
+            let Some(road) = self
+                .program
+                .statements
+                .iter()
+                .find_map(|statement| match statement {
+                    Statement::Road(road) if road.name == segment.road_name => Some(road.clone()),
+                    _ => None,
+                })
+            else {
+                continue;
+            };
+            let [start, first, second, end] = segment.points.map(|point| WorldPoint {
+                x: point.x + 1.0,
+                y: point.y - 1.0,
+            });
+            let index = map::append_curve(&mut self.program, &road, start, first, second, end);
+            let source = SegmentSource::TopLevel(index);
+            if let Some(name) = segment.name {
+                map::set_name(&mut self.program, source, format!("{name}_copy"));
+            }
+            if let Some(name) = map::project(&self.program)
+                .segments
+                .iter()
+                .find(|item| item.source == source)
+                .and_then(|item| item.name.clone())
+            {
+                set_grade(&mut self.program, &name, segment.start_z, segment.end_z);
+            }
+            pasted.push(source);
+        }
+        if let Some(source) = pasted.last().copied() {
+            self.selected_segment = Some(source);
+            self.focus_orbit_on_selection();
+        }
+        self.selected_segments = pasted;
+        if !self.selected_segments.is_empty() {
+            self.dirty = true;
+        }
+        self.status = format!("Pasted {} segment(s)", self.selected_segments.len());
+    }
+
+    fn delete_selected_segments(&mut self) -> usize {
+        let sources = if self.selected_segments.is_empty() {
+            self.selected_segment.into_iter().collect::<Vec<_>>()
+        } else {
+            self.selected_segments.clone()
+        };
+        let calls: Vec<_> = sources
+            .into_iter()
+            .filter_map(|source| match source {
+                SegmentSource::TopLevel(index) => match self.program.statements.get(index) {
+                    Some(Statement::Call(call)) => Some(call.clone()),
+                    _ => None,
+                },
+                SegmentSource::BlockInstance { .. } => None,
+            })
+            .collect();
+        let mut removed = 0;
+        for call in calls {
+            let index = self.program.statements.iter().position(|statement| {
+                matches!(statement,
+                Statement::Call(current) if current == &call)
+            });
+            if let Some(index) = index {
+                if map::remove(&mut self.program, SegmentSource::TopLevel(index)) {
+                    removed += 1;
+                }
+            }
+        }
+        if removed > 0 {
+            self.selected_segment = None;
+            self.selected_segments.clear();
+            self.selected_endpoint = None;
+            self.lane_end_choice = None;
+            self.segment_name_draft.clear();
+            self.dirty = true;
+            self.status = format!("Removed {removed} road placement(s)");
+        }
+        removed
+    }
+
     fn new(cc: &eframe::CreationContext<'_>, open_path: Option<PathBuf>) -> Self {
         egui_extras::install_image_loaders(&cc.egui_ctx);
         cc.egui_ctx
@@ -313,11 +568,21 @@ impl RoadEditor {
             view: View::Map,
             map_tool: MapTool::Select,
             camera_view: CameraView::Top,
+            render_format: cc
+                .wgpu_render_state
+                .as_ref()
+                .map(|state| state.target_format)
+                .unwrap_or(eframe::wgpu::TextureFormat::Bgra8Unorm),
+            scene_cache: None,
+            top_camera: (egui::Vec2::ZERO, 75.0),
+            iso_camera: (egui::Vec2::ZERO, 55.0),
             orbit_angle: std::f32::consts::FRAC_PI_4,
             orbit_target: WorldPoint { x: 0.0, y: 0.0 },
             selected_segments: Vec::new(),
             clipboard: Vec::new(),
             box_start: None,
+            iso_drag_pan: false,
+            iso_drag_orbit: false,
             map_start: None,
             map_start_ref: None,
             landscape_points: Vec::new(),
@@ -333,9 +598,7 @@ impl RoadEditor {
             dragging_intersection: None,
             dragging_background: false,
             show_source: false,
-            status:
-                "Explore the little city and its winding lanes | File > New starts a blank map."
-                    .into(),
+            status: String::new(),
             pending: None,
             confirm_delete_road: false,
             #[cfg(target_os = "macos")]
@@ -457,7 +720,7 @@ impl RoadEditor {
         self.selected_endpoint = None;
         self.selected_intersection = Some(reference.clone());
         self.dirty = true;
-        self.status = "Intersection placed | click an edge port to draw a road".into();
+        self.status = "Intersection placed".into();
         Some(reference)
     }
 
@@ -534,6 +797,10 @@ impl RoadEditor {
             };
             destination.push(current);
             self.selected_segment = None;
+            self.selected_segments.clear();
+            self.box_start = None;
+            self.iso_drag_pan = false;
+            self.iso_drag_orbit = false;
             self.selected_intersection = None;
             self.selected_endpoint = None;
             self.lane_end_choice = None;
@@ -598,8 +865,7 @@ impl RoadEditor {
         self.map_start_ref = Some(reference);
         self.selected_endpoint = None;
         self.dirty = true;
-        self.status =
-            "Continuing road | click another road end to join, or click the map to extend".into();
+        self.status = "Extending road".into();
         true
     }
 
@@ -634,7 +900,7 @@ impl RoadEditor {
         self.map_start_ref = Some(reference);
         self.selected_endpoint = None;
         self.dirty = true;
-        self.status = "Branch started | click an endpoint to place the exit or merge".into();
+        self.status = "Branch started".into();
         true
     }
 
@@ -893,6 +1159,10 @@ impl RoadEditor {
                     .position(|statement| matches!(statement, Statement::Road(_)));
                 self.selected_element = None;
                 self.selected_segment = None;
+                self.selected_segments.clear();
+                self.box_start = None;
+                self.iso_drag_pan = false;
+                self.iso_drag_orbit = false;
                 self.selected_intersection = None;
                 self.selected_endpoint = None;
                 self.lane_end_choice = None;
@@ -916,6 +1186,11 @@ impl RoadEditor {
                 self.redo_stack.clear();
                 self.skip_history = true;
                 self.fit_scene_once = true;
+                self.camera_view = CameraView::Top;
+                self.top_camera = (egui::Vec2::ZERO, 75.0);
+                self.iso_camera = (egui::Vec2::ZERO, 55.0);
+                self.map_pan = egui::Vec2::ZERO;
+                self.map_zoom = 75.0;
                 self.path = Some(path.clone());
                 self.dirty = false;
                 self.confirm_delete_road = false;
@@ -973,6 +1248,10 @@ impl RoadEditor {
         self.selected_road = Some(0);
         self.selected_element = None;
         self.selected_segment = None;
+        self.selected_segments.clear();
+        self.box_start = None;
+        self.iso_drag_pan = false;
+        self.iso_drag_orbit = false;
         self.selected_intersection = None;
         self.selected_endpoint = None;
         self.lane_end_choice = None;
@@ -980,6 +1259,9 @@ impl RoadEditor {
         self.road_name_draft = "neighborhood_street".into();
         self.view = View::Map;
         self.map_tool = MapTool::Draw;
+        self.camera_view = CameraView::Top;
+        self.top_camera = (egui::Vec2::ZERO, 100.0);
+        self.iso_camera = (egui::Vec2::ZERO, 55.0);
         self.map_start = None;
         self.map_start_ref = None;
         self.branch_element = usize::MAX;
@@ -1023,6 +1305,26 @@ impl RoadEditor {
         }
     }
 
+    fn export_glb(&mut self) {
+        let bytes = glb::export(&self.program);
+        if bytes.is_empty() {
+            self.status = "Nothing to export: place a road or landscape feature first".into();
+            return;
+        }
+        let mut dialog = rfd::FileDialog::new()
+            .add_filter("glTF binary", &["glb"])
+            .set_file_name("opencity.glb");
+        if let Some(parent) = self.path.as_ref().and_then(|path| path.parent()) {
+            dialog = dialog.set_directory(parent);
+        }
+        if let Some(path) = dialog.save_file() {
+            match std::fs::write(&path, bytes) {
+                Ok(()) => self.status = format!("Exported {}", path.display()),
+                Err(error) => self.status = format!("GLB export failed: {error}"),
+            }
+        }
+    }
+
     fn file_menu(&mut self, ui: &mut egui::Ui) {
         ui.menu_button("File", |ui| {
             for (label, action) in [
@@ -1035,6 +1337,11 @@ impl RoadEditor {
                     self.file_action(action);
                     ui.close();
                 }
+            }
+            ui.separator();
+            if ui.button("Export 3D scene as GLB…").clicked() {
+                self.export_glb();
+                ui.close();
             }
         });
     }
@@ -1064,6 +1371,24 @@ impl RoadEditor {
                         .clicked()
                     {
                         self.restore_history(false);
+                    }
+                    if self.view == View::Map {
+                        if ui
+                            .add_enabled(
+                                self.selected_segment.is_some()
+                                    || !self.selected_segments.is_empty(),
+                                egui::Button::new("Copy"),
+                            )
+                            .clicked()
+                        {
+                            self.copy_selection();
+                        }
+                        if ui
+                            .add_enabled(!self.clipboard.is_empty(), egui::Button::new("Paste"))
+                            .clicked()
+                        {
+                            self.paste_selection();
+                        }
                     }
                     ui.separator();
                     ui.menu_button("Theme", |ui| {
@@ -1102,6 +1427,22 @@ impl RoadEditor {
                     ui.separator();
                     if self.view == View::Map {
                         if ui
+                            .selectable_label(self.camera_view == CameraView::Top, "Top")
+                            .clicked()
+                        {
+                            self.set_camera_view(CameraView::Top);
+                        }
+                        if ui
+                            .selectable_label(
+                                self.camera_view == CameraView::Isometric,
+                                "Isometric",
+                            )
+                            .clicked()
+                        {
+                            self.set_camera_view(CameraView::Isometric);
+                        }
+                        ui.separator();
+                        if ui
                             .selectable_value(&mut self.map_tool, MapTool::Select, "Select")
                             .clicked()
                         {
@@ -1120,6 +1461,17 @@ impl RoadEditor {
                             .clicked()
                         {
                             self.map_tool = MapTool::Draw;
+                            self.map_start = None;
+                            self.map_start_ref = None;
+                        }
+                        let draft_enabled = self.road().is_some();
+                        let draft_clicked = ui
+                            .add_enabled_ui(draft_enabled, |ui| {
+                                ui.selectable_value(&mut self.map_tool, MapTool::Draft, "Draft pen")
+                            })
+                            .inner
+                            .clicked();
+                        if draft_clicked {
                             self.map_start = None;
                             self.map_start_ref = None;
                         }
@@ -1171,15 +1523,6 @@ impl RoadEditor {
                             .small()
                             .strong()
                             .color(ui.visuals().weak_text_color()),
-                    );
-                    ui.label(
-                        RichText::new(if self.view == View::Map {
-                            "Choose a type to draw"
-                        } else {
-                            "Choose a type to edit"
-                        })
-                        .small()
-                        .color(ui.visuals().weak_text_color()),
                     );
                     let mut chosen = None;
                     for category in [
@@ -1264,10 +1607,7 @@ impl RoadEditor {
                                         left += width;
                                     }
                                 }
-                                ui.label(format!(
-                                    "{} elements | shared cross section",
-                                    road.elements.len()
-                                ));
+                                ui.label(format!("{} elements", road.elements.len()));
                             });
                         }
                     }
@@ -1344,17 +1684,13 @@ impl RoadEditor {
                                     .strong()
                                     .color(ui.visuals().weak_text_color()),
                             );
-                            ui.label(
-                                RichText::new("Place at the viewport center")
-                                    .small()
-                                    .color(ui.visuals().weak_text_color()),
-                            );
                             for (name, count) in &blocks {
                                 if ui.button(format!("+ {name} ({count} parts)")).clicked() {
                                     self.place_block(name);
                                 }
                             }
                             ui.add_space(8.0);
+                            let mut focus_block = false;
                             for (index, statement) in self.program.statements.iter().enumerate() {
                                 let Statement::Call(call) = statement else {
                                     continue;
@@ -1376,10 +1712,15 @@ impl RoadEditor {
                                 {
                                     self.selected_block_instance = Some(index);
                                     self.selected_segment = None;
+                                    self.selected_segments.clear();
                                     self.selected_landscape = None;
                                     self.selected_intersection = None;
                                     self.map_tool = MapTool::Select;
+                                    focus_block = true;
                                 }
+                            }
+                            if focus_block {
+                                self.focus_orbit_on_selection();
                             }
                             ui.add_space(8.0);
                         }
@@ -1387,11 +1728,6 @@ impl RoadEditor {
                             RichText::new("TERRAIN & WATER")
                                 .small()
                                 .strong()
-                                .color(ui.visuals().weak_text_color()),
-                        );
-                        ui.label(
-                            RichText::new("Click points on the map; Enter finishes, Esc cancels")
-                                .small()
                                 .color(ui.visuals().weak_text_color()),
                         );
                         for kind in [
@@ -1418,57 +1754,17 @@ impl RoadEditor {
                                 self.selected_landscape = Some(name.clone());
                                 self.selected_block_instance = None;
                                 self.selected_segment = None;
+                                self.selected_segments.clear();
                                 self.selected_block_instance = None;
                                 self.selected_intersection = None;
                                 self.map_tool = MapTool::Select;
                                 self.landscape_points.clear();
+                                self.focus_orbit_on_selection();
                             }
                         }
                         let projection = map::project(&self.program);
                         ui.add_space(18.0);
                         ui.separator();
-                        ui.label(
-                            RichText::new(format!(
-                                "PLACED SEGMENTS | {}",
-                                projection.segments.len()
-                            ))
-                            .small()
-                            .strong()
-                            .color(ui.visuals().weak_text_color()),
-                        );
-                        if projection.segments.is_empty() {
-                            ui.label(
-                                RichText::new("The map is empty. Pick a type above.")
-                                    .small()
-                                    .color(ui.visuals().weak_text_color()),
-                            );
-                        }
-                        for (number, segment) in projection.segments.iter().enumerate() {
-                            let label = format!(
-                                "{}  {} | {}",
-                                number + 1,
-                                segment.name.as_deref().unwrap_or("Unnamed road"),
-                                preset_label(&segment.road_name)
-                            );
-                            if ui
-                                .selectable_label(
-                                    self.selected_segment == Some(segment.source),
-                                    label,
-                                )
-                                .clicked()
-                            {
-                                if self.selected_segment != Some(segment.source) {
-                                    self.branch_element = usize::MAX;
-                                }
-                                self.selected_segment = Some(segment.source);
-                                self.selected_endpoint = None;
-                                self.lane_end_choice = None;
-                                self.segment_name_draft = segment.name.clone().unwrap_or_default();
-                                self.map_tool = MapTool::Select;
-                                self.map_start = None;
-                                self.map_start_ref = None;
-                            }
-                        }
                         if projection.unresolved > 0 {
                             ui.colored_label(
                                 editor_palette(ui.ctx().theme()).warning,
@@ -1732,13 +2028,6 @@ impl RoadEditor {
                 }
             }
         });
-        ui.label(
-            RichText::new(
-                "Elevation is relative to the ground plane; negative values are below it.",
-            )
-            .small()
-            .color(ui.visuals().weak_text_color()),
-        );
         ui.horizontal(|ui| {
             if ui.button("Duplicate").clicked() {
                 let new_name = self.unused_placement_name(&call.name);
@@ -1882,7 +2171,6 @@ impl RoadEditor {
                 "{connected} of {} ports connected",
                 intersection.ports.len()
             ));
-            ui.label("Drag the intersection to move it. Click a port to draw a road.");
             if !intersection.ports.is_empty()
                 && intersection.kind != map::IntersectionKind::FourWay
                 && ui.button("Rotate 90°").clicked()
@@ -1906,8 +2194,6 @@ impl RoadEditor {
                 .find(|segment| segment.source == source)
         });
         let Some(segment) = selected else {
-            ui.label("Select a road on the map, or choose a type from the library to draw.");
-            ui.add_space(14.0);
             if let Some(road) = self.road() {
                 ui.label(
                     RichText::new("READY TO DRAW")
@@ -1916,7 +2202,6 @@ impl RoadEditor {
                         .color(ui.visuals().weak_text_color()),
                 );
                 ui.heading(preset_label(&road.name));
-                ui.label(format!("{} cross-section elements", road.elements.len()));
                 if ui.button("Edit this cross section").clicked() {
                     self.view = View::Section;
                 }
@@ -2004,13 +2289,8 @@ impl RoadEditor {
                 if grade_changed && set_grade(&mut self.program, name, start_z, end_z) {
                     self.dirty = true;
                 }
-                ui.label(
-                    RichText::new("Positive is above the ground plane; negative is below it.")
-                        .small()
-                        .color(ui.visuals().weak_text_color()),
-                );
             } else {
-                ui.label("Name this placement to set its elevation.");
+                ui.label("Name road to edit elevation");
             }
         }
         ui.add_space(8.0);
@@ -2056,8 +2336,6 @@ impl RoadEditor {
                     self.dirty = true;
                 }
             });
-            ui.label(RichText::new("Shift+R rotates the other way. Click another end while extending to join the roads.")
-                .small().color(ui.visuals().weak_text_color()));
             let reference = if is_end {
                 segment.end_ref.as_deref()
             } else {
@@ -2128,9 +2406,9 @@ impl RoadEditor {
                 split.element_index + 1
             ));
             ui.label(if split.mode == map::SplitMode::KeepLane {
-                "Optional branch: the through road retains its cross section."
+                "Optional branch"
             } else {
-                "Dedicated branch: the outer elements belong to this road."
+                "Dedicated branch"
             });
         }
         ui.add_space(8.0);
@@ -2257,11 +2535,6 @@ impl RoadEditor {
                 }
                 ui.add_space(8.0);
             }
-            ui.label(
-                RichText::new("Drag endpoints or curve controls on the map to reshape it. Connected endpoints move together.")
-                    .small()
-                    .color(ui.visuals().weak_text_color()),
-            );
             if let Some(parent_road) =
                 self.program
                     .statements
@@ -2331,8 +2604,6 @@ impl RoadEditor {
                             self.branch_t = 1.0;
                         }
                     });
-                    ui.label(RichText::new("The selected element and every element toward this side continue into the exit. The through road keeps the remaining elements and gains a divider wall.")
-                        .small().color(ui.visuals().weak_text_color()));
                     let mut keep_lane = self.branch_mode == map::SplitMode::KeepLane;
                     if ui
                         .checkbox(&mut keep_lane, "Keep lane on through road")
@@ -2344,15 +2615,6 @@ impl RoadEditor {
                             map::SplitMode::Dedicated
                         };
                     }
-                    ui.label(
-                        RichText::new(if keep_lane {
-                            "The through road keeps its full cross section; the branch copies the outer elements."
-                        } else {
-                            "The outer elements move to the branch; the through road uses the remaining elements."
-                        })
-                        .small()
-                        .color(ui.visuals().weak_text_color()),
-                    );
                     if ui.button("Start branch here").clicked() {
                         self.start_branch(segment.source, self.branch_element, self.branch_t);
                     }
@@ -2372,7 +2634,7 @@ impl RoadEditor {
                 self.status = "Road placement removed".into();
             }
         } else {
-            ui.label("This segment comes from a block instance. Its placement is shown here, but block geometry is not edited on the map.");
+            ui.label("Block geometry is read only");
         }
         ui.add_space(16.0);
         if ui.button("Edit cross section").clicked() {
@@ -2383,23 +2645,578 @@ impl RoadEditor {
         }
     }
 
+    fn isometric_canvas(&mut self, root: &mut egui::Ui) {
+        egui::CentralPanel::default().show(root, |ui| {
+            let (rect, response) = ui.allocate_exact_size(ui.available_size(), egui::Sense::click_and_drag());
+            self.map_rect = Some(rect);
+            let palette = editor_palette(ui.ctx().theme());
+            let projection = map::project(&self.program);
+            if self.fit_scene_once {
+                self.fit_scene_once = false;
+                if !projection.segments.is_empty() {
+                    let (sum_x, sum_y) = projection.segments.iter().fold((0.0, 0.0), |(x, y), segment| {
+                        let middle = segment.point_at(0.5); (x + middle.x, y + middle.y)
+                    });
+                    let count = projection.segments.len() as f32;
+                    self.orbit_target = WorldPoint { x: sum_x / count, y: sum_y / count };
+                    self.map_zoom = 55.0;
+                }
+            }
+            if response.hovered() {
+                let scroll = ui.input(|input| input.smooth_scroll_delta.y);
+                if scroll != 0.0 { self.map_zoom = (self.map_zoom * (1.0 + scroll * 0.002)).clamp(18.0, 420.0); }
+            }
+            if response.dragged_by(egui::PointerButton::Middle) { self.map_pan += response.drag_delta(); }
+            if response.drag_started_by(egui::PointerButton::Primary) {
+                let drag = ui.input(|input| iso_primary_drag(input.modifiers, input.key_down(egui::Key::B)));
+                self.iso_drag_pan = drag == IsoPrimaryDrag::Pan
+                    || (drag == IsoPrimaryDrag::Edit && self.map_tool != MapTool::Select);
+                self.iso_drag_orbit = drag == IsoPrimaryDrag::Orbit;
+                if self.iso_drag_pan || self.iso_drag_orbit {
+                    self.box_start = None;
+                    self.dragging_endpoint = None;
+                    self.dragging_control = None;
+                    self.dragging_intersection = None;
+                }
+            }
+            if response.drag_started_by(egui::PointerButton::Primary)
+                && self.map_tool == MapTool::Select && !self.iso_drag_pan && !self.iso_drag_orbit {
+                let origin = ui.input(|input| input.pointer.press_origin())
+                    .or_else(|| response.interact_pointer_pos());
+                if ui.input(|input| iso_primary_drag(input.modifiers, input.key_down(egui::Key::B)) == IsoPrimaryDrag::Box) {
+                    self.box_start = origin;
+                } else if let Some(origin) = origin.filter(|point| rect.contains(*point)) {
+                    self.dragging_endpoint = iso_endpoint_near(&projection.segments,
+                        &self.program, rect, self.map_pan, self.map_zoom,
+                        self.orbit_target, self.orbit_angle, origin);
+                    self.dragging_control = self.dragging_endpoint.is_none().then(||
+                        iso_control_near(&projection.segments, rect, self.map_pan, self.map_zoom,
+                            self.orbit_target, self.orbit_angle, origin)).flatten();
+                    self.dragging_intersection = if self.dragging_endpoint.is_none()
+                        && self.dragging_control.is_none() {
+                        map::intersections(&self.program, &projection).into_iter()
+                            .filter(|item| !item.ports.is_empty())
+                            .find(|item| origin.distance(iso_screen(rect, self.map_pan,
+                                self.map_zoom, self.orbit_target, self.orbit_angle,
+                                item.position, 0.0)) <= (self.map_zoom * 0.45).max(18.0))
+                            .map(|item| item.point_ref)
+                    } else { None };
+                    if let Some((source, is_end)) = self.dragging_endpoint {
+                        self.selected_segment = Some(source);
+                        self.selected_segments = vec![source];
+                        self.selected_endpoint = Some((source, is_end));
+                        self.selected_intersection = None;
+                    } else if let Some((source, _)) = self.dragging_control {
+                        self.selected_segment = Some(source);
+                        self.selected_segments = vec![source];
+                        self.selected_endpoint = None;
+                        self.selected_intersection = None;
+                    } else if let Some(reference) = self.dragging_intersection.as_ref() {
+                        self.selected_intersection = Some(reference.clone());
+                        self.selected_segment = None;
+                        self.selected_segments.clear();
+                    } else {
+                        self.iso_drag_pan = true;
+                    }
+                }
+            }
+            if response.dragged_by(egui::PointerButton::Primary) && self.iso_drag_pan {
+                self.map_pan += response.drag_delta();
+            }
+            if response.dragged_by(egui::PointerButton::Primary) && self.iso_drag_orbit {
+                self.orbit_angle += response.drag_delta().x * 0.008;
+            }
+            if response.dragged_by(egui::PointerButton::Primary) && !self.iso_drag_pan && !self.iso_drag_orbit
+                && self.box_start.is_none() {
+                if let Some(pointer) = response.interact_pointer_pos() {
+                    if let Some((source, is_end)) = self.dragging_endpoint {
+                        if let Some(segment) = projection.segments.iter().find(|segment| segment.source == source) {
+                            let height = if is_end { segment.end_z } else { segment.start_z };
+                            let point = iso_world_at_height(rect, self.map_pan, self.map_zoom,
+                                self.orbit_target, self.orbit_angle, pointer, height);
+                            let point = if ui.input(|input| input.modifiers.shift) {
+                                grid_point(point)
+                            } else { point };
+                            if map::set_connected_endpoint(&mut self.program, source, is_end, point) {
+                                self.dirty = true;
+                            }
+                        }
+                    } else if let Some((source, second)) = self.dragging_control {
+                        if let Some(segment) = projection.segments.iter().find(|segment| segment.source == source) {
+                            let height = segment.height_at(if second { 2.0 / 3.0 } else { 1.0 / 3.0 });
+                            let point = iso_world_at_height(rect, self.map_pan, self.map_zoom,
+                                self.orbit_target, self.orbit_angle, pointer, height);
+                            let point = if ui.input(|input| input.modifiers.shift) {
+                                grid_point(point)
+                            } else { point };
+                            if map::set_control(&mut self.program, source, second, point) {
+                                self.dirty = true;
+                            }
+                        }
+                    } else if let Some(reference) = self.dragging_intersection.as_deref() {
+                        let previous = pointer - response.drag_delta();
+                        let a = iso_ground_point(rect, self.map_pan, self.map_zoom,
+                            self.orbit_target, self.orbit_angle, previous);
+                        let b = iso_ground_point(rect, self.map_pan, self.map_zoom,
+                            self.orbit_target, self.orbit_angle, pointer);
+                        if map::translate_intersection(&mut self.program, reference,
+                            WorldPoint { x: b.x - a.x, y: b.y - a.y }) {
+                            self.dirty = true;
+                        }
+                    }
+                }
+            }
+            if response.drag_stopped_by(egui::PointerButton::Primary) {
+                self.iso_drag_pan = false;
+                self.iso_drag_orbit = false;
+                if let (Some(start), Some(end)) = (self.box_start.take(), response.interact_pointer_pos()) {
+                    let box_rect = egui::Rect::from_two_pos(start, end);
+                    self.selected_segments = projection.segments.iter().filter(|segment| {
+                        let path: Vec<_> = (0..=64).map(|step| {
+                            let t = step as f32 / 64.0;
+                            iso_screen(rect, self.map_pan, self.map_zoom,
+                                self.orbit_target, self.orbit_angle,
+                                segment.point_at(t), segment.height_at(t))
+                        }).collect();
+                        path.windows(2).any(|pair| line_crosses_rect(pair[0], pair[1], box_rect))
+                    }).map(|segment| segment.source).collect();
+                    self.selected_segment = self.selected_segments.last().copied();
+                    self.focus_orbit_on_selection();
+                    self.status = format!("Selected {} segment(s)", self.selected_segments.len());
+                }
+                if let (Some((source, is_end)), Some(pointer)) =
+                    (self.dragging_endpoint, response.interact_pointer_pos()) {
+                    let current = map::project(&self.program);
+                    let port = map::intersections(&self.program, &current).into_iter()
+                        .flat_map(|intersection| intersection.ports.into_iter()
+                            .map(move |port| (port, intersection.road_name.clone())))
+                        .find(|(port, _)| pointer.distance(iso_screen(rect, self.map_pan,
+                            self.map_zoom, self.orbit_target, self.orbit_angle,
+                            port.position, 0.0)) <= 10.0);
+                    if let Some((port, road_name)) = port {
+                        let matching = current.segments.iter().any(|segment|
+                            segment.source == source && segment.road_name == road_name);
+                        if matching && map::attach_endpoint_to_port(&mut self.program,
+                            source, is_end, &port.point_ref) {
+                            self.dirty = true;
+                            self.status = "Road end connected to intersection port".into();
+                        } else if !matching {
+                            self.status = "This port needs a road with the intersection's cross section".into();
+                        }
+                    }
+                }
+                self.dragging_endpoint = None;
+                self.dragging_control = None;
+                self.dragging_intersection = None;
+            }
+            if let Some(pointer) = response.interact_pointer_pos().filter(|_| response.clicked_by(egui::PointerButton::Primary)) {
+                match self.map_tool {
+                    MapTool::Select => {
+                        let branch_marker = self.selected_segment.and_then(|source| {
+                            let segment = projection.segments.iter().find(|segment| segment.source == source)?;
+                            let road = self.program.statements.iter().find_map(|statement| match statement {
+                                Statement::Road(road) if road.name == segment.road_name => Some(road),
+                                _ => None,
+                            })?;
+                            let point = map::element_position(segment, road, self.branch_element, self.branch_t)?;
+                            let screen = iso_screen(rect, self.map_pan, self.map_zoom,
+                                self.orbit_target, self.orbit_angle, point,
+                                segment.height_at(self.branch_t));
+                            (pointer.distance(screen) <= 10.0)
+                                .then_some((source, self.branch_element, self.branch_t))
+                        });
+                        if let Some((source, element, t)) = branch_marker {
+                            self.start_branch(source, element, t);
+                        } else if let Some((source, is_end)) = iso_endpoint_near(&projection.segments,
+                            &self.program, rect, self.map_pan, self.map_zoom,
+                            self.orbit_target, self.orbit_angle, pointer) {
+                            self.selected_segment = Some(source);
+                            self.selected_segments = vec![source];
+                            self.selected_endpoint = Some((source, is_end));
+                            self.selected_intersection = None;
+                            self.segment_name_draft = projection.segments.iter()
+                                .find(|item| item.source == source)
+                                .and_then(|item| item.name.clone()).unwrap_or_default();
+                            self.status = "Road end selected".into();
+                            self.focus_orbit_on_selection();
+                        } else {
+                        let port = map::intersections(&self.program, &projection).into_iter()
+                            .flat_map(|intersection| intersection.ports.into_iter()
+                                .map(move |port| (port, intersection.road_name.clone())))
+                            .find(|(port, _)| pointer.distance(iso_screen(rect, self.map_pan,
+                                self.map_zoom, self.orbit_target, self.orbit_angle,
+                                port.position, 0.0)) <= 10.0);
+                        if let Some((port, road_name)) = port {
+                            if !map::port_in_use(&projection, &port.point_ref) {
+                                self.selected_road = self.program.statements.iter().position(|statement|
+                                    matches!(statement, Statement::Road(road) if road.name == road_name));
+                                self.road_name_draft = road_name;
+                                self.map_tool = MapTool::Draw;
+                                self.map_start = Some(port.position);
+                                self.map_start_ref = Some(port.point_ref);
+                                self.selected_segment = None;
+                                self.selected_intersection = None;
+                                self.status = "Drawing from port".into();
+                            } else {
+                                self.status = "This intersection port already has a road".into();
+                            }
+                        } else {
+                            let intersection = map::intersections(&self.program, &projection).into_iter()
+                                .filter(|intersection| !intersection.ports.is_empty())
+                                .find(|intersection| pointer.distance(iso_screen(rect, self.map_pan,
+                                    self.map_zoom, self.orbit_target, self.orbit_angle,
+                                    intersection.position, 0.0)) <= (self.map_zoom * 0.45).max(18.0));
+                            if let Some(intersection) = intersection {
+                                self.selected_intersection = Some(intersection.point_ref);
+                                self.selected_segment = None;
+                                self.selected_segments.clear();
+                            } else {
+                                let selected = iso_segment_near(&projection.segments, rect,
+                                    self.map_pan, self.map_zoom, self.orbit_target,
+                                    self.orbit_angle, pointer);
+                                if selected != self.selected_segment {
+                                    self.branch_element = usize::MAX;
+                                }
+                                self.selected_segment = selected;
+                                self.selected_segments = self.selected_segment.into_iter().collect();
+                                self.selected_intersection = None;
+                                self.selected_endpoint = None;
+                                self.lane_end_choice = None;
+                                self.segment_name_draft = projection.segments.iter()
+                                    .find(|segment| Some(segment.source) == selected)
+                                    .and_then(|segment| segment.name.clone()).unwrap_or_default();
+                            }
+                            self.focus_orbit_on_selection();
+                        }
+                        }
+                    }
+                    MapTool::Draft => {
+                        let point = iso_ground_point(rect, self.map_pan, self.map_zoom,
+                            self.orbit_target, self.orbit_angle, pointer);
+                        if let Some(start) = self.map_start {
+                            if start != point {
+                                if let Some(road) = self.road().cloned() {
+                                    let index = map::append(&mut self.program, &road, start, point);
+                                    self.selected_segment = Some(SegmentSource::TopLevel(index));
+                                    self.selected_segments = vec![SegmentSource::TopLevel(index)];
+                                    self.dirty = true;
+                                }
+                            }
+                        }
+                        self.map_start = Some(point);
+                        self.status = "Drawing road".into();
+                    }
+                    MapTool::Draw => {
+                        let free_point = iso_ground_point(rect, self.map_pan, self.map_zoom,
+                            self.orbit_target, self.orbit_angle, pointer);
+                        let target_endpoint = iso_endpoint_near(&projection.segments,
+                            &self.program, rect, self.map_pan, self.map_zoom,
+                            self.orbit_target, self.orbit_angle, pointer);
+                        let element_end = target_endpoint.is_none().then(|| iso_element_end_near(
+                            &element_end_candidates(&projection, &self.program), &projection,
+                            rect, self.map_pan, self.map_zoom, self.orbit_target,
+                            self.orbit_angle, pointer)).flatten();
+                        let port = map::intersections(&self.program, &projection).into_iter()
+                            .flat_map(|intersection| intersection.ports.into_iter()
+                                .map(move |port| (port, intersection.road_name.clone())))
+                            .find(|(port, _)| pointer.distance(iso_screen(rect, self.map_pan,
+                                self.map_zoom, self.orbit_target, self.orbit_angle,
+                                port.position, 0.0)) <= 10.0);
+                        let picked_port = port.as_ref().filter(|(port, road_name)|
+                            !map::port_in_use(&projection, &port.point_ref)
+                            && self.road().is_some_and(|road| road.name == *road_name))
+                            .map(|(port, _)| (port.position, Some(port.point_ref.clone())));
+                        let mut picked = picked_port.or_else(|| target_endpoint.and_then(|(source, is_end)|
+                            map::link_endpoint(&mut self.program, source, is_end)
+                                .map(|(point, reference)| (point, Some(reference)))))
+                            .or_else(|| element_end.map(|candidate| (candidate.position, None)))
+                            .unwrap_or((free_point, None));
+                        if self.map_start != Some(picked.0) {
+                            if let Some(candidate) = element_end {
+                                picked.1 = map::create_lane_point(&mut self.program,
+                                    candidate.source, candidate.element_index, candidate.t)
+                                    .map(|(reference, _)| reference);
+                            }
+                        }
+                        let (point, point_ref) = picked;
+                        if let Some(start) = self.map_start {
+                            if start != point {
+                                if let Some(road) = self.road().cloned() {
+                                    let faces = self.map_start_ref.as_deref().is_none_or(|reference|
+                                        map::port_faces_road(&self.program, reference, point))
+                                        && point_ref.as_deref().is_none_or(|reference|
+                                            map::port_faces_road(&self.program, reference, start));
+                                    if faces {
+                                        let branch_ref = self.map_start_ref.clone();
+                                        let exit = branch_ref.as_deref()
+                                            .filter(|reference| map::anchored_reference(&self.program, reference))
+                                            .and_then(|reference| map::append_exit(&mut self.program,
+                                                &road, self.branch_mode, start, reference, point,
+                                                point_ref.as_deref()));
+                                        let was_exit = exit.is_some();
+                                        let (index, end_ref) = if let Some(exit) = exit {
+                                            map::create_two_segment_split(&mut self.program,
+                                                branch_ref.as_deref().unwrap(), exit.entry,
+                                                exit.full, self.branch_mode);
+                                            let SegmentSource::TopLevel(index) = exit.full else { unreachable!() };
+                                            (index, exit.end_ref)
+                                        } else {
+                                            let result = map::append_connected(&mut self.program,
+                                                &road, start, self.map_start_ref.as_deref(), point,
+                                                point_ref.as_deref());
+                                            if let Some(reference) = branch_ref.as_deref() {
+                                                map::create_lane_split(&mut self.program, reference,
+                                                    SegmentSource::TopLevel(result.0), self.branch_mode);
+                                            }
+                                            result
+                                        };
+                                        self.selected_segment = Some(SegmentSource::TopLevel(index));
+                                        self.selected_segments = vec![SegmentSource::TopLevel(index)];
+                                        if was_exit {
+                                            if let Some(name) = map::project(&self.program).segments.iter()
+                                                .find(|segment| segment.source == SegmentSource::TopLevel(index))
+                                                .map(|segment| segment.road_name.clone()) {
+                                                self.selected_road = self.program.statements.iter().position(|statement|
+                                                    matches!(statement, Statement::Road(road) if road.name == name));
+                                                self.road_name_draft = name;
+                                            }
+                                        }
+                                        self.segment_name_draft = map::project(&self.program).segments.iter()
+                                            .find(|segment| segment.source == SegmentSource::TopLevel(index))
+                                            .and_then(|segment| segment.name.clone()).unwrap_or_default();
+                                        self.map_start = Some(point);
+                                        self.map_start_ref = Some(end_ref);
+                                        self.dirty = true;
+                                        self.status = "Road placed".into();
+                                        if self.map_start_ref.as_deref().is_some_and(|reference|
+                                            map::intersection_port_direction(&self.program, reference).is_some()) {
+                                            self.map_start = None;
+                                            self.map_start_ref = None;
+                                            self.map_tool = MapTool::Select;
+                                            self.status = "Road connected to intersection port".into();
+                                        }
+                                    } else {
+                                        self.status = "Draw away from the intersection face of each port".into();
+                                    }
+                                }
+                            }
+                        } else {
+                            self.map_start = Some(point);
+                            self.map_start_ref = point_ref;
+                        }
+                    }
+                    MapTool::Landscape(_) => {
+                        let point = iso_ground_point(rect, self.map_pan, self.map_zoom,
+                            self.orbit_target, self.orbit_angle, pointer);
+                        self.landscape_points.push(point);
+                        self.status = format!("{} points placed",
+                            self.landscape_points.len());
+                    }
+                }
+            }
+            if ui.input(|input| input.key_pressed(egui::Key::Enter))
+                && matches!(self.map_tool, MapTool::Landscape(_)) {
+                self.finish_landscape();
+            } else if ui.input(|input| input.key_pressed(egui::Key::Escape)
+                || input.key_pressed(egui::Key::Enter)) {
+                if let Some(reference) = self.map_start_ref.as_deref() {
+                    if map::anchored_reference(&self.program, reference) {
+                        map::remove_unused_point(&mut self.program, reference);
+                    }
+                }
+                self.map_start = None;
+                self.map_start_ref = None;
+                self.landscape_points.clear();
+                self.dragging_endpoint = None;
+                self.dragging_control = None;
+                self.dragging_intersection = None;
+                self.map_tool = MapTool::Select;
+            }
+            if self.map_tool == MapTool::Select && !ui.ctx().egui_wants_keyboard_input() {
+                if let Some((source, is_end)) = self.selected_endpoint {
+                    if ui.input(|input| input.key_pressed(egui::Key::E)) {
+                        self.start_extension(source, is_end);
+                    } else if let Some(reverse) = ui.input(|input|
+                        input.key_pressed(egui::Key::R).then_some(input.modifiers.shift)) {
+                        if map::rotate_endpoint(&mut self.program, source, is_end,
+                            if reverse { 15.0 } else { -15.0 }) {
+                            self.dirty = true;
+                            self.status = "Road end rotated 15°".into();
+                        }
+                    }
+                }
+            }
+            if self.map_tool == MapTool::Select && !ui.ctx().egui_wants_keyboard_input()
+                && ui.input(|input| input.key_pressed(egui::Key::Backspace)
+                    || input.key_pressed(egui::Key::Delete)) {
+                if let Some(reference) = self.selected_intersection.take() {
+                    if map::remove_placed_intersection(&mut self.program, &reference) {
+                        self.dirty = true;
+                        self.status = "Intersection removed".into();
+                    }
+                } else {
+                    self.delete_selected_segments();
+                }
+            }
+            let projection = map::project(&self.program);
+            let painter = ui.painter_at(rect);
+            let scene = self.scene_geometry(palette);
+            painter.add(egui::Shape::Callback(eframe::egui_wgpu::Callback::new_paint_callback(
+                rect, scene3d::SceneCallback {
+                    scene, rect, pan: self.map_pan, zoom: self.map_zoom,
+                    target: self.orbit_target, angle: self.orbit_angle,
+                    camera: CameraView::Isometric, background: palette.map_background,
+                    target_format: self.render_format,
+                })));
+            for intersection in map::intersections(&self.program, &projection) {
+                if self.selected_intersection.as_deref() == Some(&intersection.point_ref) {
+                    let point = iso_screen(rect, self.map_pan, self.map_zoom, self.orbit_target,
+                        self.orbit_angle, intersection.position, 0.0);
+                    painter.circle_stroke(point, (self.map_zoom * 0.4).max(15.0),
+                        egui::Stroke::new(2.0, palette.map_selected));
+                }
+                for port in &intersection.ports {
+                    let point = iso_screen(rect, self.map_pan, self.map_zoom, self.orbit_target,
+                        self.orbit_angle, port.position, 0.0);
+                    let connected = projection.segments.iter().any(|segment|
+                        segment.start_ref.as_deref() == Some(&port.point_ref)
+                        || segment.end_ref.as_deref() == Some(&port.point_ref));
+                    painter.circle_filled(point, 4.0, palette.map_background);
+                    painter.circle_stroke(point, 4.0, egui::Stroke::new(2.0,
+                        if connected { palette.map_subtle } else { palette.map_preview }));
+                }
+            }
+            for segment in &projection.segments {
+                let middle = segment.point_at(0.5);
+                let point = iso_screen(rect, self.map_pan, self.map_zoom, self.orbit_target,
+                    self.orbit_angle, middle, segment.height_at(0.5));
+                let start = iso_screen(rect, self.map_pan, self.map_zoom, self.orbit_target,
+                    self.orbit_angle, segment.start, segment.start_z);
+                let end = iso_screen(rect, self.map_pan, self.map_zoom, self.orbit_target,
+                    self.orbit_angle, segment.end, segment.end_z);
+                if self.selected_segments.contains(&segment.source)
+                    || self.selected_segment == Some(segment.source)
+                    || start.distance(end) > 100.0 {
+                    painter.text(point + egui::vec2(0.0, -18.0), egui::Align2::CENTER_BOTTOM,
+                        segment.name.as_deref().unwrap_or(&segment.road_name),
+                        egui::FontId::proportional(12.0), palette.map_text);
+                }
+            }
+            if let Some(segment) = projection.segments.iter()
+                .find(|segment| Some(segment.source) == self.selected_segment) {
+                for (is_end, point, height) in [(false, segment.start, segment.start_z),
+                    (true, segment.end, segment.end_z)] {
+                    let screen = iso_screen(rect, self.map_pan, self.map_zoom,
+                        self.orbit_target, self.orbit_angle, point, height);
+                    painter.circle_filled(screen, 6.0, palette.map_text);
+                    painter.circle_stroke(screen, 6.0,
+                        egui::Stroke::new(2.0, palette.map_selected));
+                    if self.selected_endpoint == Some((segment.source, is_end)) {
+                        painter.circle_stroke(screen, 9.0,
+                            egui::Stroke::new(2.0, palette.map_selected));
+                    }
+                }
+                for (second, anchor, control, height) in [
+                    (false, segment.start, segment.controls[0], segment.height_at(1.0 / 3.0)),
+                    (true, segment.end, segment.controls[1], segment.height_at(2.0 / 3.0)),
+                ] {
+                    let a = iso_screen(rect, self.map_pan, self.map_zoom,
+                        self.orbit_target, self.orbit_angle, anchor,
+                        if second { segment.end_z } else { segment.start_z });
+                    let b = iso_screen(rect, self.map_pan, self.map_zoom,
+                        self.orbit_target, self.orbit_angle, control, height);
+                    painter.line_segment([a, b], egui::Stroke::new(1.0, palette.map_selected));
+                    painter.circle_filled(b, 5.0, palette.map_selected);
+                }
+                if self.map_tool == MapTool::Select {
+                    if let Some(road) = self.program.statements.iter().find_map(|statement| match statement {
+                        Statement::Road(road) if road.name == segment.road_name => Some(road),
+                        _ => None,
+                    }) {
+                        if let Some(point) = map::element_position(segment, road,
+                            self.branch_element, self.branch_t) {
+                            let screen = iso_screen(rect, self.map_pan, self.map_zoom,
+                                self.orbit_target, self.orbit_angle, point,
+                                segment.height_at(self.branch_t));
+                            painter.circle_filled(screen, 5.0, palette.map_preview);
+                            painter.circle_stroke(screen, 7.0,
+                                egui::Stroke::new(2.0, palette.map_text));
+                            if ui.ctx().pointer_hover_pos().is_some_and(|pointer|
+                                pointer.distance(screen) <= 12.0) {
+                                ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+                                painter.text(screen + egui::vec2(12.0, -12.0),
+                                    egui::Align2::LEFT_BOTTOM, "Click to branch here",
+                                    egui::FontId::proportional(11.0), palette.map_text);
+                            }
+                        }
+                    }
+                }
+            }
+            if matches!(self.map_tool, MapTool::Draw | MapTool::Select) {
+                if let Some(pointer) = ui.ctx().pointer_hover_pos().filter(|point| rect.contains(*point)) {
+                    let candidates = element_end_candidates(&projection, &self.program);
+                    let hovered = iso_element_end_near(&candidates, &projection, rect,
+                        self.map_pan, self.map_zoom, self.orbit_target, self.orbit_angle, pointer);
+                    for candidate in candidates {
+                        let Some(segment) = projection.segments.iter()
+                            .find(|segment| segment.source == candidate.source) else { continue };
+                        let screen = iso_screen(rect, self.map_pan, self.map_zoom,
+                            self.orbit_target, self.orbit_angle, candidate.position,
+                            segment.height_at(candidate.t));
+                        if pointer.distance(screen) <= 70.0 {
+                            let active = hovered.is_some_and(|item| item.source == candidate.source
+                                && item.element_index == candidate.element_index && item.t == candidate.t);
+                            painter.circle_stroke(screen, if active { 6.0 } else { 3.5 },
+                                egui::Stroke::new(1.5, palette.map_preview));
+                        }
+                    }
+                    if let Some(candidate) = hovered {
+                        ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+                        let screen = iso_screen(rect, self.map_pan, self.map_zoom,
+                            self.orbit_target, self.orbit_angle, candidate.position,
+                            projection.segments.iter().find(|segment| segment.source == candidate.source)
+                                .map(|segment| segment.height_at(candidate.t)).unwrap_or(0.0));
+                        painter.text(screen + egui::vec2(11.0, -12.0),
+                            egui::Align2::LEFT_BOTTOM,
+                            format!("{} {} end", kind_label(candidate.kind), candidate.element_index + 1),
+                            egui::FontId::proportional(11.0), palette.map_text);
+                    }
+                }
+            }
+            if let MapTool::Landscape(kind) = self.map_tool {
+                let mut points: Vec<_> = self.landscape_points.iter().map(|point|
+                    iso_screen(rect, self.map_pan, self.map_zoom, self.orbit_target,
+                        self.orbit_angle, *point, 0.0)).collect();
+                if let Some(pointer) = ui.ctx().pointer_hover_pos().filter(|point| rect.contains(*point)) {
+                    points.push(pointer);
+                }
+                if points.len() >= 2 {
+                    painter.add(egui::Shape::line(points.clone(),
+                        egui::Stroke::new(2.0, palette.map_preview)));
+                    if kind != LandscapeKind::River && self.landscape_points.len() >= 3 {
+                        painter.line_segment([points[0], *points.last().unwrap()],
+                            egui::Stroke::new(1.0, palette.map_preview));
+                    }
+                }
+            }
+            if let (Some(start), Some(pointer)) = (self.box_start, response.interact_pointer_pos()) {
+                painter.rect_stroke(egui::Rect::from_two_pos(start, pointer), 0.0,
+                    egui::Stroke::new(1.5, palette.map_selected), egui::StrokeKind::Inside);
+            }
+            if let (Some(start), Some(pointer)) = (self.map_start, ui.ctx().pointer_hover_pos().filter(|p| rect.contains(*p))) {
+                painter.line_segment([iso_screen(rect, self.map_pan, self.map_zoom, self.orbit_target,
+                    self.orbit_angle, start, 0.0), pointer], egui::Stroke::new(2.0, palette.map_preview));
+            }
+        });
+    }
+
     fn map_canvas(&mut self, root: &mut egui::Ui) {
+        if self.camera_view == CameraView::Isometric {
+            self.isometric_canvas(root);
+            return;
+        }
         egui::CentralPanel::default().show(root, |ui| {
             let palette = editor_palette(ui.ctx().theme());
-            ui.add_space(8.0);
-            ui.horizontal(|ui| {
-                ui.heading("Map");
-                ui.label(
-                    RichText::new(match self.map_tool {
-                        MapTool::Draw => "Click freely or pick a road/lane end | hold Shift for grid snap | drag empty map to pan | Enter or Esc finishes",
-                        MapTool::Draft => "Click to place draft points | Enter or Esc finishes",
-                        MapTool::Select => "Drag points freely; hold Shift for grid snap | E extends, R rotates | green marker starts an exit",
-                        MapTool::Landscape(_) => "Click points to outline the feature | hold Shift for grid snap | Enter finishes | Esc cancels",
-                    })
-                    .small()
-                    .color(ui.visuals().weak_text_color()),
-                );
-            });
             let (rect, response) =
                 ui.allocate_exact_size(ui.available_size(), egui::Sense::click_and_drag());
             self.map_rect = Some(rect);
@@ -2479,11 +3296,13 @@ impl RoadEditor {
                     };
                     if let Some((source, is_end)) = self.dragging_endpoint {
                         self.selected_segment = Some(source);
+                        self.selected_segments = vec![source];
                         self.selected_endpoint = Some((source, is_end));
                         self.lane_end_choice = None;
                     }
                     if let Some((source, _)) = self.dragging_control {
                         self.selected_segment = Some(source);
+                        self.selected_segments = vec![source];
                         self.selected_endpoint = None;
                         self.lane_end_choice = None;
                     }
@@ -2506,16 +3325,24 @@ impl RoadEditor {
                             origin,
                         )
                         .is_none();
+                    if self.map_tool == MapTool::Select && ui.input(|input| input.modifiers.shift) {
+                        self.box_start = Some(origin);
+                        self.dragging_endpoint = None;
+                        self.dragging_control = None;
+                        self.dragging_intersection = None;
+                        self.dragging_background = false;
+                    }
                 }
             }
             if response.dragged_by(egui::PointerButton::Secondary)
-                || (self.dragging_background && response.dragged_by(egui::PointerButton::Primary))
+                || (self.dragging_background && self.box_start.is_none() && response.dragged_by(egui::PointerButton::Primary))
             {
                 self.map_pan += response.drag_delta();
             }
             if ui.input(|input| {
                 input.key_pressed(egui::Key::Escape)
-                    || (self.map_tool == MapTool::Draw && input.key_pressed(egui::Key::Enter))
+                    || (matches!(self.map_tool, MapTool::Draw | MapTool::Draft)
+                        && input.key_pressed(egui::Key::Enter))
             }) {
                 if let Some(reference) = self.map_start_ref.as_deref() {
                     if map::anchored_reference(&self.program, reference) {
@@ -2527,6 +3354,7 @@ impl RoadEditor {
                 self.dragging_endpoint = None;
                 self.dragging_control = None;
                 self.dragging_background = false;
+                self.box_start = None;
                 self.map_tool = MapTool::Select;
                 self.landscape_points.clear();
                 self.lane_end_choice = None;
@@ -2548,20 +3376,14 @@ impl RoadEditor {
                 }
             }
             if self.map_tool == MapTool::Select
-                && self.selected_segment.is_some()
+                && (self.selected_segment.is_some() || !self.selected_segments.is_empty())
+                && self.selected_intersection.is_none()
                 && !ui.ctx().egui_wants_keyboard_input()
                 && ui.input(|input| {
                     input.key_pressed(egui::Key::Backspace) || input.key_pressed(egui::Key::Delete)
                 })
             {
-                if map::remove(&mut self.program, self.selected_segment.unwrap()) {
-                    self.selected_segment = None;
-                    self.selected_endpoint = None;
-                    self.lane_end_choice = None;
-                    self.segment_name_draft.clear();
-                    self.dirty = true;
-                    self.status = "Road placement removed".into();
-                }
+                self.delete_selected_segments();
             }
             if self.map_tool == MapTool::Select && !ui.ctx().egui_wants_keyboard_input() {
                 if let Some((source, is_end)) = self.selected_endpoint {
@@ -2572,7 +3394,7 @@ impl RoadEditor {
                         if map::rotate_endpoint(&mut self.program, source, is_end,
                             if reverse { 15.0 } else { -15.0 }) {
                             self.dirty = true;
-                            self.status = "Rotated road end tangent 15° | Shift+R reverses direction".into();
+                            self.status = "Road end rotated 15°".into();
                         }
                     }
                 }
@@ -2588,10 +3410,25 @@ impl RoadEditor {
                 } else {
                     pointer_world
                 };
+                if self.map_tool == MapTool::Draft && response.clicked_by(egui::PointerButton::Primary) {
+                    if let Some(start) = self.map_start {
+                        if start != free_point {
+                            if let Some(road) = self.road().cloned() {
+                                let index = map::append(&mut self.program, &road, start, free_point);
+                                self.selected_segment = Some(SegmentSource::TopLevel(index));
+                                self.selected_segments = vec![SegmentSource::TopLevel(index)];
+                                self.dirty = true;
+                            }
+                        }
+                    }
+                    self.map_start = Some(free_point);
+                    self.map_start_ref = None;
+                    self.status = "Draft pen active".into();
+                }
                 if matches!(self.map_tool, MapTool::Landscape(_))
                     && response.clicked_by(egui::PointerButton::Primary) {
                     self.landscape_points.push(free_point);
-                    self.status = format!("{} points placed | Enter finishes, Esc cancels",
+                    self.status = format!("{} points placed",
                         self.landscape_points.len());
                 }
                 let port_hit = intersection_port_near(&self.program, &before, rect,
@@ -2702,13 +3539,12 @@ impl RoadEditor {
                                 self.dirty = true;
                                 self.status = if let Some(side) = exit_side {
                                     if through_added {
-                                        format!("Placed {} exit and a divided through road | click another endpoint or press Enter/Esc", side.label())
+                                        format!("{} exit and divided through road placed", side.label())
                                     } else {
-                                        format!("Placed {} branch with carried cross section | click another endpoint or press Enter/Esc", side.label())
+                                        format!("{} branch placed", side.label())
                                     }
                                 } else {
-                                    format!("Placed {} | click another endpoint or press Enter/Esc",
-                                        preset_label(&road.name))
+                                    format!("{} placed", preset_label(&road.name))
                                 };
                                 if self.map_start_ref.as_deref().is_some_and(|reference|
                                     map::intersection_port_direction(&self.program, reference).is_some()) {
@@ -2741,7 +3577,7 @@ impl RoadEditor {
                         self.selected_segment = None;
                         self.selected_intersection = None;
                         self.selected_endpoint = None;
-                        self.status = "Drawing from intersection port | click to place the road end".into();
+                        self.status = "Drawing from port".into();
                         }
                     }
                 }
@@ -2783,7 +3619,7 @@ impl RoadEditor {
                             self.segment_name_draft = before.segments.iter()
                                 .find(|segment| segment.source == source)
                                 .and_then(|segment| segment.name.clone()).unwrap_or_default();
-                            self.status = "Road end selected | E extends or joins; R rotates the tangent".into();
+                            self.status = "Road end selected".into();
                         } else if let Some((source, element, t)) = branch_marker {
                             self.lane_end_choice = None;
                             self.start_branch(source, element, t);
@@ -2823,6 +3659,8 @@ impl RoadEditor {
                             .and_then(|segment| segment.name.clone())
                             .unwrap_or_default();
                         }
+                        self.selected_segments = self.selected_segment.into_iter().collect();
+                        self.focus_orbit_on_selection();
                     }
                     if response.dragged_by(egui::PointerButton::Primary) {
                         if let Some(reference) = self.dragging_intersection.as_deref() {
@@ -2848,6 +3686,20 @@ impl RoadEditor {
                 }
             }
             if response.drag_stopped_by(egui::PointerButton::Primary) {
+                if let (Some(start), Some(end)) = (self.box_start.take(), response.interact_pointer_pos()) {
+                    let selection = egui::Rect::from_two_pos(start, end);
+                    self.selected_segments = map::project(&self.program).segments.into_iter()
+                        .filter(|segment| {
+                            let path: Vec<_> = (0..=64).map(|step| screen_of(rect,
+                                self.map_pan, self.map_zoom,
+                                segment.point_at(step as f32 / 64.0))).collect();
+                            path.windows(2).any(|pair| line_crosses_rect(pair[0], pair[1], selection))
+                        })
+                        .map(|segment| segment.source).collect();
+                    self.selected_segment = self.selected_segments.last().copied();
+                    self.focus_orbit_on_selection();
+                    self.status = format!("Selected {} segment(s)", self.selected_segments.len());
+                }
                 if let (Some((source, is_end)), Some(pointer)) =
                     (self.dragging_endpoint, response.interact_pointer_pos()) {
                     let projection = map::project(&self.program);
@@ -2871,56 +3723,26 @@ impl RoadEditor {
             }
 
             let painter = ui.painter_at(rect);
-            painter.rect_filled(rect, 0.0, palette.map_background);
-            paint_grid(&painter, rect, self.map_pan, self.map_zoom, palette);
-            paint_landscape(&painter, rect, self.map_pan, self.map_zoom,
-                &self.program, self.selected_landscape.as_deref(), palette);
             let projection = map::project(&self.program);
             let profiles = paint_profiles(&self.program, &projection);
             let issues = design_rule_issues(&self.program, &projection, &profiles);
-            for index in road_paint_order(&self.program, &projection, &profiles) {
-                let segment = &projection.segments[index];
-                let selected = self.selected_segment == Some(segment.source);
-                let road = self
-                    .program
-                    .statements
-                    .iter()
-                    .find_map(|statement| match statement {
-                        Statement::Road(road) if road.name == segment.road_name => Some(road),
-                        _ => None,
-                    });
-                if let Some(road) = road.filter(|_| {
-                    profiles[index].start_alignment.is_some()
-                        || profiles[index].merge_alignment.is_some()
-                        || !profiles[index].start_taper.is_empty()
-                        || !profiles[index].end_taper.is_empty()
-                }) {
-                    paint_profiled_road(&painter, rect, self.map_pan, self.map_zoom,
-                        segment, road, selected, palette, &profiles[index]);
-                } else {
-                    paint_road_segment(&painter, rect, self.map_pan, self.map_zoom,
-                        segment, road, selected, palette);
-                }
-                let midpoint = screen_of(rect, self.map_pan, self.map_zoom, segment.point_at(0.5));
-                let screen_length = screen_of(rect, self.map_pan, self.map_zoom, segment.start)
-                    .distance(screen_of(rect, self.map_pan, self.map_zoom, segment.end));
-                if selected || screen_length > 100.0 {
-                    painter.text(
-                        midpoint + egui::vec2(0.0, -22.0),
-                        egui::Align2::CENTER_BOTTOM,
-                        segment.name.as_deref().unwrap_or(&segment.road_name),
-                        egui::FontId::proportional(12.0),
-                        palette.map_text,
-                    );
-                }
+            let scene = self.scene_geometry(palette);
+            painter.add(egui::Shape::Callback(eframe::egui_wgpu::Callback::new_paint_callback(
+                rect, scene3d::SceneCallback {
+                    scene, rect, pan: self.map_pan, zoom: self.map_zoom,
+                    target: self.orbit_target, angle: self.orbit_angle,
+                    camera: CameraView::Top, background: palette.map_background,
+                    target_format: self.render_format,
+                })));
+            if let (Some(start), Some(pointer)) = (self.box_start, response.interact_pointer_pos()) {
+                painter.rect_stroke(egui::Rect::from_two_pos(start, pointer), 0.0,
+                    egui::Stroke::new(1.5, palette.map_selected), egui::StrokeKind::Inside);
             }
             let intersections = map::intersections(&self.program, &projection);
             let intersection_squares: Vec<_> = intersections.iter().filter_map(|intersection|
                 intersection_paint(&self.program, &projection, intersection, rect,
                     self.map_pan, self.map_zoom).map(|paint| paint.square)).collect();
             for intersection in &intersections {
-                paint_intersection(&painter, rect, self.map_pan, self.map_zoom,
-                    &self.program, &projection, intersection, palette);
                 if self.selected_intersection.as_deref() == Some(&intersection.point_ref) {
                     if let Some(paint) = intersection_paint(&self.program, &projection,
                         intersection, rect, self.map_pan, self.map_zoom) {
@@ -2938,6 +3760,17 @@ impl RoadEditor {
                     painter.circle_filled(point, radius, palette.map_background);
                     painter.circle_stroke(point, radius,
                         egui::Stroke::new(2.0, if connected { palette.map_subtle } else { palette.map_preview }));
+                }
+            }
+            for segment in &projection.segments {
+                let midpoint = screen_of(rect, self.map_pan, self.map_zoom, segment.point_at(0.5));
+                let length = screen_of(rect, self.map_pan, self.map_zoom, segment.start)
+                    .distance(screen_of(rect, self.map_pan, self.map_zoom, segment.end));
+                if self.selected_segments.contains(&segment.source)
+                    || self.selected_segment == Some(segment.source) || length > 100.0 {
+                    painter.text(midpoint + egui::vec2(0.0, -22.0), egui::Align2::CENTER_BOTTOM,
+                        segment.name.as_deref().unwrap_or(&segment.road_name),
+                        egui::FontId::proportional(12.0), palette.map_text);
                 }
             }
             if let Some(segment) = projection.segments.iter()
@@ -3225,7 +4058,7 @@ impl RoadEditor {
                         1 => { self.start_branch(choice.source, choice.element_index, choice.t); }
                         2 => {
                             if self.start_extension(choice.source, choice.t >= 0.5) {
-                                self.status = "Join roads | click another road end with the same cross section".into();
+                                self.status = "Joining roads".into();
                             }
                         }
                         _ => { self.start_extension(choice.source, choice.t >= 0.5); }
@@ -3244,16 +4077,10 @@ impl RoadEditor {
                     ui.add_space(90.0);
                     ui.add(icon("box", ui.visuals().text_color()));
                     ui.heading("No road selected");
-                    ui.label("Create a road from the toolbar, or open a .road file.");
                 });
                 return;
             };
             ui.heading(&road.name);
-            ui.label(
-                RichText::new("CROSS SECTION | left to right in source order")
-                    .small()
-                    .color(ui.visuals().weak_text_color()),
-            );
             ui.add_space(25.0);
             let elements = road.elements.clone();
             let mut clicked = None;
@@ -3295,8 +4122,7 @@ impl RoadEditor {
                         if response.clicked() {
                             clicked = Some(index);
                         }
-                        response
-                            .on_hover_text(format!("{} | click to edit", kind_label(element.kind)));
+                        response.on_hover_text(kind_label(element.kind));
                     }
                 });
             });
@@ -3304,13 +4130,6 @@ impl RoadEditor {
                 self.selected_element = Some(index);
             }
             ui.add_space(20.0);
-            ui.label(
-                RichText::new(format!(
-                    "{} elements  |  Select to inspect  |  Add after selection",
-                    elements.len()
-                ))
-                .color(ui.visuals().weak_text_color()),
-            );
             if self.show_source {
                 ui.add_space(20.0);
                 ui.separator();
@@ -3392,6 +4211,221 @@ fn world_of(rect: egui::Rect, pan: egui::Vec2, zoom: f32, point: egui::Pos2) -> 
     }
 }
 
+const ISO_ELEVATION: f32 = 0.61548;
+
+fn iso_screen(
+    rect: egui::Rect,
+    pan: egui::Vec2,
+    zoom: f32,
+    target: WorldPoint,
+    angle: f32,
+    point: WorldPoint,
+    height: f32,
+) -> egui::Pos2 {
+    let dx = point.x - target.x;
+    let dy = point.y - target.y;
+    rect.center()
+        + pan
+        + egui::vec2(
+            (dx * angle.cos() + dy * angle.sin()) * zoom,
+            ((dx * angle.sin() - dy * angle.cos()) * ISO_ELEVATION.sin()
+                - height * ISO_ELEVATION.cos())
+                * zoom,
+        )
+}
+
+fn iso_ground_point(
+    rect: egui::Rect,
+    pan: egui::Vec2,
+    zoom: f32,
+    target: WorldPoint,
+    angle: f32,
+    screen: egui::Pos2,
+) -> WorldPoint {
+    iso_world_at_height(rect, pan, zoom, target, angle, screen, 0.0)
+}
+
+fn iso_world_at_height(
+    rect: egui::Rect,
+    pan: egui::Vec2,
+    zoom: f32,
+    target: WorldPoint,
+    angle: f32,
+    screen: egui::Pos2,
+    height: f32,
+) -> WorldPoint {
+    let delta = (screen - rect.center() - pan) / zoom;
+    let vertical = (delta.y + height * ISO_ELEVATION.cos()) / ISO_ELEVATION.sin();
+    WorldPoint {
+        x: target.x + delta.x * angle.cos() + vertical * angle.sin(),
+        y: target.y + delta.x * angle.sin() - vertical * angle.cos(),
+    }
+}
+
+fn iso_endpoint_near(
+    segments: &[map::Segment],
+    program: &Program,
+    rect: egui::Rect,
+    pan: egui::Vec2,
+    zoom: f32,
+    target: WorldPoint,
+    angle: f32,
+    pointer: egui::Pos2,
+) -> Option<(SegmentSource, bool)> {
+    segments
+        .iter()
+        .rev()
+        .filter(|segment| segment.source.editable())
+        .flat_map(|segment| {
+            [
+                (
+                    false,
+                    segment.start,
+                    segment.start_z,
+                    segment.start_ref.as_deref(),
+                ),
+                (true, segment.end, segment.end_z, segment.end_ref.as_deref()),
+            ]
+            .into_iter()
+            .filter_map(move |(is_end, point, height, reference)| {
+                (!reference.is_some_and(|name| map::anchored_reference(program, name))).then_some((
+                    segment.source,
+                    is_end,
+                    point,
+                    height,
+                ))
+            })
+        })
+        .filter_map(|(source, is_end, point, height)| {
+            let distance =
+                pointer.distance_sq(iso_screen(rect, pan, zoom, target, angle, point, height));
+            (distance <= 12.0 * 12.0).then_some((source, is_end, distance))
+        })
+        .min_by(|a, b| a.2.total_cmp(&b.2))
+        .map(|(source, is_end, _)| (source, is_end))
+}
+
+fn iso_control_near(
+    segments: &[map::Segment],
+    rect: egui::Rect,
+    pan: egui::Vec2,
+    zoom: f32,
+    target: WorldPoint,
+    angle: f32,
+    pointer: egui::Pos2,
+) -> Option<(SegmentSource, bool)> {
+    segments
+        .iter()
+        .rev()
+        .filter(|segment| segment.source.editable())
+        .flat_map(|segment| {
+            [
+                (false, segment.controls[0], segment.height_at(1.0 / 3.0)),
+                (true, segment.controls[1], segment.height_at(2.0 / 3.0)),
+            ]
+            .into_iter()
+            .map(move |(second, point, height)| (segment.source, second, point, height))
+        })
+        .filter_map(|(source, second, point, height)| {
+            let distance =
+                pointer.distance_sq(iso_screen(rect, pan, zoom, target, angle, point, height));
+            (distance <= 12.0 * 12.0).then_some((source, second, distance))
+        })
+        .min_by(|a, b| a.2.total_cmp(&b.2))
+        .map(|(source, second, _)| (source, second))
+}
+
+fn iso_element_end_near(
+    candidates: &[ElementEndCandidate],
+    projection: &map::Projection,
+    rect: egui::Rect,
+    pan: egui::Vec2,
+    zoom: f32,
+    target: WorldPoint,
+    angle: f32,
+    pointer: egui::Pos2,
+) -> Option<ElementEndCandidate> {
+    candidates
+        .iter()
+        .copied()
+        .filter_map(|candidate| {
+            let segment = projection
+                .segments
+                .iter()
+                .find(|segment| segment.source == candidate.source)?;
+            let height = segment.height_at(candidate.t);
+            let distance = pointer.distance_sq(iso_screen(
+                rect,
+                pan,
+                zoom,
+                target,
+                angle,
+                candidate.position,
+                height,
+            ));
+            (distance <= 12.0 * 12.0).then_some((candidate, distance))
+        })
+        .min_by(|a, b| a.1.total_cmp(&b.1))
+        .map(|(candidate, _)| candidate)
+}
+
+fn line_crosses_rect(a: egui::Pos2, b: egui::Pos2, rect: egui::Rect) -> bool {
+    let mut near = 0.0_f32;
+    let mut far = 1.0_f32;
+    for (start, end, low, high) in [
+        (a.x, b.x, rect.min.x, rect.max.x),
+        (a.y, b.y, rect.min.y, rect.max.y),
+    ] {
+        let delta = end - start;
+        if delta.abs() <= f32::EPSILON {
+            if start < low || start > high {
+                return false;
+            }
+        } else {
+            let first = (low - start) / delta;
+            let second = (high - start) / delta;
+            near = near.max(first.min(second));
+            far = far.min(first.max(second));
+            if near > far {
+                return false;
+            }
+        }
+    }
+    true
+}
+
+fn iso_segment_near(
+    segments: &[map::Segment],
+    rect: egui::Rect,
+    pan: egui::Vec2,
+    zoom: f32,
+    target: WorldPoint,
+    angle: f32,
+    pointer: egui::Pos2,
+) -> Option<SegmentSource> {
+    segments
+        .iter()
+        .filter_map(|segment| {
+            let distance = (0..=32)
+                .map(|step| {
+                    let t = step as f32 / 32.0;
+                    pointer.distance_sq(iso_screen(
+                        rect,
+                        pan,
+                        zoom,
+                        target,
+                        angle,
+                        segment.point_at(t),
+                        segment.height_at(t),
+                    ))
+                })
+                .fold(f32::INFINITY, f32::min);
+            (distance <= 20.0 * 20.0).then_some((segment.source, distance))
+        })
+        .min_by(|a, b| a.1.total_cmp(&b.1))
+        .map(|(source, _)| source)
+}
+
 fn landscape_screen_points(
     feature: &opencity::LandscapeFeature,
     rect: egui::Rect,
@@ -3459,71 +4493,67 @@ fn landscape_at(
     })
 }
 
-fn paint_landscape(
+fn paint_landscape_feature(
     painter: &egui::Painter,
     rect: egui::Rect,
     pan: egui::Vec2,
     zoom: f32,
-    program: &Program,
-    selected: Option<&str>,
+    feature: &opencity::LandscapeFeature,
+    selected: bool,
     palette: EditorPalette,
 ) {
-    let mut features = project_landscape_features(program).features;
-    features.sort_by(|a, b| a.elevation.total_cmp(&b.elevation));
-    for feature in &features {
-        let points = landscape_screen_points(feature, rect, pan, zoom);
-        let selected = selected == feature.name.as_deref();
-        let (fill, edge) = match (palette.theme, feature.kind) {
-            (egui::Theme::Dark, LandscapeKind::Land) => (
-                Color32::from_rgb(44, 77, 52),
-                Color32::from_rgb(103, 162, 106),
-            ),
-            (egui::Theme::Light, LandscapeKind::Land) => (
-                Color32::from_rgb(194, 224, 180),
-                Color32::from_rgb(80, 139, 75),
-            ),
-            (egui::Theme::Dark, LandscapeKind::Lake | LandscapeKind::River) => (
-                Color32::from_rgb(26, 76, 112),
-                Color32::from_rgb(69, 165, 204),
-            ),
-            (egui::Theme::Light, LandscapeKind::Lake | LandscapeKind::River) => (
-                Color32::from_rgb(124, 190, 220),
-                Color32::from_rgb(32, 120, 166),
-            ),
-        };
-        let stroke = egui::Stroke::new(
-            if selected { 3.0 } else { 1.5 },
-            if selected { palette.map_selected } else { edge },
-        );
-        if feature.kind == LandscapeKind::River {
-            painter.add(egui::Shape::line(
+    let points = landscape_screen_points(feature, rect, pan, zoom);
+
+    let (fill, edge) = match (palette.theme, feature.kind) {
+        (egui::Theme::Dark, LandscapeKind::Land) => (
+            Color32::from_rgb(44, 77, 52),
+            Color32::from_rgb(103, 162, 106),
+        ),
+        (egui::Theme::Light, LandscapeKind::Land) => (
+            Color32::from_rgb(194, 224, 180),
+            Color32::from_rgb(80, 139, 75),
+        ),
+        (egui::Theme::Dark, LandscapeKind::Lake | LandscapeKind::River) => (
+            Color32::from_rgb(26, 76, 112),
+            Color32::from_rgb(69, 165, 204),
+        ),
+        (egui::Theme::Light, LandscapeKind::Lake | LandscapeKind::River) => (
+            Color32::from_rgb(124, 190, 220),
+            Color32::from_rgb(32, 120, 166),
+        ),
+    };
+    let stroke = egui::Stroke::new(
+        if selected { 3.0 } else { 1.5 },
+        if selected { palette.map_selected } else { edge },
+    );
+    if feature.kind == LandscapeKind::River {
+        painter.add(egui::Shape::line(
+            points.clone(),
+            egui::Stroke::new(10.0, fill),
+        ));
+        painter.add(egui::Shape::line(points.clone(), stroke));
+    } else {
+        if landscape_is_convex(&points) {
+            painter.add(egui::Shape::convex_polygon(
                 points.clone(),
-                egui::Stroke::new(10.0, fill),
+                fill,
+                egui::Stroke::NONE,
             ));
-            painter.add(egui::Shape::line(points.clone(), stroke));
         } else {
-            if landscape_is_convex(&points) {
+            // Concave shorelines need separate triangles to keep their inlets open.
+            for [a, b, c] in landscape_triangles(&points) {
                 painter.add(egui::Shape::convex_polygon(
-                    points.clone(),
+                    vec![a, b, c],
                     fill,
                     egui::Stroke::NONE,
                 ));
-            } else {
-                // Concave shorelines need separate triangles to keep their inlets open.
-                for [a, b, c] in landscape_triangles(&points) {
-                    painter.add(egui::Shape::convex_polygon(
-                        vec![a, b, c],
-                        fill,
-                        egui::Stroke::NONE,
-                    ));
-                }
             }
-            painter.add(egui::Shape::closed_line(points.clone(), stroke));
         }
-        if selected {
-            for point in points {
-                painter.circle_filled(point, 4.0, palette.map_selected);
-            }
+        painter.add(egui::Shape::closed_line(points.clone(), stroke));
+    }
+    if selected {
+        for point in points {
+            painter.circle_filled(point, 4.0, palette.map_selected);
         }
     }
 }
@@ -4494,6 +5524,8 @@ fn trim_adjoining_ramp_to_parent(
     }
 }
 
+// These painters define road and junction geometry in world-scaled coordinates.
+// scene3d tessellates their shapes and renders them for both cameras with wgpu.
 fn paint_profiled_road(
     painter: &egui::Painter,
     rect: egui::Rect,
@@ -4524,19 +5556,17 @@ fn paint_profiled_road(
     }
     for (element_index, element) in road.elements.iter().enumerate() {
         let color = kind_color(element.kind, palette.theme);
-        for pair in boundaries.windows(2) {
-            let polygon = [
-                pair[0][element_index],
-                pair[1][element_index],
-                pair[1][element_index + 1],
-                pair[0][element_index + 1],
-            ];
-            painter.add(egui::Shape::convex_polygon(
-                polygon.to_vec(),
-                color,
-                egui::Stroke::NONE,
-            ));
+        let mut mesh = egui::epaint::Mesh::default();
+        for row in &boundaries {
+            mesh.colored_vertex(row[element_index], color);
+            mesh.colored_vertex(row[element_index + 1], color);
         }
+        for step in 0..samples {
+            let a = (step * 2) as u32;
+            mesh.add_triangle(a, a + 2, a + 3);
+            mesh.add_triangle(a, a + 3, a + 1);
+        }
+        painter.add(egui::Shape::mesh(mesh));
     }
     let outline = if selected {
         palette.map_selected
@@ -5311,18 +6341,30 @@ impl eframe::App for RoadEditor {
         if let Some(undo) = history_shortcut {
             self.restore_history(undo);
         }
+        if self.view == View::Map && !ctx.egui_wants_keyboard_input() {
+            let copy =
+                ctx.input_mut(|input| input.consume_key(egui::Modifiers::COMMAND, egui::Key::C));
+            let paste =
+                ctx.input_mut(|input| input.consume_key(egui::Modifiers::COMMAND, egui::Key::V));
+            if copy {
+                self.copy_selection();
+            }
+            if paste {
+                self.paste_selection();
+            }
+        }
         self.top_bar(root);
         self.sidebar(root);
         self.inspector(root);
-        egui::Panel::bottom("status").show(root, |ui| {
-            ui.horizontal(|ui| {
+        if !self.status.is_empty() {
+            egui::Panel::bottom("status").show(root, |ui| {
                 ui.label(
                     RichText::new(&self.status)
                         .small()
                         .color(ui.visuals().weak_text_color()),
                 );
             });
-        });
+        }
         match self.view {
             View::Map => self.map_canvas(root),
             View::Section => self.section_canvas(root),
@@ -5330,7 +6372,9 @@ impl eframe::App for RoadEditor {
         self.pending_dialog(&ctx);
         self.delete_dialog(&ctx);
         let dragging = ctx.input(|input| input.pointer.primary_down())
-            && (self.dragging_endpoint.is_some() || self.dragging_control.is_some());
+            && (self.dragging_endpoint.is_some()
+                || self.dragging_control.is_some()
+                || self.dragging_intersection.is_some());
         self.record_history(before, dragging);
     }
 }
@@ -5545,6 +6589,153 @@ fn main() -> eframe::Result {
 mod tests {
     use super::*;
 
+    #[test]
+    fn narrow_box_crosses_a_visible_road_between_samples() {
+        let box_rect = egui::Rect::from_min_max(egui::pos2(49.0, 49.0), egui::pos2(51.0, 51.0));
+        assert!(line_crosses_rect(
+            egui::pos2(0.0, 0.0),
+            egui::pos2(100.0, 100.0),
+            box_rect
+        ));
+        assert!(!line_crosses_rect(
+            egui::pos2(0.0, 0.0),
+            egui::pos2(100.0, 20.0),
+            box_rect
+        ));
+    }
+
+    #[test]
+    fn isometric_handle_pick_and_drag_preserve_road_height() {
+        let mut program = parse("road lane: sidewalk-carlane-sidewalk; end;").unwrap();
+        let Statement::Road(road) = &program.statements[0] else {
+            unreachable!()
+        };
+        let road = road.clone();
+        let index = map::append(
+            &mut program,
+            &road,
+            WorldPoint { x: 0.0, y: 0.0 },
+            WorldPoint { x: 3.0, y: 0.0 },
+        );
+        let source = SegmentSource::TopLevel(index);
+        let projection = map::project(&program);
+        let segment = projection
+            .segments
+            .iter()
+            .find(|segment| segment.source == source)
+            .unwrap();
+        let rect = egui::Rect::from_min_size(egui::pos2(100.0, 60.0), egui::vec2(800.0, 600.0));
+        let pan = egui::vec2(27.0, -19.0);
+        let target = WorldPoint { x: 1.0, y: -0.5 };
+        let angle = 0.72;
+        let endpoint = iso_screen(
+            rect,
+            pan,
+            90.0,
+            target,
+            angle,
+            segment.start,
+            segment.start_z,
+        );
+        assert_eq!(
+            iso_endpoint_near(
+                &projection.segments,
+                &program,
+                rect,
+                pan,
+                90.0,
+                target,
+                angle,
+                endpoint
+            ),
+            Some((source, false))
+        );
+        let control = iso_screen(
+            rect,
+            pan,
+            90.0,
+            target,
+            angle,
+            segment.controls[1],
+            segment.height_at(2.0 / 3.0),
+        );
+        assert_eq!(
+            iso_control_near(
+                &projection.segments,
+                rect,
+                pan,
+                90.0,
+                target,
+                angle,
+                control
+            ),
+            Some((source, true))
+        );
+        let moved = WorldPoint { x: 0.4, y: 0.7 };
+        let projected = iso_screen(rect, pan, 90.0, target, angle, moved, 1.25);
+        let picked = iso_world_at_height(rect, pan, 90.0, target, angle, projected, 1.25);
+        assert!((picked.x - moved.x).abs() < 0.0001);
+        assert!((picked.y - moved.y).abs() < 0.0001);
+        assert!(map::set_control(&mut program, source, true, picked));
+        let changed = map::project(&program)
+            .segments
+            .into_iter()
+            .find(|segment| segment.source == source)
+            .unwrap();
+        assert!((changed.controls[1].x - moved.x).abs() < 0.0001);
+        assert!((changed.controls[1].y - moved.y).abs() < 0.0001);
+    }
+
+    #[test]
+    fn isometric_element_end_picks_branch_source() {
+        let mut program = parse("road lane: sidewalk-carlane-sidewalk; end;").unwrap();
+        let Statement::Road(road) = &program.statements[0] else {
+            unreachable!()
+        };
+        let road = road.clone();
+        map::append(
+            &mut program,
+            &road,
+            WorldPoint { x: 0.0, y: 0.0 },
+            WorldPoint { x: 4.0, y: 0.0 },
+        );
+        let projection = map::project(&program);
+        let candidate = element_end_candidates(&projection, &program)
+            .into_iter()
+            .find(|candidate| candidate.element_index == 0 && candidate.t == 1.0)
+            .unwrap();
+        let segment = projection
+            .segments
+            .iter()
+            .find(|segment| segment.source == candidate.source)
+            .unwrap();
+        let rect = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(700.0, 500.0));
+        let target = WorldPoint { x: 2.0, y: 0.0 };
+        let screen = iso_screen(
+            rect,
+            egui::Vec2::ZERO,
+            80.0,
+            target,
+            0.8,
+            candidate.position,
+            segment.height_at(candidate.t),
+        );
+        let found = iso_element_end_near(
+            &element_end_candidates(&projection, &program),
+            &projection,
+            rect,
+            egui::Vec2::ZERO,
+            80.0,
+            target,
+            0.8,
+            screen,
+        )
+        .unwrap();
+        assert_eq!(found.source, candidate.source);
+        assert_eq!(found.element_index, candidate.element_index);
+        assert_eq!(found.t, candidate.t);
+    }
+
     fn sample_editor() -> RoadEditor {
         RoadEditor {
             program: parse(include_str!("../../examples/city.road")).unwrap(),
@@ -5568,11 +6759,17 @@ mod tests {
             view: View::Map,
             map_tool: MapTool::Select,
             camera_view: CameraView::Top,
+            render_format: eframe::wgpu::TextureFormat::Bgra8Unorm,
+            scene_cache: None,
+            top_camera: (egui::Vec2::ZERO, 100.0),
+            iso_camera: (egui::Vec2::ZERO, 55.0),
             orbit_angle: std::f32::consts::FRAC_PI_4,
             orbit_target: WorldPoint { x: 0.0, y: 0.0 },
             selected_segments: Vec::new(),
             clipboard: Vec::new(),
             box_start: None,
+            iso_drag_pan: false,
+            iso_drag_orbit: false,
             map_start: None,
             map_start_ref: None,
             landscape_points: Vec::new(),
@@ -7074,5 +8271,145 @@ mod tests {
         assert_eq!(map::lane_splits(&program).len(), 1);
         assert_eq!(map::lane_splits(&program)[0].mode, map::SplitMode::KeepLane);
         assert_eq!(parse(&program.to_road_source()).unwrap(), program);
+    }
+
+    #[test]
+    fn isometric_ground_pick_tracks_orbit_and_pan() {
+        let rect = egui::Rect::from_min_size(egui::pos2(10.0, 20.0), egui::vec2(640.0, 480.0));
+        let target = WorldPoint { x: 2.0, y: -3.0 };
+        let point = WorldPoint { x: 4.5, y: 1.25 };
+        for angle in [0.0, 0.7, 2.3] {
+            let screen = iso_screen(
+                rect,
+                egui::vec2(31.0, -14.0),
+                73.0,
+                target,
+                angle,
+                point,
+                0.0,
+            );
+            let recovered =
+                iso_ground_point(rect, egui::vec2(31.0, -14.0), 73.0, target, angle, screen);
+            assert!((recovered.x - point.x).abs() < 0.0001);
+            assert!((recovered.y - point.y).abs() < 0.0001);
+        }
+    }
+
+    #[test]
+    fn switching_views_preserves_each_camera() {
+        let mut editor = sample_editor();
+        editor.map_pan = egui::vec2(24.0, -9.0);
+        editor.map_zoom = 91.0;
+        editor.set_camera_view(CameraView::Isometric);
+        assert_eq!(editor.map_zoom, 55.0);
+        editor.map_pan = egui::vec2(-18.0, 4.0);
+        editor.map_zoom = 42.0;
+        editor.set_camera_view(CameraView::Top);
+        assert_eq!(editor.map_pan, egui::vec2(24.0, -9.0));
+        assert_eq!(editor.map_zoom, 91.0);
+        editor.set_camera_view(CameraView::Isometric);
+        assert_eq!(editor.map_pan, egui::vec2(-18.0, 4.0));
+        assert_eq!(editor.map_zoom, 42.0);
+    }
+
+    #[test]
+    fn isometric_primary_drag_routes_modifiers() {
+        let ctrl = egui::Modifiers {
+            ctrl: true,
+            ..Default::default()
+        };
+        let command = egui::Modifiers {
+            command: true,
+            ..Default::default()
+        };
+        let shift = egui::Modifiers {
+            shift: true,
+            ..Default::default()
+        };
+        let alt = egui::Modifiers {
+            alt: true,
+            ..Default::default()
+        };
+        assert_eq!(iso_primary_drag(ctrl, false), IsoPrimaryDrag::Orbit);
+        assert_eq!(iso_primary_drag(command, false), IsoPrimaryDrag::Edit);
+        assert_eq!(iso_primary_drag(shift, false), IsoPrimaryDrag::Pan);
+        assert_eq!(iso_primary_drag(alt, false), IsoPrimaryDrag::Box);
+        assert_eq!(
+            iso_primary_drag(egui::Modifiers::NONE, true),
+            IsoPrimaryDrag::Box
+        );
+        assert_eq!(
+            iso_primary_drag(egui::Modifiers::NONE, false),
+            IsoPrimaryDrag::Edit
+        );
+        assert_eq!(
+            iso_primary_drag(
+                egui::Modifiers {
+                    ctrl: true,
+                    shift: true,
+                    ..Default::default()
+                },
+                false
+            ),
+            IsoPrimaryDrag::Orbit
+        );
+    }
+
+    #[test]
+    fn copied_curve_preserves_grade_and_round_trips() {
+        let mut editor = sample_editor();
+        editor.program = parse("road street:\n    carlane;\nend;\nroad_1 = street(0,0,1,1,2,1,3,0);\ngrade(road_1,0.25,0.75);").unwrap();
+        editor.selected_segment = Some(SegmentSource::TopLevel(1));
+        editor.copy_selection();
+        editor.paste_selection();
+        let segments = map::project(&editor.program).segments;
+        assert_eq!(segments.len(), 2);
+        assert!((segments[1].start.x - 1.0).abs() < 0.0001);
+        assert!((segments[1].start.y + 1.0).abs() < 0.0001);
+        assert!((segments[1].controls[0].x - 2.0).abs() < 0.0001);
+        assert!((segments[1].start_z - 0.25).abs() < 0.0001);
+        assert!((segments[1].end_z - 0.75).abs() < 0.0001);
+        assert_eq!(
+            parse(&editor.program.to_road_source()).unwrap(),
+            editor.program
+        );
+    }
+
+    #[test]
+    fn box_selected_roads_delete_even_when_junctions_shift_indices() {
+        let mut editor = sample_editor();
+        editor.program = parse("road street:\n    carlane;\nend;").unwrap();
+        let road = match &editor.program.statements[0] {
+            Statement::Road(road) => road.clone(),
+            _ => unreachable!(),
+        };
+        let first = map::append_connected(
+            &mut editor.program,
+            &road,
+            WorldPoint { x: 0.0, y: 0.0 },
+            None,
+            WorldPoint { x: 1.0, y: 0.0 },
+            None,
+        )
+        .0;
+        let second = map::append_connected(
+            &mut editor.program,
+            &road,
+            WorldPoint { x: 2.0, y: 0.0 },
+            None,
+            WorldPoint { x: 3.0, y: 0.0 },
+            None,
+        )
+        .0;
+        editor.selected_segments = vec![
+            SegmentSource::TopLevel(first),
+            SegmentSource::TopLevel(second),
+        ];
+        assert_eq!(editor.delete_selected_segments(), 2);
+        assert!(map::project(&editor.program).segments.is_empty());
+        assert_eq!(
+            parse(&editor.program.to_road_source()).unwrap(),
+            editor.program
+        );
     }
 }
