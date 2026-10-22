@@ -130,33 +130,33 @@ town_2_2 = map_point(-5.6000, -2.8000);
 
 town_access_end = map_point(-5.6000, -1.7000);
 
-nw_loop_a_nw_loop_a_seam = map_point(-1.6164, 0.1858);
+nw_loop_a_nw_loop_a_seam = map_point(-1.6164, 0.2043);
 
-nw_loop_c_nw_loop_c_merge_seam = map_point(-0.1858, 1.6164);
+nw_loop_c_nw_loop_c_merge_seam = map_point(-0.2043, 1.6164);
 
 nw_connector_nw_connector_seam = map_point(-0.3360, 2.8290);
 
 nw_connector_nw_connector_merge_seam = map_point(-2.8290, 0.3360);
 
-sw_loop_a_sw_loop_a_seam = map_point(-0.1858, -1.6164);
+sw_loop_a_sw_loop_a_seam = map_point(-0.2043, -1.6164);
 
-sw_loop_c_sw_loop_c_merge_seam = map_point(-1.6164, -0.1858);
+sw_loop_c_sw_loop_c_merge_seam = map_point(-1.6164, -0.2043);
 
 sw_connector_sw_connector_seam = map_point(-2.8290, -0.3360);
 
 sw_connector_sw_connector_merge_seam = map_point(-0.3360, -2.8290);
 
-ne_loop_a_ne_loop_a_seam = map_point(0.1858, 1.6164);
+ne_loop_a_ne_loop_a_seam = map_point(0.2043, 1.6164);
 
-ne_loop_c_ne_loop_c_merge_seam = map_point(1.6164, 0.1858);
+ne_loop_c_ne_loop_c_merge_seam = map_point(1.6164, 0.2043);
 
 ne_connector_ne_connector_seam = map_point(2.8290, 0.3360);
 
 ne_connector_ne_connector_merge_seam = map_point(0.3360, 2.8290);
 
-se_loop_a_se_loop_a_seam = map_point(1.6164, -0.1858);
+se_loop_a_se_loop_a_seam = map_point(1.6164, -0.2043);
 
-se_loop_c_se_loop_c_merge_seam = map_point(0.1858, -1.6164);
+se_loop_c_se_loop_c_merge_seam = map_point(0.2043, -1.6164);
 
 se_connector_se_connector_seam = map_point(0.3360, -2.8290);
 
@@ -236,45 +236,45 @@ i_ns_05 = interstate_three_lane(ns_n12, 0.0000, 2.1333, 0.0000, 3.0667, ns_n4);
 
 i_ns_06 = interstate_three_lane(ns_n4, 0.0000, 4.6667, 0.0000, 5.3333, ns_n6);
 
-nw_loop_a_mouth = ramp_mouth(nw_exit, -1.3440, 0.1250, -1.4851, 0.1454, nw_loop_a_nw_loop_a_seam);
+nw_loop_a_mouth = ramp_mouth(nw_exit, -1.3440, 0.1250, -1.4851, 0.1639, nw_loop_a_nw_loop_a_seam);
 
-nw_loop_a = exit_ramp(nw_loop_a_nw_loop_a_seam, -2.0323, 0.3135, -2.3500, 0.6408, nw_outer);
+nw_loop_a = exit_ramp(nw_loop_a_nw_loop_a_seam, -2.0323, 0.3320, -2.3500, 0.6408, nw_outer);
 
 nw_loop_b = exit_ramp(nw_outer, -2.3500, 1.8500, -1.8500, 2.3500, nw_crown);
 
-nw_loop_c = exit_ramp(nw_crown, -0.6408, 2.3500, -0.3135, 2.0323, nw_loop_c_nw_loop_c_merge_seam);
+nw_loop_c = exit_ramp(nw_crown, -0.6408, 2.3500, -0.3320, 2.0323, nw_loop_c_nw_loop_c_merge_seam);
 
-nw_loop_c_merge = ramp_mouth(nw_loop_c_nw_loop_c_merge_seam, -0.1454, 1.4851, -0.1250, 1.3440, nw_merge);
+nw_loop_c_merge = ramp_mouth(nw_loop_c_nw_loop_c_merge_seam, -0.1639, 1.4851, -0.1250, 1.3440, nw_merge);
 
-sw_loop_a_mouth = ramp_mouth(sw_exit, -0.1250, -1.3440, -0.1454, -1.4851, sw_loop_a_sw_loop_a_seam);
+sw_loop_a_mouth = ramp_mouth(sw_exit, -0.1250, -1.3440, -0.1639, -1.4851, sw_loop_a_sw_loop_a_seam);
 
-sw_loop_a = exit_ramp(sw_loop_a_sw_loop_a_seam, -0.3135, -2.0323, -0.6408, -2.3500, sw_crown);
+sw_loop_a = exit_ramp(sw_loop_a_sw_loop_a_seam, -0.3320, -2.0323, -0.6408, -2.3500, sw_crown);
 
 sw_loop_b = exit_ramp(sw_crown, -1.8500, -2.3500, -2.3500, -1.8500, sw_outer);
 
-sw_loop_c = exit_ramp(sw_outer, -2.3500, -0.6408, -2.0323, -0.3135, sw_loop_c_sw_loop_c_merge_seam);
+sw_loop_c = exit_ramp(sw_outer, -2.3500, -0.6408, -2.0323, -0.3320, sw_loop_c_sw_loop_c_merge_seam);
 
-sw_loop_c_merge = ramp_mouth(sw_loop_c_sw_loop_c_merge_seam, -1.4851, -0.1454, -1.3440, -0.1250, sw_merge);
+sw_loop_c_merge = ramp_mouth(sw_loop_c_sw_loop_c_merge_seam, -1.4851, -0.1639, -1.3440, -0.1250, sw_merge);
 
-ne_loop_a_mouth = ramp_mouth(ne_exit, 0.1250, 1.3440, 0.1454, 1.4851, ne_loop_a_ne_loop_a_seam);
+ne_loop_a_mouth = ramp_mouth(ne_exit, 0.1250, 1.3440, 0.1639, 1.4851, ne_loop_a_ne_loop_a_seam);
 
-ne_loop_a = exit_ramp(ne_loop_a_ne_loop_a_seam, 0.3135, 2.0323, 0.6408, 2.3500, ne_crown);
+ne_loop_a = exit_ramp(ne_loop_a_ne_loop_a_seam, 0.3320, 2.0323, 0.6408, 2.3500, ne_crown);
 
 ne_loop_b = exit_ramp(ne_crown, 1.8500, 2.3500, 2.3500, 1.8500, ne_outer);
 
-ne_loop_c = exit_ramp(ne_outer, 2.3500, 0.6408, 2.0323, 0.3135, ne_loop_c_ne_loop_c_merge_seam);
+ne_loop_c = exit_ramp(ne_outer, 2.3500, 0.6408, 2.0323, 0.3320, ne_loop_c_ne_loop_c_merge_seam);
 
-ne_loop_c_merge = ramp_mouth(ne_loop_c_ne_loop_c_merge_seam, 1.4851, 0.1454, 1.3440, 0.1250, ne_merge);
+ne_loop_c_merge = ramp_mouth(ne_loop_c_ne_loop_c_merge_seam, 1.4851, 0.1639, 1.3440, 0.1250, ne_merge);
 
-se_loop_a_mouth = ramp_mouth(se_exit, 1.3440, -0.1250, 1.4851, -0.1454, se_loop_a_se_loop_a_seam);
+se_loop_a_mouth = ramp_mouth(se_exit, 1.3440, -0.1250, 1.4851, -0.1639, se_loop_a_se_loop_a_seam);
 
-se_loop_a = exit_ramp(se_loop_a_se_loop_a_seam, 2.0323, -0.3135, 2.3500, -0.6408, se_outer);
+se_loop_a = exit_ramp(se_loop_a_se_loop_a_seam, 2.0323, -0.3320, 2.3500, -0.6408, se_outer);
 
 se_loop_b = exit_ramp(se_outer, 2.3500, -1.8500, 1.8500, -2.3500, se_crown);
 
-se_loop_c = exit_ramp(se_crown, 0.6408, -2.3500, 0.3135, -2.0323, se_loop_c_se_loop_c_merge_seam);
+se_loop_c = exit_ramp(se_crown, 0.6408, -2.3500, 0.3320, -2.0323, se_loop_c_se_loop_c_merge_seam);
 
-se_loop_c_merge = ramp_mouth(se_loop_c_se_loop_c_merge_seam, 0.1454, -1.4851, 0.1250, -1.3440, se_merge);
+se_loop_c_merge = ramp_mouth(se_loop_c_se_loop_c_merge_seam, 0.1639, -1.4851, 0.1250, -1.3440, se_merge);
 
 nw_connector_mouth = ramp_mouth(nw_direct_exit, -0.1250, 3.6000, -0.2000, 3.2050, nw_connector_nw_connector_seam);
 

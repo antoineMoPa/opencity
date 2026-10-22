@@ -115,7 +115,23 @@ enum View {
 enum MapTool {
     Select,
     Draw,
+    Draft,
     Landscape(LandscapeKind),
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum CameraView {
+    Top,
+    Isometric,
+}
+
+#[derive(Clone)]
+struct CopiedSegment {
+    road_name: String,
+    name: Option<String>,
+    points: [WorldPoint; 4],
+    start_z: f32,
+    end_z: f32,
 }
 
 fn landscape_label(kind: LandscapeKind) -> &'static str {
@@ -237,6 +253,12 @@ struct RoadEditor {
     new_kind: RoadElementKind,
     view: View,
     map_tool: MapTool,
+    camera_view: CameraView,
+    orbit_angle: f32,
+    orbit_target: WorldPoint,
+    selected_segments: Vec<SegmentSource>,
+    clipboard: Vec<CopiedSegment>,
+    box_start: Option<egui::Pos2>,
     map_start: Option<WorldPoint>,
     map_start_ref: Option<String>,
     landscape_points: Vec<WorldPoint>,
@@ -290,6 +312,12 @@ impl RoadEditor {
             new_kind: RoadElementKind::CarLane,
             view: View::Map,
             map_tool: MapTool::Select,
+            camera_view: CameraView::Top,
+            orbit_angle: std::f32::consts::FRAC_PI_4,
+            orbit_target: WorldPoint { x: 0.0, y: 0.0 },
+            selected_segments: Vec::new(),
+            clipboard: Vec::new(),
+            box_start: None,
             map_start: None,
             map_start_ref: None,
             landscape_points: Vec::new(),
@@ -2364,6 +2392,7 @@ impl RoadEditor {
                 ui.label(
                     RichText::new(match self.map_tool {
                         MapTool::Draw => "Click freely or pick a road/lane end | hold Shift for grid snap | drag empty map to pan | Enter or Esc finishes",
+                        MapTool::Draft => "Click to place draft points | Enter or Esc finishes",
                         MapTool::Select => "Drag points freely; hold Shift for grid snap | E extends, R rotates | green marker starts an exit",
                         MapTool::Landscape(_) => "Click points to outline the feature | hold Shift for grid snap | Enter finishes | Esc cancels",
                     })
@@ -3838,6 +3867,80 @@ struct PaintProfile {
     merge_alignment: Option<usize>,
     start_taper: Vec<usize>,
     end_taper: Vec<usize>,
+    start_parent: Option<AttachmentFootprint>,
+    end_parent: Option<AttachmentFootprint>,
+}
+
+#[derive(Clone)]
+struct AttachmentFootprint {
+    segments: Vec<map::Segment>,
+    half_width: f32,
+}
+
+fn attachment_footprint(
+    projection: &map::Projection,
+    parent_index: usize,
+    road: &RoadDefinition,
+) -> AttachmentFootprint {
+    let parent = &projection.segments[parent_index];
+    let joins = road_joins(projection);
+    let mut included = vec![false; projection.segments.len()];
+    included[parent_index] = true;
+    loop {
+        let mut expanded = false;
+        for &(incoming, outgoing) in &joins {
+            let same_profile = projection.segments[incoming].road_name == parent.road_name
+                && projection.segments[outgoing].road_name == parent.road_name;
+            if same_profile
+                && straight_join(
+                    &projection.segments[incoming],
+                    &projection.segments[outgoing],
+                )
+            {
+                if included[incoming] && !included[outgoing] {
+                    included[outgoing] = true;
+                    expanded = true;
+                } else if included[outgoing] && !included[incoming] {
+                    included[incoming] = true;
+                    expanded = true;
+                }
+            }
+        }
+        if !expanded {
+            break;
+        }
+    }
+    let segments = projection
+        .segments
+        .iter()
+        .enumerate()
+        .filter_map(|(index, segment)| included[index].then(|| segment.clone()))
+        .collect();
+    let total: f32 = road
+        .elements
+        .iter()
+        .map(|element| map::element_world_width(element.kind))
+        .sum();
+    AttachmentFootprint {
+        segments,
+        half_width: total / 2.0,
+    }
+}
+
+#[cfg(test)]
+fn attachment_verges(road: &RoadDefinition, lane: usize) -> Vec<usize> {
+    let adjacent = if lane == 0 {
+        1
+    } else if lane + 1 == road.elements.len() {
+        lane - 1
+    } else {
+        return Vec::new();
+    };
+    road.elements
+        .get(adjacent)
+        .filter(|element| element.kind == RoadElementKind::Verge)
+        .map(|_| vec![adjacent])
+        .unwrap_or_default()
 }
 
 #[derive(Clone)]
@@ -3935,10 +4038,11 @@ fn paint_profiles(program: &Program, projection: &map::Projection) -> Vec<PaintP
         .map(|_| PaintProfile::default())
         .collect();
     for split in map::lane_splits(program) {
-        let Some(parent) = projection
+        let Some((parent_index, parent)) = projection
             .segments
             .iter()
-            .find(|segment| segment.name.as_deref() == Some(&split.parent))
+            .enumerate()
+            .find(|(_, segment)| segment.name.as_deref() == Some(&split.parent))
         else {
             continue;
         };
@@ -3956,8 +4060,12 @@ fn paint_profiles(program: &Program, projection: &map::Projection) -> Vec<PaintP
         let Some(ramp_road) = road_for_segment(program, ramp) else {
             continue;
         };
-        profiles[ramp_index].start_alignment =
-            ramp_element_at_attachment(parent_road, ramp_road, split.element_index);
+        if let Some(lane) = ramp_element_at_attachment(parent_road, ramp_road, split.element_index)
+        {
+            profiles[ramp_index].start_alignment = Some(lane);
+            profiles[ramp_index].start_parent =
+                Some(attachment_footprint(projection, parent_index, parent_road));
+        }
     }
     for (index, segment) in projection.segments.iter().enumerate() {
         let Some((parent_name, element_index, _)) = segment
@@ -3967,10 +4075,11 @@ fn paint_profiles(program: &Program, projection: &map::Projection) -> Vec<PaintP
         else {
             continue;
         };
-        let Some(parent) = projection
+        let Some((parent_index, parent)) = projection
             .segments
             .iter()
-            .find(|candidate| candidate.name.as_deref() == Some(&parent_name))
+            .enumerate()
+            .find(|(_, candidate)| candidate.name.as_deref() == Some(&parent_name))
         else {
             continue;
         };
@@ -3980,14 +4089,25 @@ fn paint_profiles(program: &Program, projection: &map::Projection) -> Vec<PaintP
         ) else {
             continue;
         };
-        profiles[index].merge_alignment =
-            ramp_element_at_attachment(parent_road, ramp_road, element_index);
+        if let Some(lane) = ramp_element_at_attachment(parent_road, ramp_road, element_index) {
+            profiles[index].merge_alignment = Some(lane);
+            profiles[index].end_parent =
+                Some(attachment_footprint(projection, parent_index, parent_road));
+        }
     }
     for (incoming, outgoing) in road_joins(projection) {
         let a = &projection.segments[incoming];
         let b = &projection.segments[outgoing];
         if !straight_join(a, b) {
             continue;
+        }
+        // The exit ramp adjoining a mouth can reach beneath the receiving
+        // highway before the mouth starts. Clip that hidden outline against
+        // the same parent, while leaving its lane shape and paint order alone.
+        if a.road_name == "exit_ramp" && b.road_name == "ramp_mouth" {
+            profiles[incoming].end_parent = profiles[outgoing].end_parent.clone();
+        } else if a.road_name == "ramp_mouth" && b.road_name == "exit_ramp" {
+            profiles[outgoing].start_parent = profiles[incoming].start_parent.clone();
         }
         let (Some(a_road), Some(b_road)) =
             (road_for_segment(program, a), road_for_segment(program, b))
@@ -4112,6 +4232,61 @@ fn section_edges(road: &RoadDefinition, profile: &PaintProfile, t: f32) -> (f32,
     (left, left + widths.iter().sum::<f32>())
 }
 
+fn screen_point_in_road(
+    point: egui::Pos2,
+    footprint: &AttachmentFootprint,
+    rect: egui::Rect,
+    pan: egui::Vec2,
+    zoom: f32,
+) -> bool {
+    // The ramp boundary can land exactly on the parent's outline. Account for
+    // the outline's raster width so that the coincident ramp outline is hidden.
+    let radius = footprint.half_width * zoom + 0.5;
+    let radius_sq = radius.powi(2);
+    for segment in &footprint.segments {
+        let hull = [
+            segment.start,
+            segment.controls[0],
+            segment.controls[1],
+            segment.end,
+        ]
+        .map(|world| screen_of(rect, pan, zoom, world));
+        let (min_x, max_x) = hull
+            .iter()
+            .fold((f32::INFINITY, f32::NEG_INFINITY), |(min, max), corner| {
+                (min.min(corner.x), max.max(corner.x))
+            });
+        let (min_y, max_y) = hull
+            .iter()
+            .fold((f32::INFINITY, f32::NEG_INFINITY), |(min, max), corner| {
+                (min.min(corner.y), max.max(corner.y))
+            });
+        if point.x < min_x - radius
+            || point.x > max_x + radius
+            || point.y < min_y - radius
+            || point.y > max_y + radius
+        {
+            continue;
+        }
+        let mut previous = screen_of(rect, pan, zoom, segment.point_at(0.0));
+        for step in 1..=128 {
+            let next = screen_of(rect, pan, zoom, segment.point_at(step as f32 / 128.0));
+            let direction = next - previous;
+            let length_sq = direction.length_sq();
+            let along = if length_sq > 0.0 {
+                ((point - previous).dot(direction) / length_sq).clamp(0.0, 1.0)
+            } else {
+                0.0
+            };
+            if point.distance_sq(previous + direction * along) <= radius_sq {
+                return true;
+            }
+            previous = next;
+        }
+    }
+    false
+}
+
 fn design_rule_issues(
     program: &Program,
     projection: &map::Projection,
@@ -4207,6 +4382,118 @@ fn design_rule_issues(
     issues
 }
 
+fn tuck_mouth_lane_at_seam(
+    row: &mut [egui::Pos2],
+    t: f32,
+    profile: &PaintProfile,
+    rect: egui::Rect,
+    pan: egui::Vec2,
+    zoom: f32,
+) {
+    // The parent covers the preceding ramp where it passes beneath the verge.
+    // Open the mouth lane into that verge gradually from the first visible
+    // section, so its full width does not appear abruptly at the seam.
+    let seam = if let Some(parent) = profile.end_parent.as_ref() {
+        profile
+            .merge_alignment
+            .map(|lane| (parent, lane, 1.0 - (t / 0.35).clamp(0.0, 1.0)))
+    } else if let Some(parent) = profile.start_parent.as_ref() {
+        profile
+            .start_alignment
+            .map(|lane| (parent, lane, 1.0 - ((1.0 - t) / 0.35).clamp(0.0, 1.0)))
+    } else {
+        None
+    };
+    let Some((parent, lane, blend)) = seam else {
+        return;
+    };
+    if blend <= 0.0 || lane + 1 >= row.len() {
+        return;
+    }
+    let left_inside = screen_point_in_road(row[lane], parent, rect, pan, zoom);
+    let right_inside = screen_point_in_road(row[lane + 1], parent, rect, pan, zoom);
+    if left_inside == right_inside {
+        return;
+    }
+    let (inside, outside) = if left_inside {
+        (lane, lane + 1)
+    } else {
+        (lane + 1, lane)
+    };
+    let mut within = row[inside];
+    let mut beyond = row[outside];
+    for _ in 0..8 {
+        let middle = within + (beyond - within) * 0.5;
+        if screen_point_in_road(middle, parent, rect, pan, zoom) {
+            within = middle;
+        } else {
+            beyond = middle;
+        }
+    }
+    let eased = blend * blend * (3.0 - 2.0 * blend);
+    row[inside] += (beyond - row[inside]) * eased;
+}
+
+fn trim_adjoining_ramp_to_parent(
+    row: &mut [egui::Pos2],
+    profile: &PaintProfile,
+    rect: egui::Rect,
+    pan: egui::Vec2,
+    zoom: f32,
+) {
+    // This footprint is inherited only by the exit_ramp next to a mouth.
+    // Keep its surface outside the receiving road while collapsing the lane
+    // and verge portions already buried beneath that road to its outer edge.
+    if profile.start_alignment.is_some() || profile.merge_alignment.is_some() {
+        return;
+    }
+    let Some(parent) = profile
+        .start_parent
+        .as_ref()
+        .or(profile.end_parent.as_ref())
+    else {
+        return;
+    };
+    let inside: Vec<_> = row
+        .iter()
+        .map(|point| screen_point_in_road(*point, parent, rect, pan, zoom))
+        .collect();
+    let crossing = if inside[0] && !inside[row.len() - 1] {
+        inside
+            .iter()
+            .position(|inside| !inside)
+            .map(|outside| (0, outside))
+    } else if !inside[0] && inside[row.len() - 1] {
+        inside
+            .iter()
+            .rposition(|inside| !inside)
+            .map(|outside| (outside + 1, row.len()))
+    } else {
+        None
+    };
+    let Some((start, end)) = crossing else {
+        return;
+    };
+    let (inside_index, outside_index) = if start == 0 {
+        (end - 1, end)
+    } else {
+        (start, start - 1)
+    };
+    let mut within = row[inside_index];
+    let mut beyond = row[outside_index];
+    for _ in 0..8 {
+        let middle = within + (beyond - within) * 0.5;
+        if screen_point_in_road(middle, parent, rect, pan, zoom) {
+            within = middle;
+        } else {
+            beyond = middle;
+        }
+    }
+    for point in &mut row[start..end] {
+        *point = beyond;
+    }
+}
+
 fn paint_profiled_road(
     painter: &egui::Painter,
     rect: egui::Rect,
@@ -4231,6 +4518,8 @@ fn paint_profiled_road(
             offset += width;
             row.push(center + normal * offset);
         }
+        tuck_mouth_lane_at_seam(&mut row, t, profile, rect, pan, zoom);
+        trim_adjoining_ramp_to_parent(&mut row, profile, rect, pan, zoom);
         boundaries.push(row);
     }
     for (element_index, element) in road.elements.iter().enumerate() {
@@ -4255,26 +4544,67 @@ fn paint_profiled_road(
         palette.map_outline
     };
     for edge in [0, road.elements.len()] {
-        let path: Vec<_> = boundaries.iter().map(|row| row[edge]).collect();
+        let mut path = Vec::new();
+        for row in &boundaries {
+            let within_parent = profile
+                .start_parent
+                .as_ref()
+                .is_some_and(|parent| screen_point_in_road(row[edge], parent, rect, pan, zoom))
+                || profile
+                    .end_parent
+                    .as_ref()
+                    .is_some_and(|parent| screen_point_in_road(row[edge], parent, rect, pan, zoom));
+            if within_parent {
+                if path.len() > 1 {
+                    painter.add(egui::Shape::line(
+                        std::mem::take(&mut path),
+                        egui::Stroke::new(if selected { 2.5 } else { 1.5 }, outline),
+                    ));
+                } else {
+                    path.clear();
+                }
+            } else {
+                path.push(row[edge]);
+            }
+        }
+        if path.len() > 1 {
+            painter.add(egui::Shape::line(
+                path,
+                egui::Stroke::new(if selected { 2.5 } else { 1.5 }, outline),
+            ));
+        }
+    }
+    let mut spine = Vec::new();
+    for step in 0..=samples {
+        let point = screen_of(
+            rect,
+            pan,
+            zoom,
+            segment.point_at(step as f32 / samples as f32),
+        );
+        let within_parent = [profile.start_parent.as_ref(), profile.end_parent.as_ref()]
+            .into_iter()
+            .flatten()
+            .any(|parent| screen_point_in_road(point, parent, rect, pan, zoom));
+        if within_parent {
+            if spine.len() > 1 {
+                painter.add(egui::Shape::line(
+                    std::mem::take(&mut spine),
+                    egui::Stroke::new((zoom * 0.004).clamp(0.8, 12.0), palette.map_centerline),
+                ));
+            } else {
+                spine.clear();
+            }
+        } else {
+            spine.push(point);
+        }
+    }
+    if spine.len() > 1 {
         painter.add(egui::Shape::line(
-            path,
-            egui::Stroke::new(if selected { 2.5 } else { 1.5 }, outline),
+            spine,
+            egui::Stroke::new((zoom * 0.004).clamp(0.8, 12.0), palette.map_centerline),
         ));
     }
-    let spine: Vec<_> = (0..=samples)
-        .map(|step| {
-            screen_of(
-                rect,
-                pan,
-                zoom,
-                segment.point_at(step as f32 / samples as f32),
-            )
-        })
-        .collect();
-    painter.add(egui::Shape::line(
-        spine,
-        egui::Stroke::new((zoom * 0.004).clamp(0.8, 12.0), palette.map_centerline),
-    ));
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -5237,6 +5567,12 @@ mod tests {
             new_kind: RoadElementKind::BikeLane,
             view: View::Map,
             map_tool: MapTool::Select,
+            camera_view: CameraView::Top,
+            orbit_angle: std::f32::consts::FRAC_PI_4,
+            orbit_target: WorldPoint { x: 0.0, y: 0.0 },
+            selected_segments: Vec::new(),
+            clipboard: Vec::new(),
+            box_start: None,
             map_start: None,
             map_start_ref: None,
             landscape_points: Vec::new(),
@@ -5647,6 +5983,277 @@ mod tests {
             }
         }
         assert_eq!((exits, merges), (8, 9));
+    }
+
+    #[test]
+    fn every_ramp_mouth_opens_at_its_highway_attachment() {
+        for (source, expected_mouths) in [
+            (include_str!("../../examples/starter_city.road"), 16),
+            (include_str!("../../examples/cloverleaf_town.road"), 17),
+        ] {
+            let program = parse(source).unwrap();
+            let projection = map::project(&program);
+            let profiles = paint_profiles(&program, &projection);
+            let mut mouths = 0;
+            for (index, segment) in projection.segments.iter().enumerate() {
+                if segment.road_name != "ramp_mouth" {
+                    continue;
+                }
+                mouths += 1;
+                let road = road_for_segment(&program, segment).unwrap();
+                let profile = &profiles[index];
+                let (t, lane, parent) = if let Some(parent) = profile.start_parent.as_ref() {
+                    (0.0, profile.start_alignment.unwrap(), parent)
+                } else {
+                    (
+                        1.0,
+                        profile.merge_alignment.unwrap(),
+                        profile.end_parent.as_ref().unwrap(),
+                    )
+                };
+                let (widths, left) = section_widths(road, 1.0, profile, t);
+                let lane_center = left + widths[..lane].iter().sum::<f32>() + widths[lane] / 2.0;
+                assert!(
+                    lane_center.abs() < 0.00001,
+                    "{} lane center",
+                    segment.name.as_deref().unwrap()
+                );
+                assert!(
+                    (widths[lane] - map::element_world_width(RoadElementKind::CarLane)).abs()
+                        < 0.00001
+                );
+                for verge in attachment_verges(road, lane) {
+                    assert!(
+                        (widths[verge] - map::element_world_width(RoadElementKind::Verge)).abs()
+                            < 0.00001,
+                        "{} verge",
+                        segment.name.as_deref().unwrap()
+                    );
+                }
+                let rect = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(100.0, 100.0));
+                let center = screen_of(rect, egui::Vec2::ZERO, 1000.0, segment.point_at(t));
+                let normal = screen_normal_at(segment, t);
+                for offset in [left, left + widths.iter().sum::<f32>()] {
+                    assert!(
+                        screen_point_in_road(
+                            center + normal * (offset * 1000.0),
+                            parent,
+                            rect,
+                            egui::Vec2::ZERO,
+                            1000.0
+                        ),
+                        "{} ramp outline starts outside receiving road",
+                        segment.name.as_deref().unwrap()
+                    );
+                }
+            }
+            assert_eq!(mouths, expected_mouths);
+        }
+    }
+
+    #[test]
+    fn loop_mouth_lane_enters_parent_verge_without_a_seam_fin() {
+        let program = starter_program();
+        let projection = map::project(&program);
+        let profiles = paint_profiles(&program, &projection);
+        let rect = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(100.0, 100.0));
+        let pan = egui::Vec2::ZERO;
+        let zoom = 1000.0;
+        for (name, seam_t) in [("nw_loop_c_merge", 0.0), ("ne_loop_a_mouth", 1.0)] {
+            let index = projection
+                .segments
+                .iter()
+                .position(|segment| segment.name.as_deref() == Some(name))
+                .unwrap();
+            let segment = &projection.segments[index];
+            let road = road_for_segment(&program, segment).unwrap();
+            let profile = &profiles[index];
+            let (parent, lane) = if seam_t == 0.0 {
+                (
+                    profile.end_parent.as_ref().unwrap(),
+                    profile.merge_alignment.unwrap(),
+                )
+            } else {
+                (
+                    profile.start_parent.as_ref().unwrap(),
+                    profile.start_alignment.unwrap(),
+                )
+            };
+            let row_at = |t| {
+                let center = screen_of(rect, pan, zoom, segment.point_at(t));
+                let normal = screen_normal_at(segment, t);
+                let (widths, mut offset) = section_widths(road, zoom, profile, t);
+                let mut row = vec![center + normal * offset];
+                for width in widths {
+                    offset += width;
+                    row.push(center + normal * offset);
+                }
+                row
+            };
+            let mut row = row_at(seam_t);
+            let before = row.clone();
+            let left_inside = screen_point_in_road(row[lane], parent, rect, pan, zoom);
+            let right_inside = screen_point_in_road(row[lane + 1], parent, rect, pan, zoom);
+            assert_ne!(
+                left_inside, right_inside,
+                "{name} must cross the parent edge"
+            );
+            let (inside, outside) = if left_inside {
+                (lane, lane + 1)
+            } else {
+                (lane + 1, lane)
+            };
+            tuck_mouth_lane_at_seam(&mut row, seam_t, profile, rect, pan, zoom);
+            assert!(
+                !screen_point_in_road(row[inside], parent, rect, pan, zoom),
+                "{name} fin remains"
+            );
+            assert_eq!(
+                row[outside], before[outside],
+                "{name} outside lane edge moved"
+            );
+            assert!(
+                row[inside].distance(row[outside]) > 2.0,
+                "{name} lane collapsed"
+            );
+            let far_t = if seam_t == 0.0 { 0.35 } else { 0.65 };
+            let mut far_row = row_at(far_t);
+            let original_far_row = far_row.clone();
+            tuck_mouth_lane_at_seam(&mut far_row, far_t, profile, rect, pan, zoom);
+            assert_eq!(
+                far_row, original_far_row,
+                "{name} mouth beyond seam changed"
+            );
+        }
+    }
+
+    #[test]
+    fn adjoining_loop_ramp_outlines_clip_at_the_mouths_parent() {
+        let program = starter_program();
+        let projection = map::project(&program);
+        let profiles = paint_profiles(&program, &projection);
+        for (ramp_name, mouth_name, merge) in [
+            ("nw_loop_c", "nw_loop_c_merge", true),
+            ("ne_loop_a", "ne_loop_a_mouth", false),
+        ] {
+            let find = |name: &str| {
+                projection
+                    .segments
+                    .iter()
+                    .position(|segment| segment.name.as_deref() == Some(name))
+                    .unwrap()
+            };
+            let ramp = &profiles[find(ramp_name)];
+            let mouth = &profiles[find(mouth_name)];
+            let (ramp_parent, mouth_parent) = if merge {
+                (ramp.end_parent.as_ref(), mouth.end_parent.as_ref())
+            } else {
+                (ramp.start_parent.as_ref(), mouth.start_parent.as_ref())
+            };
+            let ramp_names: Vec<_> = ramp_parent
+                .unwrap()
+                .segments
+                .iter()
+                .map(|segment| segment.name.as_deref())
+                .collect();
+            let mouth_names: Vec<_> = mouth_parent
+                .unwrap()
+                .segments
+                .iter()
+                .map(|segment| segment.name.as_deref())
+                .collect();
+            assert_eq!(ramp_names, mouth_names, "{ramp_name} clips at {mouth_name}");
+            assert!(ramp.start_alignment.is_none());
+            assert!(ramp.merge_alignment.is_none());
+        }
+    }
+
+    #[test]
+    fn adjoining_loop_ramp_fill_stops_at_the_parent_edge() {
+        let program = starter_program();
+        let projection = map::project(&program);
+        let profiles = paint_profiles(&program, &projection);
+        let rect = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(100.0, 100.0));
+        let pan = egui::Vec2::ZERO;
+        let zoom = 1000.0;
+        for (name, t, merge) in [("nw_loop_c", 1.0, true), ("ne_loop_a", 0.0, false)] {
+            let index = projection
+                .segments
+                .iter()
+                .position(|segment| segment.name.as_deref() == Some(name))
+                .unwrap();
+            let segment = &projection.segments[index];
+            let profile = &profiles[index];
+            let parent = if merge {
+                profile.end_parent.as_ref().unwrap()
+            } else {
+                profile.start_parent.as_ref().unwrap()
+            };
+            let road = road_for_segment(&program, segment).unwrap();
+            let center = screen_of(rect, pan, zoom, segment.point_at(t));
+            let normal = screen_normal_at(segment, t);
+            let (widths, mut offset) = section_widths(road, zoom, profile, t);
+            let mut row = vec![center + normal * offset];
+            for width in widths {
+                offset += width;
+                row.push(center + normal * offset);
+            }
+            let original = row.clone();
+            let inside: Vec<_> = row
+                .iter()
+                .map(|point| screen_point_in_road(*point, parent, rect, pan, zoom))
+                .collect();
+            assert!(inside.iter().any(|inside| *inside), "{name} misses parent");
+            assert!(inside.iter().any(|inside| !*inside), "{name} wholly buried");
+            trim_adjoining_ramp_to_parent(&mut row, profile, rect, pan, zoom);
+            for (index, point) in row.iter().enumerate() {
+                assert!(
+                    !screen_point_in_road(*point, parent, rect, pan, zoom),
+                    "{name} cap remains at boundary {index}"
+                );
+                if !inside[index] {
+                    assert_eq!(*point, original[index], "{name} outside surface moved");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn ramp_attachment_footprints_cross_connected_highway_seams() {
+        for (source, mouth_name, near_name, far_name) in [
+            (
+                include_str!("../../examples/starter_city.road"),
+                "nw_loop_c_merge",
+                "interstate_north_south_04",
+                "interstate_north_south_05",
+            ),
+            (
+                include_str!("../../examples/cloverleaf_town.road"),
+                "nw_loop_c_merge",
+                "i_ns_04",
+                "i_ns_05",
+            ),
+        ] {
+            let program = parse(source).unwrap();
+            let projection = map::project(&program);
+            let profiles = paint_profiles(&program, &projection);
+            let (index, _) = projection
+                .segments
+                .iter()
+                .enumerate()
+                .find(|(_, segment)| segment.name.as_deref() == Some(mouth_name))
+                .unwrap();
+            let footprint = profiles[index].end_parent.as_ref().unwrap();
+            for name in [near_name, far_name] {
+                assert!(
+                    footprint
+                        .segments
+                        .iter()
+                        .any(|segment| segment.name.as_deref() == Some(name)),
+                    "{mouth_name} must clip its outline across {name}"
+                );
+            }
+        }
     }
 
     #[test]

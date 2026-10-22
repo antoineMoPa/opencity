@@ -17,7 +17,7 @@ path = "src/bin/editor.rs"
 required-features = ["editor"]
 
 [dependencies]
-eframe = { version = "0.36", default-features = false, features = ["default_fonts", "glow", "x11", "wayland"], optional = true }
+eframe = { version = "0.36", default-features = false, features = ["default_fonts", "wgpu", "x11", "wayland"], optional = true }
 egui_extras = { version = "0.36", features = ["svg"], optional = true }
 rfd = { version = "0.17", optional = true }
 serde_json = { version = "=1.0.151", optional = true }
