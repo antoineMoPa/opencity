@@ -26,23 +26,23 @@ road farm_track:
     verge-carlane-verge;
 end;
 road rural_road:
-    verge-shoulder-carlane-middle-carlane-shoulder-verge;
+    verge-carlane-middle-carlane-verge;
 end;
 road rural_highway:
-    verge-shoulder-carlane-carlane-carlane-carlane-shoulder-verge;
+    verge-carlane-carlane-carlane-carlane-verge;
 end;
 road mountain_road:
-    shoulder-carlane-middle-carlane-shoulder;
+    carlane-middle-carlane;
 end;
 road divided_highway:
-    verge-shoulder-carlane-carlane-middle-carlane-carlane-shoulder-verge;
+    verge-carlane-carlane-middle-carlane-carlane-verge;
 end;
 road exit_ramp:
-    verge-shoulder-carlane-shoulder-verge;
+    verge-carlane-verge;
 end;
 road interstate_three_lane:
-    verge-shoulder-carlane-carlane-carlane-middle-carlane-carlane-carlane-shoulder-verge;
+    verge-carlane-carlane-carlane-middle-carlane-carlane-carlane-verge;
 end;
 road interstate_four_lane:
-    verge-shoulder-carlane-carlane-carlane-carlane-middle-carlane-carlane-carlane-carlane-shoulder-verge;
+    verge-carlane-carlane-carlane-carlane-middle-carlane-carlane-carlane-carlane-verge;
 end;

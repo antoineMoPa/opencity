@@ -38,13 +38,14 @@ fn tool(name: &str, description: &str, properties: Value, required: &[&str]) -> 
 fn tools() -> Value {
     json!({"tools":[
         tool("get_road_state", "Get the current road AST source and projected road segments", json!({}), &[]),
-        tool("check_design_rules", "Check whether straight road-to-road joins have matching edges", json!({}), &[]),
+        tool("check_design_rules", "Check road joins and intersection edge cross sections", json!({}), &[]),
         tool("get_viewport_image", "Capture the current editor viewport as a PNG image", json!({}), &[]),
         tool("get_viewport", "Get map center and zoom in pixels per world unit", json!({}), &[]),
         tool("set_viewport", "Set map center and zoom", json!({"center_x":{"type":"number"},"center_y":{"type":"number"},"zoom":{"type":"number"}}), &["center_x","center_y","zoom"]),
         tool("replace_document", "Replace the editor document with valid OpenCity road source as one undoable edit", json!({"source":{"type":"string"}}), &["source"]),
         tool("save_document", "Save the current editor document to an absolute .road path", json!({"path":{"type":"string"}}), &["path"]),
         tool("add_road", "Place a cubic road using an existing road type; optional endpoint references share junctions", json!({"road_type":{"type":"string"},"name":{"type":"string"},"start_ref":{"type":"string"},"end_ref":{"type":"string"},"start_x":{"type":"number"},"start_y":{"type":"number"},"end_x":{"type":"number"},"end_y":{"type":"number"},"control1_x":{"type":"number"},"control1_y":{"type":"number"},"control2_x":{"type":"number"},"control2_y":{"type":"number"}}), &["road_type","start_x","start_y","end_x","end_y"]),
+        tool("set_intersection", "Define or remove a square turn or intersection with a fixed edge cross section", json!({"point_ref":{"type":"string"},"kind":{"type":"string","enum":["right_turn","three_way","four_way","none"]},"road_type":{"type":"string"}}), &["point_ref","kind"]),
         tool("move_road", "Translate a placed road and its connected endpoints", json!({"segment_index":{"type":"integer"},"dx":{"type":"number"},"dy":{"type":"number"}}), &["segment_index","dx","dy"]),
         tool("move_control_point", "Set the first or second Bézier control point", json!({"segment_index":{"type":"integer"},"control":{"type":"integer","enum":[1,2]},"x":{"type":"number"},"y":{"type":"number"}}), &["segment_index","control","x","y"]),
         tool("move_endpoint", "Set the start or end point, moving connected road ends too", json!({"segment_index":{"type":"integer"},"end":{"type":"boolean"},"x":{"type":"number"},"y":{"type":"number"}}), &["segment_index","end","x","y"]),
@@ -336,6 +337,20 @@ impl RoadEditor {
             }
             "get_road_state" => {
                 let projection = map::project(&self.program);
+                let intersections: Vec<_> = map::intersections(&self.program, &projection)
+                    .iter()
+                    .map(|intersection| {
+                        json!({"point_ref":intersection.point_ref,"kind":match intersection.kind {
+                        map::IntersectionKind::RightTurn => "right_turn",
+                        map::IntersectionKind::ThreeWay => "three_way",
+                        map::IntersectionKind::FourWay => "four_way",
+                    },"road_type":intersection.road_name,"position":[intersection.position.x,intersection.position.y],
+                    "ports":intersection.ports.iter().map(|port| json!({
+                        "point_ref":port.point_ref,"position":[port.position.x,port.position.y],
+                        "direction":[port.direction.x,port.direction.y]
+                    })).collect::<Vec<_>>()})
+                    })
+                    .collect();
                 let segments: Vec<_> = projection.segments.iter().map(|segment| {
                     json!({"segment_index": match segment.source { SegmentSource::TopLevel(index) => Some(index), _ => None },
                         "name":segment.name,"road_type":segment.road_name,
@@ -344,7 +359,7 @@ impl RoadEditor {
                         "control2":[segment.controls[1].x,segment.controls[1].y],"end":[segment.end.x,segment.end.y]})
                 }).collect();
                 Ok(
-                    json!({"source":self.program.to_road_source(),"segments":segments,"dirty":self.program != self.saved_program}),
+                    json!({"source":self.program.to_road_source(),"segments":segments,"intersections":intersections,"dirty":self.program != self.saved_program}),
                 )
             }
             "get_viewport" => {
@@ -437,10 +452,12 @@ impl RoadEditor {
                     .ok_or_else(|| format!("Unknown road type: {road_type}"))?;
                 let start = point(args, "start_x", "start_y")?;
                 let end = point(args, "end_x", "end_y")?;
-                let points = map::project(&self.program).points;
+                let projection = map::project(&self.program);
+                let intersections = map::intersections(&self.program, &projection);
                 for (reference, position) in [(start_ref, start), (end_ref, end)] {
                     if let Some(reference) = reference {
-                        let attached = points
+                        let attached = projection
+                            .points
                             .iter()
                             .find(|point| point.name == reference)
                             .ok_or_else(|| format!("Unknown junction: {reference}"))?;
@@ -448,6 +465,31 @@ impl RoadEditor {
                             || (attached.position.y - position.y).abs() > 0.001
                         {
                             return Err(format!("Junction {reference} has different coordinates"));
+                        }
+                        if let Some(intersection) = intersections.iter().find(|intersection| {
+                            intersection
+                                .ports
+                                .iter()
+                                .any(|port| port.point_ref == reference)
+                        }) {
+                            if intersection.road_name != road_type {
+                                return Err(format!(
+                                    "Port {reference} requires {}",
+                                    intersection.road_name
+                                ));
+                            }
+                            if map::port_in_use(&projection, reference) {
+                                return Err(format!("Port {reference} already has a road"));
+                            }
+                        }
+                    }
+                }
+                for (reference, other) in [(start_ref, end), (end_ref, start)] {
+                    if let Some(reference) = reference {
+                        if !map::port_faces_road(&self.program, reference, other) {
+                            return Err(format!(
+                                "Road must approach port {reference} from outside the intersection"
+                            ));
                         }
                     }
                 }
@@ -497,6 +539,19 @@ impl RoadEditor {
                 }
                 self.view = View::Map;
                 Ok(json!({"segment_index":index}))
+            }
+            "set_intersection" => {
+                let point_ref = args["point_ref"].as_str().ok_or("Missing point_ref")?;
+                let kind = match args["kind"].as_str().ok_or("Missing kind")? {
+                    "right_turn" => Some(map::IntersectionKind::RightTurn),
+                    "three_way" => Some(map::IntersectionKind::ThreeWay),
+                    "four_way" => Some(map::IntersectionKind::FourWay),
+                    "none" => None,
+                    _ => return Err("kind must be right_turn, three_way, four_way, or none".into()),
+                };
+                let road_type = args.get("road_type").and_then(Value::as_str);
+                map::set_intersection(&mut self.program, point_ref, kind, road_type)?;
+                Ok(json!({"point_ref":point_ref,"kind":args["kind"],"road_type":road_type}))
             }
             "move_road" => {
                 let source = source(args, self)?;

@@ -2,7 +2,8 @@ use std::{collections::HashMap, path::PathBuf};
 
 use eframe::egui::{self, Color32, RichText};
 use opencity::{
-    parse, parse_road_file, Program, RoadDefinition, RoadElement, RoadElementKind, Statement,
+    parse, parse_road_file, Argument, Program, RoadDefinition, RoadElement, RoadElementKind,
+    Statement,
 };
 
 #[path = "editor/map.rs"]
@@ -11,7 +12,7 @@ mod map;
 mod mcp;
 use map::{SegmentSource, WorldPoint};
 
-const KINDS: [RoadElementKind; 11] = [
+const KINDS: [RoadElementKind; 10] = [
     RoadElementKind::BuildingEdge,
     RoadElementKind::Sidewalk,
     RoadElementKind::BikeLane,
@@ -20,7 +21,6 @@ const KINDS: [RoadElementKind; 11] = [
     RoadElementKind::CarLane,
     RoadElementKind::BusStop,
     RoadElementKind::Middle,
-    RoadElementKind::Shoulder,
     RoadElementKind::Verge,
     RoadElementKind::Barrier,
 ];
@@ -51,16 +51,16 @@ fn editor_palette(theme: egui::Theme) -> EditorPalette {
             toolbar: Color32::from_rgb(29, 35, 45),
             brand: Color32::from_rgb(105, 190, 220),
             warning: Color32::from_rgb(245, 150, 110),
-            map_background: Color32::from_rgb(19, 30, 34),
-            map_axis: Color32::from_rgb(67, 100, 104),
-            map_major: Color32::from_rgb(45, 70, 72),
-            map_minor: Color32::from_rgb(31, 49, 51),
+            map_background: Color32::from_rgb(10, 27, 34),
+            map_axis: Color32::from_rgb(28, 48, 55),
+            map_major: Color32::from_rgb(18, 36, 43),
+            map_minor: Color32::from_rgb(12, 30, 36),
             map_text: Color32::from_rgb(226, 237, 235),
             map_subtle: Color32::from_rgb(153, 177, 175),
             map_outline: Color32::from_rgb(11, 18, 22),
             map_selected: Color32::from_rgb(124, 207, 245),
             map_preview: Color32::from_rgb(127, 216, 199),
-            map_centerline: Color32::from_white_alpha(90),
+            map_centerline: Color32::from_white_alpha(155),
             tile_text: Color32::WHITE,
         },
         egui::Theme::Light => EditorPalette {
@@ -208,6 +208,7 @@ struct RoadEditor {
     selected_road: Option<usize>,
     selected_element: Option<usize>,
     selected_segment: Option<SegmentSource>,
+    selected_intersection: Option<String>,
     selected_endpoint: Option<(SegmentSource, bool)>,
     lane_end_choice: Option<ElementEndCandidate>,
     segment_name_draft: String,
@@ -225,6 +226,7 @@ struct RoadEditor {
     fit_scene_once: bool,
     dragging_endpoint: Option<(SegmentSource, bool)>,
     dragging_control: Option<(SegmentSource, bool)>,
+    dragging_intersection: Option<String>,
     dragging_background: bool,
     show_source: bool,
     status: String,
@@ -256,6 +258,7 @@ impl RoadEditor {
             selected_road: Some(0),
             selected_element: None,
             selected_segment: None,
+            selected_intersection: None,
             selected_endpoint: None,
             lane_end_choice: None,
             segment_name_draft: String::new(),
@@ -273,6 +276,7 @@ impl RoadEditor {
             fit_scene_once: true,
             dragging_endpoint: None,
             dragging_control: None,
+            dragging_intersection: None,
             dragging_background: false,
             show_source: false,
             status:
@@ -298,6 +302,67 @@ impl RoadEditor {
         }
     }
 
+    fn add_intersection_from_library(&mut self, kind: map::IntersectionKind) -> Option<String> {
+        if self.road().is_none() {
+            self.selected_road = self
+                .program
+                .statements
+                .iter()
+                .position(|statement| matches!(statement, Statement::Road(_)));
+        }
+        let road = self.road()?.clone();
+        self.road_name_draft = road.name.clone();
+        let visible_center = self
+            .map_rect
+            .map(|rect| world_of(rect, self.map_pan, self.map_zoom, rect.center()))
+            .unwrap_or(WorldPoint { x: 0.0, y: 0.0 });
+        let width: f32 = road
+            .elements
+            .iter()
+            .map(|element| map::element_world_width(element.kind))
+            .sum();
+        let projection = map::project(&self.program);
+        let existing = map::intersections(&self.program, &projection);
+        let spacing = width * 1.8;
+        let center = [
+            (0.0, 0.0),
+            (1.0, 0.0),
+            (-1.0, 0.0),
+            (0.0, 1.0),
+            (0.0, -1.0),
+            (1.0, 1.0),
+            (-1.0, 1.0),
+            (1.0, -1.0),
+            (-1.0, -1.0),
+        ]
+        .into_iter()
+        .map(|(x, y)| WorldPoint {
+            x: visible_center.x + x * spacing,
+            y: visible_center.y + y * spacing,
+        })
+        .find(|candidate| {
+            existing.iter().all(|intersection| {
+                (candidate.x - intersection.position.x).abs() > spacing * 0.8
+                    || (candidate.y - intersection.position.y).abs() > spacing * 0.8
+            })
+        })
+        .unwrap_or(visible_center);
+        let reference = map::place_intersection(&mut self.program, kind, &road, center);
+        if width > 0.0 && width * self.map_zoom < 64.0 {
+            self.map_zoom = (64.0 / width).clamp(18.0, 420.0);
+            self.map_pan = egui::vec2(-center.x * self.map_zoom, center.y * self.map_zoom);
+        }
+        self.map_tool = MapTool::Select;
+        self.map_start = None;
+        self.map_start_ref = None;
+        self.selected_segment = None;
+        self.selected_endpoint = None;
+        self.selected_intersection = Some(reference.clone());
+        self.dirty = true;
+        self.status = "Intersection placed | click an edge port to draw a road".into();
+        Some(reference)
+    }
+
     fn restore_history(&mut self, undo: bool) -> bool {
         let target = if undo {
             &mut self.undo_stack
@@ -313,6 +378,7 @@ impl RoadEditor {
             };
             destination.push(current);
             self.selected_segment = None;
+            self.selected_intersection = None;
             self.selected_endpoint = None;
             self.lane_end_choice = None;
             self.map_start = None;
@@ -612,6 +678,15 @@ impl RoadEditor {
         for statement in &mut self.program.statements {
             match statement {
                 Statement::Call(call) if call.name == old_name => call.name = new_name.to_owned(),
+                Statement::Call(call)
+                    if map::IntersectionKind::from_call_name(&call.name).is_some() =>
+                {
+                    if let Some(Argument::Identifier(name)) = call.args.get_mut(1) {
+                        if *name == old_name {
+                            *name = new_name.to_owned();
+                        }
+                    }
+                }
                 Statement::Block(block) => {
                     for call in &mut block.calls {
                         if call.name == old_name {
@@ -662,6 +737,7 @@ impl RoadEditor {
                     .position(|statement| matches!(statement, Statement::Road(_)));
                 self.selected_element = None;
                 self.selected_segment = None;
+                self.selected_intersection = None;
                 self.selected_endpoint = None;
                 self.lane_end_choice = None;
                 self.segment_name_draft.clear();
@@ -669,6 +745,7 @@ impl RoadEditor {
                 self.map_start_ref = None;
                 self.dragging_endpoint = None;
                 self.dragging_control = None;
+                self.dragging_intersection = None;
                 self.dragging_background = false;
                 self.road_name_draft = self
                     .selected_road
@@ -740,6 +817,7 @@ impl RoadEditor {
         self.selected_road = Some(0);
         self.selected_element = None;
         self.selected_segment = None;
+        self.selected_intersection = None;
         self.selected_endpoint = None;
         self.lane_end_choice = None;
         self.segment_name_draft.clear();
@@ -756,6 +834,7 @@ impl RoadEditor {
         self.fit_scene_once = false;
         self.dragging_endpoint = None;
         self.dragging_control = None;
+        self.dragging_intersection = None;
         self.dragging_background = false;
         self.dirty = false;
         self.confirm_delete_road = false;
@@ -1035,6 +1114,43 @@ impl RoadEditor {
                             });
                         }
                     }
+                    if self.view == View::Map {
+                        ui.add_space(16.0);
+                        ui.label(
+                            RichText::new("INTERSECTIONS")
+                                .small()
+                                .strong()
+                                .color(ui.visuals().weak_text_color()),
+                        );
+                        ui.label(
+                            RichText::new(format!(
+                                "Edge cross section: {}",
+                                self.road()
+                                    .map(|road| preset_label(&road.name))
+                                    .unwrap_or("first library road type")
+                            ))
+                            .small()
+                            .color(ui.visuals().weak_text_color()),
+                        );
+                        for (kind, label) in [
+                            (map::IntersectionKind::RightTurn, "90° turn"),
+                            (map::IntersectionKind::ThreeWay, "3-way intersection"),
+                            (map::IntersectionKind::FourWay, "4-way intersection"),
+                        ] {
+                            if ui
+                                .add_enabled(
+                                    self.program
+                                        .statements
+                                        .iter()
+                                        .any(|statement| matches!(statement, Statement::Road(_))),
+                                    egui::Button::new(format!("+ {label}")),
+                                )
+                                .clicked()
+                            {
+                                self.add_intersection_from_library(kind);
+                            }
+                        }
+                    }
                     if let Some(index) = chosen {
                         self.selected_road = Some(index);
                         self.selected_element = None;
@@ -1113,7 +1229,12 @@ impl RoadEditor {
                                 Statement::Call(call)
                                     if matches!(
                                         call.name.as_str(),
-                                        "map_point" | "lane_point" | "lane_split"
+                                        "map_point"
+                                            | "lane_point"
+                                            | "lane_split"
+                                            | "intersection2"
+                                            | "intersection3"
+                                            | "intersection4"
                                     ) =>
                                 {
                                     false
@@ -1142,7 +1263,12 @@ impl RoadEditor {
                                     Statement::Call(call)
                                         if !matches!(
                                             call.name.as_str(),
-                                            "map_point" | "lane_point" | "lane_split"
+                                            "map_point"
+                                                | "lane_point"
+                                                | "lane_split"
+                                                | "intersection2"
+                                                | "intersection3"
+                                                | "intersection4"
                                         ) =>
                                     {
                                         ui.label(format!("↳  {}(…)", call.name));
@@ -1289,7 +1415,7 @@ impl RoadEditor {
             ),
             |ui| {
                 if issues.is_empty() {
-                    ui.label("Road-to-road joins are aligned.");
+                    ui.label("Road joins and intersection edges are aligned.");
                 }
                 for issue in &issues {
                     if ui.button(&issue.message).clicked() {
@@ -1301,6 +1427,53 @@ impl RoadEditor {
             },
         );
         ui.add_space(10.0);
+        if let Some(intersection) = map::intersections(&self.program, &projection)
+            .into_iter()
+            .find(|intersection| {
+                self.selected_intersection.as_deref() == Some(&intersection.point_ref)
+            })
+        {
+            ui.label(RichText::new("INTERSECTION").small().strong());
+            ui.heading(match intersection.kind {
+                map::IntersectionKind::RightTurn => "90° turn",
+                map::IntersectionKind::ThreeWay => "3-way intersection",
+                map::IntersectionKind::FourWay => "4-way intersection",
+            });
+            ui.label(format!(
+                "Edge cross section: {}",
+                preset_label(&intersection.road_name)
+            ));
+            let connected = intersection
+                .ports
+                .iter()
+                .filter(|port| {
+                    projection.segments.iter().any(|segment| {
+                        segment.start_ref.as_deref() == Some(&port.point_ref)
+                            || segment.end_ref.as_deref() == Some(&port.point_ref)
+                    })
+                })
+                .count();
+            ui.label(format!(
+                "{connected} of {} ports connected",
+                intersection.ports.len()
+            ));
+            ui.label("Drag the intersection to move it. Click a port to draw a road.");
+            if !intersection.ports.is_empty()
+                && intersection.kind != map::IntersectionKind::FourWay
+                && ui.button("Rotate 90°").clicked()
+                && map::rotate_intersection(&mut self.program, &intersection.point_ref)
+            {
+                self.dirty = true;
+            }
+            if !intersection.ports.is_empty()
+                && ui.button("Delete intersection").clicked()
+                && map::remove_placed_intersection(&mut self.program, &intersection.point_ref)
+            {
+                self.selected_intersection = None;
+                self.dirty = true;
+            }
+            return;
+        }
         let selected = self.selected_segment.and_then(|source| {
             map::project(&self.program)
                 .segments
@@ -1411,6 +1584,65 @@ impl RoadEditor {
             });
             ui.label(RichText::new("Shift+R rotates the other way. Click another end while extending to join the roads.")
                 .small().color(ui.visuals().weak_text_color()));
+            let reference = if is_end {
+                segment.end_ref.as_deref()
+            } else {
+                segment.start_ref.as_deref()
+            };
+            if let Some(reference) = reference {
+                let arms = map::intersection_arms(&projection, reference).len();
+                let kind = match arms {
+                    2 if map::right_angle(&projection, reference) => {
+                        Some(map::IntersectionKind::RightTurn)
+                    }
+                    3 => Some(map::IntersectionKind::ThreeWay),
+                    4 => Some(map::IntersectionKind::FourWay),
+                    _ => None,
+                };
+                if let Some(kind) = kind {
+                    let defined = map::intersections(&self.program, &projection)
+                        .into_iter()
+                        .find(|intersection| intersection.point_ref == reference);
+                    ui.label(format!("{arms}-way junction: {reference}"));
+                    if let Some(intersection) = &defined {
+                        ui.label(format!("Edge: {}", preset_label(&intersection.road_name)));
+                    }
+                    let edge_name = self.road().map(|road| road.name.clone());
+                    if let (Some(intersection), Some(edge_name)) = (&defined, &edge_name) {
+                        if intersection.road_name != *edge_name
+                            && ui
+                                .button("Use selected road type for intersection edge")
+                                .clicked()
+                            && map::set_intersection(
+                                &mut self.program,
+                                reference,
+                                Some(kind),
+                                Some(edge_name),
+                            )
+                            .is_ok()
+                        {
+                            self.dirty = true;
+                        }
+                    }
+                    if ui
+                        .button(if defined.is_some() {
+                            "Remove intersection"
+                        } else {
+                            "Define intersection"
+                        })
+                        .clicked()
+                        && map::set_intersection(
+                            &mut self.program,
+                            reference,
+                            if defined.is_some() { None } else { Some(kind) },
+                            edge_name.as_deref(),
+                        )
+                        .is_ok()
+                    {
+                        self.dirty = true;
+                    }
+                }
+            }
         }
         if let Some(split) = map::lane_splits(&self.program).into_iter().find(|split| {
             segment.name.as_deref() == Some(&split.ramp)
@@ -1684,10 +1916,9 @@ impl RoadEditor {
             ui.horizontal(|ui| {
                 ui.heading("Map");
                 ui.label(
-                    RichText::new(if self.map_tool == MapTool::Draw {
-                        "Click freely or pick a road/lane end | hold Shift for grid snap | drag empty map to pan | Enter or Esc finishes"
-                    } else {
-                        "Drag points freely; hold Shift for grid snap | E extends, R rotates | green marker starts an exit"
+                    RichText::new(match self.map_tool {
+                        MapTool::Draw => "Click freely or pick a road/lane end | hold Shift for grid snap | drag empty map to pan | Enter or Esc finishes",
+                        MapTool::Select => "Drag points freely; hold Shift for grid snap | E extends, R rotates | green marker starts an exit",
                     })
                     .small()
                     .color(ui.visuals().weak_text_color()),
@@ -1732,27 +1963,32 @@ impl RoadEditor {
                         - egui::vec2(anchored.x * self.map_zoom, -anchored.y * self.map_zoom);
                 }
             }
-            let junctions = junction_candidates(&before);
+            let junctions = junction_candidates(&self.program, &before);
             let element_ends = element_end_candidates(&before, &self.program);
             if response.drag_started_by(egui::PointerButton::Primary) {
                 let origin = ui
                     .input(|input| input.pointer.press_origin())
                     .or_else(|| response.interact_pointer_pos());
                 if let Some(origin) = origin.filter(|point| rect.contains(*point)) {
+                    self.dragging_intersection = if self.map_tool == MapTool::Select {
+                        placed_intersection_at(&self.program, &before, rect,
+                            self.map_pan, self.map_zoom, origin)
+                    } else { None };
                     self.dragging_endpoint = if self.map_tool == MapTool::Select {
-                        endpoint_near(
+                        self.dragging_intersection.is_none().then(|| endpoint_near(
                             &before.segments,
                             &self.program,
                             rect,
                             self.map_pan,
                             self.map_zoom,
                             origin,
-                        )
+                        )).flatten()
                     } else {
                         None
                     };
                     self.dragging_control = if self.map_tool == MapTool::Select
                         && self.dragging_endpoint.is_none()
+                        && self.dragging_intersection.is_none()
                     {
                         control_near(&before.segments, rect, self.map_pan, self.map_zoom, origin)
                     } else {
@@ -1777,6 +2013,7 @@ impl RoadEditor {
                     }
                     self.dragging_background = self.dragging_endpoint.is_none()
                         && self.dragging_control.is_none()
+                        && self.dragging_intersection.is_none()
                         && segment_near(
                             &before.segments,
                             &self.program,
@@ -1809,6 +2046,18 @@ impl RoadEditor {
                 self.dragging_background = false;
                 self.map_tool = MapTool::Select;
                 self.lane_end_choice = None;
+            }
+            if self.map_tool == MapTool::Select
+                && self.selected_intersection.is_some()
+                && !ui.ctx().egui_wants_keyboard_input()
+                && ui.input(|input| input.key_pressed(egui::Key::Backspace)
+                    || input.key_pressed(egui::Key::Delete))
+            {
+                let reference = self.selected_intersection.take().unwrap();
+                if map::remove_placed_intersection(&mut self.program, &reference) {
+                    self.dirty = true;
+                    self.status = "Intersection removed".into();
+                }
             }
             if self.map_tool == MapTool::Select
                 && self.selected_segment.is_some()
@@ -1851,9 +2100,29 @@ impl RoadEditor {
                 } else {
                     pointer_world
                 };
+                let port_hit = intersection_port_near(&self.program, &before, rect,
+                    self.map_pan, self.map_zoom, pointer);
+                let port_mismatch = self.map_tool == MapTool::Draw
+                    && response.clicked_by(egui::PointerButton::Primary)
+                    && port_hit.as_ref().is_some_and(|(_, _, road_name)|
+                        self.road().is_some_and(|road| road.name != *road_name));
+                if port_mismatch {
+                    self.status = "This port needs a road with the intersection's cross section".into();
+                }
+                let port_busy = port_hit.as_ref().is_some_and(|(_, reference, _)|
+                    map::port_in_use(&before, reference));
+                if self.map_tool == MapTool::Draw && port_busy
+                    && response.clicked_by(egui::PointerButton::Primary) {
+                    self.status = "This intersection port already has a road".into();
+                }
+                let selecting_port = self.map_tool == MapTool::Select;
                 if self.map_tool == MapTool::Draw
                     && response.clicked_by(egui::PointerButton::Primary)
+                    && !port_mismatch
+                    && !port_busy
                 {
+                    let matched_port = port_hit.as_ref().filter(|(_, _, road_name)|
+                        self.road().is_some_and(|road| road.name == *road_name));
                     let target_endpoint = endpoint_near(&before.segments, &self.program,
                         rect, self.map_pan, self.map_zoom, pointer)
                         .filter(|(source, is_end)| {
@@ -1864,9 +2133,10 @@ impl RoadEditor {
                     let element_end = if target_endpoint.is_none() {
                         element_end_near(&element_ends, rect, self.map_pan, self.map_zoom, pointer)
                     } else { None };
-                    let picked = target_endpoint.and_then(|(source, is_end)|
+                    let picked = matched_port.map(|(point, reference, _)| (*point, Some(reference.clone())))
+                        .or_else(|| target_endpoint.and_then(|(source, is_end)|
                         map::link_endpoint(&mut self.program, source, is_end)
-                            .map(|(point, reference)| (point, Some(reference))))
+                            .map(|(point, reference)| (point, Some(reference)))))
                         .or_else(|| element_end.map(|candidate| (candidate.position, None)))
                         .or_else(|| junction_near(&junctions, rect, self.map_pan, self.map_zoom, pointer));
                     let (point, mut point_ref) = picked.unwrap_or((free_point, None));
@@ -1882,7 +2152,14 @@ impl RoadEditor {
                         }
                     }
                     if let Some(start) = self.map_start {
-                        if start != point {
+                        let faces_ports = self.map_start_ref.as_deref().is_none_or(|reference|
+                            map::port_faces_road(&self.program, reference, point))
+                            && point_ref.as_deref().is_none_or(|reference|
+                                map::port_faces_road(&self.program, reference, start));
+                        if !faces_ports {
+                            self.status = "Draw away from the intersection face of each port".into();
+                        }
+                        if start != point && faces_ports {
                             if let Some(road) = self.road().cloned() {
                                 let branch_ref = self.map_start_ref.clone();
                                 let exit = branch_ref.as_deref()
@@ -1939,6 +2216,13 @@ impl RoadEditor {
                                     format!("Placed {} | click another endpoint or press Enter/Esc",
                                         preset_label(&road.name))
                                 };
+                                if self.map_start_ref.as_deref().is_some_and(|reference|
+                                    map::intersection_port_direction(&self.program, reference).is_some()) {
+                                    self.map_start = None;
+                                    self.map_start_ref = None;
+                                    self.map_tool = MapTool::Select;
+                                    self.status = "Road connected to intersection port".into();
+                                }
                             }
                         }
                     } else {
@@ -1946,8 +2230,38 @@ impl RoadEditor {
                         self.map_start_ref = point_ref;
                     }
                 }
-                if self.map_tool == MapTool::Select {
-                    if response.clicked_by(egui::PointerButton::Primary) {
+                let clicked_port = port_hit.is_some()
+                    && response.clicked_by(egui::PointerButton::Primary);
+                if selecting_port && self.map_tool == MapTool::Select
+                    && response.clicked_by(egui::PointerButton::Primary) {
+                    if let Some((position, reference, road_name)) = port_hit {
+                        if map::port_in_use(&before, &reference) {
+                            self.status = "This intersection port already has a road".into();
+                        } else {
+                        self.selected_road = self.program.statements.iter().position(|statement|
+                            matches!(statement, Statement::Road(road) if road.name == road_name));
+                        self.road_name_draft = road_name;
+                        self.map_tool = MapTool::Draw;
+                        self.map_start = Some(position);
+                        self.map_start_ref = Some(reference);
+                        self.selected_segment = None;
+                        self.selected_intersection = None;
+                        self.selected_endpoint = None;
+                        self.status = "Drawing from intersection port | click to place the road end".into();
+                        }
+                    }
+                }
+                if self.map_tool == MapTool::Select && !clicked_port {
+                    let body_hit = response.clicked_by(egui::PointerButton::Primary)
+                        .then(|| placed_intersection_at(&self.program, &before, rect,
+                            self.map_pan, self.map_zoom, pointer)).flatten();
+                    if let Some(reference) = body_hit.as_ref() {
+                        self.selected_intersection = Some(reference.clone());
+                        self.selected_segment = None;
+                        self.selected_endpoint = None;
+                        self.lane_end_choice = None;
+                    } else if response.clicked_by(egui::PointerButton::Primary) {
+                        self.selected_intersection = None;
                         let picked_endpoint = endpoint_near(&before.segments, &self.program,
                             rect, self.map_pan, self.map_zoom, pointer)
                             .filter(|(source, is_end)| {
@@ -2013,6 +2327,14 @@ impl RoadEditor {
                         }
                     }
                     if response.dragged_by(egui::PointerButton::Primary) {
+                        if let Some(reference) = self.dragging_intersection.as_deref() {
+                            let delta = response.drag_delta();
+                            if map::translate_intersection(&mut self.program, reference,
+                                WorldPoint { x: delta.x / self.map_zoom, y: -delta.y / self.map_zoom }) {
+                                self.selected_intersection = Some(reference.to_owned());
+                                self.dirty = true;
+                            }
+                        }
                         if let Some((source, is_end)) = self.dragging_endpoint {
                             if map::set_connected_endpoint(&mut self.program, source, is_end, free_point)
                             {
@@ -2028,8 +2350,25 @@ impl RoadEditor {
                 }
             }
             if response.drag_stopped_by(egui::PointerButton::Primary) {
+                if let (Some((source, is_end)), Some(pointer)) =
+                    (self.dragging_endpoint, response.interact_pointer_pos()) {
+                    let projection = map::project(&self.program);
+                    if let Some((_, reference, road_name)) = intersection_port_near(
+                        &self.program, &projection, rect, self.map_pan, self.map_zoom, pointer) {
+                        let matching = projection.segments.iter().any(|segment|
+                            segment.source == source && segment.road_name == road_name);
+                        if matching && map::attach_endpoint_to_port(&mut self.program,
+                            source, is_end, &reference) {
+                            self.dirty = true;
+                            self.status = "Road end connected to intersection port".into();
+                        } else if !matching {
+                            self.status = "This port needs a road with the intersection's cross section".into();
+                        }
+                    }
+                }
                 self.dragging_endpoint = None;
                 self.dragging_control = None;
+                self.dragging_intersection = None;
                 self.dragging_background = false;
             }
 
@@ -2081,29 +2420,55 @@ impl RoadEditor {
                         palette.map_text,
                     );
                 }
-                if selected {
-                    for point in [segment.start, segment.end]
-                        .map(|point| screen_of(rect, self.map_pan, self.map_zoom, point))
-                    {
-                        painter.circle_filled(point, 7.0, palette.map_text);
-                        painter.circle_stroke(
-                            point,
-                            7.0,
-                            egui::Stroke::new(2.0, palette.map_selected),
-                        );
+            }
+            let intersections = map::intersections(&self.program, &projection);
+            let intersection_squares: Vec<_> = intersections.iter().filter_map(|intersection|
+                intersection_paint(&self.program, &projection, intersection, rect,
+                    self.map_pan, self.map_zoom).map(|paint| paint.square)).collect();
+            for intersection in &intersections {
+                paint_intersection(&painter, rect, self.map_pan, self.map_zoom,
+                    &self.program, &projection, intersection, palette);
+                if self.selected_intersection.as_deref() == Some(&intersection.point_ref) {
+                    if let Some(paint) = intersection_paint(&self.program, &projection,
+                        intersection, rect, self.map_pan, self.map_zoom) {
+                        painter.rect_stroke(paint.square, 0.0,
+                            egui::Stroke::new(2.0, palette.map_selected), egui::StrokeKind::Inside);
                     }
-                    {
-                        for (anchor, control) in [
-                            (segment.start, segment.controls[0]),
-                            (segment.end, segment.controls[1]),
-                        ] {
-                            let a = screen_of(rect, self.map_pan, self.map_zoom, anchor);
-                            let b = screen_of(rect, self.map_pan, self.map_zoom, control);
-                            painter
-                                .line_segment([a, b], egui::Stroke::new(1.0, palette.map_selected));
-                            painter.circle_filled(b, 5.0, palette.map_selected);
-                        }
+                }
+                for port in &intersection.ports {
+                    let point = screen_of(rect, self.map_pan, self.map_zoom, port.position);
+                    let center = screen_of(rect, self.map_pan, self.map_zoom, intersection.position);
+                    let radius = (point.distance(center) * 0.35).clamp(2.5, 6.0);
+                    let connected = projection.segments.iter().any(|segment|
+                        segment.start_ref.as_deref() == Some(&port.point_ref)
+                            || segment.end_ref.as_deref() == Some(&port.point_ref));
+                    painter.circle_filled(point, radius, palette.map_background);
+                    painter.circle_stroke(point, radius,
+                        egui::Stroke::new(2.0, if connected { palette.map_subtle } else { palette.map_preview }));
+                }
+            }
+            if let Some(segment) = projection.segments.iter()
+                .find(|segment| Some(segment.source) == self.selected_segment) {
+                for point in [segment.start, segment.end]
+                    .map(|point| screen_of(rect, self.map_pan, self.map_zoom, point)) {
+                    if intersection_squares.iter().any(|square| square.contains(point)) {
+                        continue;
                     }
+                    painter.circle_filled(point, 7.0, palette.map_text);
+                    painter.circle_stroke(point, 7.0,
+                        egui::Stroke::new(2.0, palette.map_selected));
+                }
+                for (anchor, control) in [
+                    (segment.start, segment.controls[0]),
+                    (segment.end, segment.controls[1]),
+                ] {
+                    let a = screen_of(rect, self.map_pan, self.map_zoom, anchor);
+                    let b = screen_of(rect, self.map_pan, self.map_zoom, control);
+                    if intersection_squares.iter().any(|square| square.contains(a)) {
+                        continue;
+                    }
+                    painter.line_segment([a, b], egui::Stroke::new(1.0, palette.map_selected));
+                    painter.circle_filled(b, 5.0, palette.map_selected);
                 }
             }
             if self.map_tool == MapTool::Select {
@@ -2150,7 +2515,10 @@ impl RoadEditor {
                     .pointer_hover_pos()
                     .filter(|point| rect.contains(*point))
                 {
-                    let element_ends = element_end_candidates(&projection, &self.program);
+                    let element_ends: Vec<_> = element_end_candidates(&projection, &self.program)
+                        .into_iter().filter(|candidate| !intersection_squares.iter().any(|square|
+                            square.contains(screen_of(rect, self.map_pan, self.map_zoom,
+                                candidate.position)))).collect();
                     let hovered_end =
                         element_end_near(&element_ends, rect, self.map_pan, self.map_zoom, pointer);
                     for candidate in element_ends.iter().filter(|candidate| {
@@ -2195,8 +2563,11 @@ impl RoadEditor {
                             palette.map_text,
                         );
                     }
-                    for (point, reference) in junction_candidates(&projection) {
+                    for (point, reference) in junction_candidates(&self.program, &projection) {
                         let screen = screen_of(rect, self.map_pan, self.map_zoom, point);
+                        if intersection_squares.iter().any(|square| square.contains(screen)) {
+                            continue;
+                        }
                         let distance = pointer.distance(screen);
                         if distance <= 90.0 {
                             let hovered = distance <= 16.0;
@@ -2506,10 +2877,19 @@ fn grid_point(point: WorldPoint) -> WorldPoint {
     }
 }
 
-fn junction_candidates(projection: &map::Projection) -> Vec<(WorldPoint, Option<String>)> {
+fn junction_candidates(
+    program: &Program,
+    projection: &map::Projection,
+) -> Vec<(WorldPoint, Option<String>)> {
+    let placed_centers: Vec<_> = map::intersections(program, projection)
+        .into_iter()
+        .filter(|intersection| !intersection.ports.is_empty())
+        .map(|intersection| intersection.point_ref)
+        .collect();
     let mut candidates: Vec<_> = projection
         .points
         .iter()
+        .filter(|point| !placed_centers.contains(&point.name))
         .map(|point| (point.position, Some(point.name.clone())))
         .collect();
     for segment in &projection.segments {
@@ -2550,6 +2930,60 @@ fn junction_near(
         })
         .min_by(|a, b| a.0.total_cmp(&b.0))
         .map(|(_, position, reference)| (position, reference))
+}
+
+fn intersection_port_near(
+    program: &Program,
+    projection: &map::Projection,
+    rect: egui::Rect,
+    pan: egui::Vec2,
+    zoom: f32,
+    pointer: egui::Pos2,
+) -> Option<(WorldPoint, String, String)> {
+    map::intersections(program, projection)
+        .into_iter()
+        .flat_map(|intersection| {
+            intersection.ports.into_iter().map(move |port| {
+                (
+                    port.position,
+                    port.point_ref,
+                    intersection.road_name.clone(),
+                    intersection.position,
+                )
+            })
+        })
+        .filter_map(|(position, reference, road_name, center)| {
+            let distance = pointer.distance_sq(screen_of(rect, pan, zoom, position));
+            let radius = (screen_of(rect, pan, zoom, position)
+                .distance(screen_of(rect, pan, zoom, center))
+                * 0.42)
+                .clamp(3.0, 12.0);
+            (distance <= radius * radius).then_some((distance, position, reference, road_name))
+        })
+        .min_by(|a, b| a.0.total_cmp(&b.0))
+        .map(|(_, position, reference, road_name)| (position, reference, road_name))
+}
+
+fn placed_intersection_at(
+    program: &Program,
+    projection: &map::Projection,
+    rect: egui::Rect,
+    pan: egui::Vec2,
+    zoom: f32,
+    pointer: egui::Pos2,
+) -> Option<String> {
+    if intersection_port_near(program, projection, rect, pan, zoom, pointer).is_some() {
+        return None;
+    }
+    map::intersections(program, projection)
+        .into_iter()
+        .rev()
+        .find_map(|intersection| {
+            (!intersection.ports.is_empty()
+                && intersection_paint(program, projection, &intersection, rect, pan, zoom)
+                    .is_some_and(|paint| paint.square.contains(pointer)))
+            .then_some(intersection.point_ref)
+        })
 }
 
 #[derive(Clone, Copy)]
@@ -2952,6 +3386,63 @@ fn design_rule_issues(
             });
         }
     }
+    for intersection in map::intersections(program, projection) {
+        let Some(edge) = program
+            .statements
+            .iter()
+            .find_map(|statement| match statement {
+                Statement::Road(road) if road.name == intersection.road_name => Some(road),
+                _ => None,
+            })
+        else {
+            continue;
+        };
+        let attached: Vec<_> = if intersection.ports.is_empty() {
+            map::intersection_arms(projection, &intersection.point_ref)
+                .into_iter()
+                .map(|(index, _)| index)
+                .collect()
+        } else {
+            projection
+                .segments
+                .iter()
+                .enumerate()
+                .filter_map(|(index, segment)| {
+                    intersection
+                        .ports
+                        .iter()
+                        .any(|port| {
+                            segment.start_ref.as_deref() == Some(&port.point_ref)
+                                || segment.end_ref.as_deref() == Some(&port.point_ref)
+                        })
+                        .then_some(index)
+                })
+                .collect()
+        };
+        for index in attached {
+            let segment = &projection.segments[index];
+            let Some(approach) = road_for_segment(program, segment) else {
+                continue;
+            };
+            if !approach
+                .elements
+                .iter()
+                .map(|element| element.kind)
+                .eq(edge.elements.iter().map(|element| element.kind))
+            {
+                let name = segment.name.as_deref().unwrap_or(&segment.road_name);
+                issues.push(DesignIssue {
+                    code: "intersection_edge_mismatch",
+                    message: format!(
+                        "{name} must match {} before {}",
+                        edge.name, intersection.point_ref
+                    ),
+                    at: intersection.position,
+                    roads: [name.to_owned(), edge.name.clone()],
+                });
+            }
+        }
+    }
     issues
 }
 
@@ -3021,8 +3512,433 @@ fn paint_profiled_road(
         .collect();
     painter.add(egui::Shape::line(
         spine,
-        egui::Stroke::new(0.8, palette.map_centerline),
+        egui::Stroke::new((zoom * 0.004).clamp(0.8, 12.0), palette.map_centerline),
     ));
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum PortSide {
+    East,
+    South,
+    West,
+    North,
+}
+
+impl PortSide {
+    const ALL: [Self; 4] = [Self::East, Self::South, Self::West, Self::North];
+
+    fn from_world_direction(direction: WorldPoint) -> Option<Self> {
+        match (direction.x as i32, direction.y as i32) {
+            (1, 0) => Some(Self::East),
+            (0, -1) => Some(Self::South),
+            (-1, 0) => Some(Self::West),
+            (0, 1) => Some(Self::North),
+            _ => None,
+        }
+    }
+
+    fn direction(self) -> egui::Vec2 {
+        match self {
+            Self::East => egui::vec2(1.0, 0.0),
+            Self::South => egui::vec2(0.0, 1.0),
+            Self::West => egui::vec2(-1.0, 0.0),
+            Self::North => egui::vec2(0.0, -1.0),
+        }
+    }
+
+    fn edge_point(self, center: egui::Pos2, half: f32, lateral: f32) -> egui::Pos2 {
+        match self {
+            Self::East => center + egui::vec2(half, lateral),
+            Self::South => center + egui::vec2(lateral, half),
+            Self::West => center + egui::vec2(-half, lateral),
+            Self::North => center + egui::vec2(lateral, -half),
+        }
+    }
+
+    fn lateral(self) -> egui::Vec2 {
+        match self {
+            Self::East | Self::West => egui::vec2(0.0, 1.0),
+            Self::South | Self::North => egui::vec2(1.0, 0.0),
+        }
+    }
+
+    fn wedge_planes(self) -> [(f32, f32); 2] {
+        match self {
+            Self::East => [(1.0, -1.0), (1.0, 1.0)],
+            Self::South => [(-1.0, 1.0), (1.0, 1.0)],
+            Self::West => [(-1.0, -1.0), (-1.0, 1.0)],
+            Self::North => [(-1.0, -1.0), (1.0, -1.0)],
+        }
+    }
+}
+
+fn clipped_port_band(band: egui::Rect, side: PortSide, center: egui::Pos2) -> Vec<egui::Pos2> {
+    let mut polygon = vec![
+        band.left_top(),
+        band.right_top(),
+        band.right_bottom(),
+        band.left_bottom(),
+    ];
+    for (x, y) in side.wedge_planes() {
+        let signed = |point: egui::Pos2| x * (point.x - center.x) + y * (point.y - center.y);
+        let mut clipped = Vec::new();
+        if let Some(mut previous) = polygon.last().copied() {
+            for current in polygon {
+                let before = signed(previous);
+                let after = signed(current);
+                if (before < 0.0 && after >= 0.0) || (before >= 0.0 && after < 0.0) {
+                    let fraction = before / (before - after);
+                    clipped.push(previous + (current - previous) * fraction);
+                }
+                if after >= 0.0 {
+                    clipped.push(current);
+                }
+                previous = current;
+            }
+        }
+        polygon = clipped;
+    }
+    polygon
+}
+
+fn paint_port_band(
+    painter: &egui::Painter,
+    band: egui::Rect,
+    side: PortSide,
+    center: egui::Pos2,
+    color: Color32,
+) {
+    let polygon = clipped_port_band(band, side, center);
+    if polygon.len() >= 3 {
+        painter.add(egui::Shape::convex_polygon(
+            polygon,
+            color,
+            egui::Stroke::NONE,
+        ));
+    }
+}
+
+struct IntersectionArm<'a> {
+    segment: &'a map::Segment,
+    is_end: bool,
+    direction: egui::Vec2,
+}
+
+struct IntersectionPort {
+    side: PortSide,
+    bands: Vec<(RoadElementKind, egui::Rect)>,
+}
+
+struct IntersectionPaint {
+    square: egui::Rect,
+    closed: RoadElementKind,
+    ports: Vec<IntersectionPort>,
+}
+
+fn port_sides(arms: &[IntersectionArm<'_>]) -> Vec<PortSide> {
+    fn assign(
+        arms: &[IntersectionArm<'_>],
+        current: &mut Vec<PortSide>,
+        best: &mut (f32, Vec<PortSide>),
+    ) {
+        if current.len() == arms.len() {
+            let score = current
+                .iter()
+                .zip(arms)
+                .map(|(side, arm)| side.direction().dot(arm.direction))
+                .sum();
+            if score > best.0 {
+                *best = (score, current.clone());
+            }
+            return;
+        }
+        for side in PortSide::ALL {
+            if !current.contains(&side) {
+                current.push(side);
+                assign(arms, current, best);
+                current.pop();
+            }
+        }
+    }
+    let mut best = (f32::NEG_INFINITY, Vec::new());
+    assign(arms, &mut Vec::new(), &mut best);
+    best.1
+}
+
+fn intersection_port(
+    arm: &IntersectionArm<'_>,
+    side: PortSide,
+    junction: egui::Pos2,
+    half: f32,
+    road: &RoadDefinition,
+    zoom: f32,
+) -> IntersectionPort {
+    let normal = screen_normal_at(arm.segment, if arm.is_end { 1.0 } else { 0.0 });
+    let sign = if normal.dot(side.lateral()) >= 0.0 {
+        1.0
+    } else {
+        -1.0
+    };
+    intersection_port_with_sign(side, junction, half, road, zoom, sign)
+}
+
+fn intersection_port_with_sign(
+    side: PortSide,
+    junction: egui::Pos2,
+    half: f32,
+    road: &RoadDefinition,
+    zoom: f32,
+    sign: f32,
+) -> IntersectionPort {
+    let depth = half * 0.44;
+    let mut offset = -half;
+    let bands = road
+        .elements
+        .iter()
+        .map(|element| {
+            let next = offset + map::element_world_width(element.kind) * zoom;
+            let a = side.edge_point(junction, half, offset * sign);
+            let b = side.edge_point(junction, half, next * sign);
+            let inside = -side.direction() * depth;
+            offset = next;
+            (element.kind, egui::Rect::from_two_pos(a, b + inside))
+        })
+        .collect();
+    IntersectionPort { side, bands }
+}
+
+fn intersection_paint(
+    program: &Program,
+    projection: &map::Projection,
+    intersection: &map::Intersection,
+    rect: egui::Rect,
+    pan: egui::Vec2,
+    zoom: f32,
+) -> Option<IntersectionPaint> {
+    let junction = screen_of(rect, pan, zoom, intersection.position);
+    let road = program
+        .statements
+        .iter()
+        .find_map(|statement| match statement {
+            Statement::Road(road) if road.name == intersection.road_name => Some(road),
+            _ => None,
+        })?;
+    let mut arms = Vec::new();
+    for (index, is_end) in map::intersection_arms(projection, &intersection.point_ref) {
+        let segment = &projection.segments[index];
+        let tangent = segment.tangent_at(if is_end { 1.0 } else { 0.0 });
+        let direction = egui::vec2(
+            if is_end { -tangent.x } else { tangent.x },
+            if is_end { tangent.y } else { -tangent.y },
+        );
+        arms.push(IntersectionArm {
+            segment,
+            is_end,
+            direction,
+        });
+    }
+    let half = road
+        .elements
+        .iter()
+        .map(|element| map::element_world_width(element.kind))
+        .sum::<f32>()
+        * zoom
+        * 0.5;
+    let closed = if road
+        .elements
+        .iter()
+        .any(|element| element.kind == RoadElementKind::Sidewalk)
+    {
+        RoadElementKind::Sidewalk
+    } else if road
+        .elements
+        .iter()
+        .any(|element| element.kind == RoadElementKind::Verge)
+    {
+        RoadElementKind::Verge
+    } else {
+        RoadElementKind::CarLane
+    };
+    let ports = if intersection.ports.is_empty() {
+        port_sides(&arms)
+            .into_iter()
+            .zip(&arms)
+            .map(|(side, arm)| intersection_port(arm, side, junction, half, road, zoom))
+            .collect()
+    } else {
+        intersection
+            .ports
+            .iter()
+            .filter_map(|port| {
+                let side = PortSide::from_world_direction(port.direction)?;
+                Some(intersection_port_with_sign(
+                    side, junction, half, road, zoom, 1.0,
+                ))
+            })
+            .collect()
+    };
+    Some(IntersectionPaint {
+        square: egui::Rect::from_center_size(junction, egui::vec2(half * 2.0, half * 2.0)),
+        closed,
+        ports,
+    })
+}
+
+fn paint_intersection(
+    painter: &egui::Painter,
+    rect: egui::Rect,
+    pan: egui::Vec2,
+    zoom: f32,
+    program: &Program,
+    projection: &map::Projection,
+    intersection: &map::Intersection,
+    palette: EditorPalette,
+) {
+    let Some(paint) = intersection_paint(program, projection, intersection, rect, pan, zoom) else {
+        return;
+    };
+    painter.rect_filled(
+        paint.square,
+        0.0,
+        kind_color(RoadElementKind::CarLane, palette.theme),
+    );
+    let center = paint.square.center();
+    let half = paint.square.width() * 0.5;
+    if paint.ports.len() == 4 {
+        // Each corner follows the port's outer bands. The carriageway stays
+        // clear across the junction instead of forming four pointed wedges.
+        if let Some(north) = paint.ports.iter().find(|port| port.side == PortSide::North) {
+            for right in [false, true] {
+                let corner = if right {
+                    paint.square.right_top()
+                } else {
+                    paint.square.left_top()
+                };
+                paint_rounded_corner(
+                    painter,
+                    north,
+                    corner,
+                    center.x,
+                    right,
+                    false,
+                    palette.theme,
+                );
+            }
+        }
+        if let Some(south) = paint.ports.iter().find(|port| port.side == PortSide::South) {
+            for right in [false, true] {
+                let corner = if right {
+                    paint.square.right_bottom()
+                } else {
+                    paint.square.left_bottom()
+                };
+                paint_rounded_corner(painter, south, corner, center.x, right, true, palette.theme);
+            }
+        }
+        return;
+    }
+    for side in PortSide::ALL {
+        if !paint.ports.iter().any(|port| port.side == side) {
+            let a = side.edge_point(center, half, -half);
+            let b = side.edge_point(center, half, half);
+            paint_port_band(
+                painter,
+                egui::Rect::from_two_pos(a, b - side.direction() * half * 0.44),
+                side,
+                center,
+                kind_color(paint.closed, palette.theme),
+            );
+        }
+    }
+    for port in &paint.ports {
+        for (kind, band) in &port.bands {
+            paint_port_band(
+                painter,
+                *band,
+                port.side,
+                center,
+                kind_color(*kind, palette.theme),
+            );
+        }
+    }
+    for side in PortSide::ALL {
+        if !paint.ports.iter().any(|port| port.side == side) {
+            painter.line_segment(
+                [
+                    side.edge_point(center, half, -half),
+                    side.edge_point(center, half, half),
+                ],
+                egui::Stroke::new(1.5, palette.map_outline),
+            );
+        }
+    }
+}
+
+fn paint_rounded_corner(
+    painter: &egui::Painter,
+    port: &IntersectionPort,
+    corner: egui::Pos2,
+    middle_x: f32,
+    right: bool,
+    bottom: bool,
+    theme: egui::Theme,
+) {
+    for (kind, radius) in corner_disks(port, corner.x, middle_x, right)
+        .into_iter()
+        .rev()
+    {
+        let mut points = Vec::with_capacity(18);
+        points.push(corner);
+        for step in 0..=16 {
+            let angle = std::f32::consts::FRAC_PI_2 * step as f32 / 16.0;
+            points.push(
+                corner
+                    + egui::vec2(
+                        if right { -1.0 } else { 1.0 } * radius * angle.cos(),
+                        if bottom { -1.0 } else { 1.0 } * radius * angle.sin(),
+                    ),
+            );
+        }
+        painter.add(egui::Shape::convex_polygon(
+            points,
+            kind_color(kind, theme),
+            egui::Stroke::NONE,
+        ));
+    }
+}
+
+fn corner_disks(
+    port: &IntersectionPort,
+    corner_x: f32,
+    middle_x: f32,
+    right: bool,
+) -> Vec<(RoadElementKind, f32)> {
+    let mut bands: Vec<_> = port
+        .bands
+        .iter()
+        .filter_map(|(kind, band)| {
+            if (band.center().x >= middle_x) != right {
+                return None;
+            }
+            let distance = (corner_x - band.center().x).abs();
+            Some((distance, *kind, band.width()))
+        })
+        .collect();
+    bands.sort_by(|a, b| a.0.total_cmp(&b.0));
+    let mut radius = 0.0;
+    bands
+        .into_iter()
+        .take_while(|(_, kind, _)| {
+            !matches!(
+                kind,
+                RoadElementKind::CarLane | RoadElementKind::BusLane | RoadElementKind::Middle
+            )
+        })
+        .map(|(_, kind, width)| {
+            radius += width;
+            (kind, radius)
+        })
+        .collect()
 }
 
 fn paint_road_segment(
@@ -3084,7 +4000,7 @@ fn paint_road_segment(
     }
     painter.add(egui::Shape::line(
         spine,
-        egui::Stroke::new(0.8, palette.map_centerline),
+        egui::Stroke::new((zoom * 0.004).clamp(0.8, 12.0), palette.map_centerline),
     ));
 }
 
@@ -3288,7 +4204,6 @@ fn kind_label(kind: RoadElementKind) -> &'static str {
         RoadElementKind::CarLane => "Car lane",
         RoadElementKind::BusStop => "Bus stop",
         RoadElementKind::Middle => "Median",
-        RoadElementKind::Shoulder => "Shoulder",
         RoadElementKind::Verge => "Verge",
         RoadElementKind::Barrier => "Divider wall",
     }
@@ -3304,7 +4219,6 @@ fn kind_short(kind: RoadElementKind) -> &'static str {
         RoadElementKind::CarLane => "CAR",
         RoadElementKind::BusStop => "STOP",
         RoadElementKind::Middle => "MID",
-        RoadElementKind::Shoulder => "SHLD",
         RoadElementKind::Verge => "VERGE",
         RoadElementKind::Barrier => "WALL",
     }
@@ -3313,15 +4227,14 @@ fn kind_short(kind: RoadElementKind) -> &'static str {
 fn kind_color(kind: RoadElementKind, theme: egui::Theme) -> Color32 {
     match theme {
         egui::Theme::Dark => match kind {
-            RoadElementKind::BuildingEdge => Color32::from_rgb(100, 107, 119),
-            RoadElementKind::Sidewalk => Color32::from_rgb(139, 112, 89),
+            RoadElementKind::BuildingEdge => Color32::from_rgb(9, 25, 32),
+            RoadElementKind::Sidewalk => Color32::from_rgb(163, 119, 86),
             RoadElementKind::BikeLane => Color32::from_rgb(58, 131, 105),
-            RoadElementKind::ParkingLane => Color32::from_rgb(88, 105, 122),
+            RoadElementKind::ParkingLane => Color32::from_rgb(87, 122, 149),
             RoadElementKind::BusLane => Color32::from_rgb(164, 76, 71),
-            RoadElementKind::CarLane => Color32::from_rgb(72, 95, 120),
+            RoadElementKind::CarLane => Color32::from_rgb(59, 95, 127),
             RoadElementKind::BusStop => Color32::from_rgb(162, 121, 53),
-            RoadElementKind::Middle => Color32::from_rgb(106, 94, 65),
-            RoadElementKind::Shoulder => Color32::from_rgb(93, 103, 102),
+            RoadElementKind::Middle => Color32::from_rgb(59, 95, 127),
             RoadElementKind::Verge => Color32::from_rgb(71, 115, 77),
             RoadElementKind::Barrier => Color32::from_rgb(165, 170, 162),
         },
@@ -3334,7 +4247,6 @@ fn kind_color(kind: RoadElementKind, theme: egui::Theme) -> Color32 {
             RoadElementKind::CarLane => Color32::from_rgb(151, 176, 205),
             RoadElementKind::BusStop => Color32::from_rgb(230, 188, 110),
             RoadElementKind::Middle => Color32::from_rgb(204, 191, 148),
-            RoadElementKind::Shoulder => Color32::from_rgb(182, 196, 195),
             RoadElementKind::Verge => Color32::from_rgb(158, 200, 160),
             RoadElementKind::Barrier => Color32::from_rgb(107, 115, 112),
         },
@@ -3351,7 +4263,6 @@ fn element_width(kind: RoadElementKind) -> f32 {
         RoadElementKind::CarLane => 108.0,
         RoadElementKind::BusStop => 96.0,
         RoadElementKind::Middle => 78.0,
-        RoadElementKind::Shoulder => 76.0,
         RoadElementKind::Verge => 86.0,
         RoadElementKind::Barrier => 30.0,
     }
@@ -3479,6 +4390,7 @@ mod tests {
             selected_road: Some(0),
             selected_element: None,
             selected_segment: None,
+            selected_intersection: None,
             selected_endpoint: None,
             lane_end_choice: None,
             segment_name_draft: String::new(),
@@ -3496,6 +4408,7 @@ mod tests {
             fit_scene_once: false,
             dragging_endpoint: None,
             dragging_control: None,
+            dragging_intersection: None,
             dragging_background: false,
             show_source: false,
             status: String::new(),
@@ -3571,6 +4484,58 @@ mod tests {
         assert_eq!(editor.program, before_move);
         editor.restore_history(true);
         assert_eq!(editor.program, original);
+    }
+
+    #[test]
+    fn mcp_sets_and_reports_an_intersection() {
+        let mut editor = sample_editor();
+        editor.program = parse(
+            "road street: carlane; end; center = map_point(0, 0); \
+            west = map_point(-1, 0); east = map_point(1, 0); north = map_point(0, 1); \
+            a = street(west, -0.7, 0, -0.3, 0, center); \
+            b = street(center, 0.3, 0, 0.7, 0, east); \
+            c = street(center, 0, 0.3, 0, 0.7, north);",
+        )
+        .unwrap();
+        assert!(editor
+            .call_mcp(
+                "set_intersection",
+                &serde_json::json!({
+                    "point_ref":"center", "kind":"four_way"
+                })
+            )
+            .is_err());
+        editor
+            .call_mcp(
+                "set_intersection",
+                &serde_json::json!({
+                    "point_ref":"center", "kind":"three_way", "road_type":"street"
+                }),
+            )
+            .unwrap();
+        let state = editor
+            .call_mcp("get_road_state", &serde_json::json!({}))
+            .unwrap();
+        assert_eq!(state["intersections"][0]["point_ref"], "center");
+        assert_eq!(state["intersections"][0]["kind"], "three_way");
+        assert_eq!(state["intersections"][0]["road_type"], "street");
+        editor
+            .call_mcp(
+                "set_intersection",
+                &serde_json::json!({
+                    "point_ref":"center", "kind":"none"
+                }),
+            )
+            .unwrap();
+        assert_eq!(
+            editor
+                .call_mcp("get_road_state", &serde_json::json!({}))
+                .unwrap()["intersections"]
+                .as_array()
+                .unwrap()
+                .len(),
+            0
+        );
     }
 
     #[test]
@@ -3669,7 +4634,7 @@ mod tests {
     }
 
     #[test]
-    fn all_cloverleaf_ramp_mouths_align_with_the_highway_shoulder() {
+    fn all_cloverleaf_ramp_mouths_align_with_outer_highway_lane() {
         let program = parse(include_str!("../../examples/cloverleaf_town.road")).unwrap();
         let projection = map::project(&program);
         let profiles = paint_profiles(&program, &projection);
@@ -3762,37 +4727,427 @@ mod tests {
     }
 
     #[test]
-    fn starter_city_is_an_organic_connected_neighborhood() {
+    fn starter_city_defines_street_intersections_without_filling_the_cloverleaf() {
         let program = starter_program();
         let projection = map::project(&program);
         assert_eq!(projection.unresolved, 0);
-        assert_eq!(projection.segments.len(), 30);
-        let named = |name: &str| {
-            projection
+        assert_eq!(projection.segments.len(), 72);
+        let intersections = map::intersections(&program, &projection);
+        assert_eq!(intersections.len(), 12);
+        for intersection in &intersections {
+            assert_eq!(intersection.ports.len(), intersection.kind.arm_count());
+            assert!(map::intersection_arms(&projection, &intersection.point_ref).is_empty());
+            for port in &intersection.ports {
+                assert!(projection
+                    .segments
+                    .iter()
+                    .any(
+                        |segment| segment.start_ref.as_deref() == Some(&port.point_ref)
+                            || segment.end_ref.as_deref() == Some(&port.point_ref)
+                    ));
+            }
+        }
+        assert!(design_rule_issues(
+            &program,
+            &projection,
+            &paint_profiles(&program, &projection)
+        )
+        .is_empty());
+        assert_eq!(
+            intersections
+                .iter()
+                .filter(|intersection| intersection.kind == map::IntersectionKind::ThreeWay)
+                .count(),
+            5
+        );
+        assert_eq!(
+            intersections
+                .iter()
+                .filter(|intersection| intersection.kind == map::IntersectionKind::RightTurn)
+                .count(),
+            3
+        );
+        assert_eq!(
+            intersections
+                .iter()
+                .filter(|intersection| intersection.kind == map::IntersectionKind::FourWay)
+                .count(),
+            4
+        );
+        for reference in ["ew_3", "ew_5", "ns_2", "ns_4"] {
+            assert_eq!(map::intersection_arms(&projection, reference).len(), 2);
+            assert!(!intersections
+                .iter()
+                .any(|intersection| intersection.point_ref == reference));
+        }
+        for (reference, highway, lane, t) in [
+            ("nw_exit", "interstate_east_west_04", 1, 0.5),
+            ("sw_merge", "interstate_east_west_04", 7, 0.5),
+            ("ne_merge", "interstate_east_west_05", 1, 0.5),
+            ("se_exit", "interstate_east_west_05", 7, 0.5),
+            ("nw_merge", "interstate_north_south_04", 1, 0.5),
+            ("ne_exit", "interstate_north_south_04", 7, 0.5),
+            ("sw_exit", "interstate_north_south_03", 1, 0.5),
+            ("se_merge", "interstate_north_south_03", 7, 0.5),
+            ("nw_direct_exit", "interstate_north_south_06", 1, 0.756098),
+            ("nw_direct_merge", "interstate_east_west_02", 1, 0.208333),
+            ("ne_direct_exit", "interstate_east_west_07", 1, 0.696970),
+            ("ne_direct_merge", "interstate_north_south_06", 7, 0.756098),
+            ("sw_direct_exit", "interstate_east_west_02", 7, 0.208333),
+            ("sw_direct_merge", "interstate_north_south_01", 1, 0.243902),
+            ("se_direct_exit", "interstate_north_south_01", 7, 0.243902),
+            ("se_direct_merge", "interstate_east_west_07", 7, 0.696970),
+        ] {
+            assert_eq!(
+                map::lane_attachment(&program, reference),
+                Some((highway.to_owned(), lane, t))
+            );
+        }
+        for (name, highway_at_start, horizontal) in [
+            ("nw_loop_a_mouth", true, true),
+            ("nw_loop_c_merge", false, false),
+            ("sw_loop_a_mouth", true, false),
+            ("sw_loop_c_merge", false, true),
+            ("ne_loop_a_mouth", true, false),
+            ("ne_loop_c_merge", false, true),
+            ("se_loop_a_mouth", true, true),
+            ("se_loop_c_merge", false, false),
+            ("nw_connector_mouth", true, false),
+            ("nw_connector_merge", false, true),
+            ("ne_connector_mouth", true, true),
+            ("ne_connector_merge", false, false),
+            ("sw_connector_mouth", true, true),
+            ("sw_connector_merge", false, false),
+            ("se_connector_mouth", true, false),
+            ("se_connector_merge", false, true),
+        ] {
+            let mouth = projection
                 .segments
                 .iter()
                 .find(|segment| segment.name.as_deref() == Some(name))
-                .unwrap()
-        };
-        assert_eq!(
-            named("market_northwest").end_ref,
-            named("market_north").start_ref
-        );
-        assert_eq!(
-            named("market_southwest").end_ref,
-            named("market_northwest").start_ref
-        );
-        assert_eq!(named("west_road").end_ref, named("mill_street").start_ref);
-        assert_eq!(named("harbor_street").end_ref, named("east_road").start_ref);
-        assert_eq!(
-            named("southwest_lane").end_ref,
-            named("sw_shortcut").start_ref
-        );
-        assert!(projection
+                .unwrap();
+            let tangent = mouth.tangent_at(if highway_at_start { 0.0 } else { 1.0 });
+            if horizontal {
+                assert!(tangent.y.abs() < 0.001, "{name} bends at the highway");
+                assert!(
+                    (mouth.end.x - mouth.start.x).abs() > 0.85,
+                    "{name} is too short"
+                );
+            } else {
+                assert!(tangent.x.abs() < 0.001, "{name} bends at the highway");
+                assert!(
+                    (mouth.end.y - mouth.start.y).abs() > 0.85,
+                    "{name} is too short"
+                );
+            }
+        }
+        for quadrant in ["nw", "ne", "sw", "se"] {
+            let loop_prefix = format!("{quadrant}_loop_");
+            let connector_prefix = format!("{quadrant}_connector");
+            for loop_segment in projection.segments.iter().filter(|segment| {
+                segment
+                    .name
+                    .as_deref()
+                    .is_some_and(|name| name.starts_with(&loop_prefix))
+            }) {
+                for connector in projection.segments.iter().filter(|segment| {
+                    segment
+                        .name
+                        .as_deref()
+                        .is_some_and(|name| name.starts_with(&connector_prefix))
+                }) {
+                    for loop_step in 0..=100 {
+                        let a = loop_segment.point_at(loop_step as f32 / 100.0);
+                        for connector_step in 0..=100 {
+                            let b = connector.point_at(connector_step as f32 / 100.0);
+                            let separation_squared = (a.x - b.x).powi(2) + (a.y - b.y).powi(2);
+                            assert!(
+                                separation_squared > 0.22_f32.powi(2),
+                                "{quadrant} connector crosses its loop"
+                            );
+                        }
+                    }
+                }
+            }
+        }
+        assert_eq!(map::intersection_arms(&projection, "ns_3").len(), 2);
+        assert_eq!(map::intersection_arms(&projection, "ew_4").len(), 2);
+        assert!(!intersections
+            .iter()
+            .any(|intersection| intersection.point_ref == "ew_2"));
+        for reference in ["grid_0_0", "grid_0_3", "grid_2_0"] {
+            assert!(intersections
+                .iter()
+                .any(|intersection| intersection.point_ref == reference
+                    && intersection.kind == map::IntersectionKind::RightTurn));
+        }
+        let country_edge = projection
             .segments
             .iter()
-            .all(|segment| !segment.road_name.contains("highway")));
+            .find(|segment| segment.name.as_deref() == Some("country_road_1_edge"))
+            .unwrap();
+        let tangent = country_edge.tangent_at(0.0);
+        assert!(tangent.x.abs() < 0.001);
+        let profiles = paint_profiles(&program, &projection);
+        assert!(design_rule_issues(&program, &projection, &profiles).is_empty());
         assert_eq!(parse(&program.to_road_source()).unwrap(), program);
+    }
+
+    #[test]
+    fn starter_grid_intersection_is_square_with_four_cross_section_ports() {
+        let program = starter_program();
+        let projection = map::project(&program);
+        let intersection = map::intersections(&program, &projection)
+            .into_iter()
+            .find(|intersection| intersection.point_ref == "grid_1_1")
+            .unwrap();
+        let rect = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1000.0, 1000.0));
+        let paint = intersection_paint(
+            &program,
+            &projection,
+            &intersection,
+            rect,
+            egui::Vec2::ZERO,
+            100.0,
+        )
+        .unwrap();
+        let edge = program
+            .statements
+            .iter()
+            .find_map(|statement| match statement {
+                Statement::Road(road) if road.name == intersection.road_name => Some(road),
+                _ => None,
+            })
+            .unwrap();
+        let edge_width = edge
+            .elements
+            .iter()
+            .map(|element| map::element_world_width(element.kind))
+            .sum::<f32>()
+            * 100.0;
+        assert!((paint.square.width() - paint.square.height()).abs() < 0.001);
+        assert!((paint.square.width() - edge_width).abs() < 0.001);
+        assert_eq!(paint.closed, RoadElementKind::Sidewalk);
+        assert_eq!(paint.ports.len(), 4);
+        for side in PortSide::ALL {
+            assert_eq!(
+                paint.ports.iter().filter(|port| port.side == side).count(),
+                1
+            );
+        }
+        assert!(paint.ports.iter().all(|port| port
+            .bands
+            .iter()
+            .any(|(kind, _)| *kind == RoadElementKind::Sidewalk)));
+        for port in &paint.ports {
+            assert_eq!(port.bands.len(), edge.elements.len());
+            for (index, (kind, band)) in port.bands.iter().enumerate() {
+                assert_eq!(*kind, edge.elements[index].kind);
+                assert!(paint.square.contains_rect(*band));
+            }
+        }
+        let north = paint
+            .ports
+            .iter()
+            .find(|port| port.side == PortSide::North)
+            .unwrap();
+        for right in [false, true] {
+            let corner_x = if right {
+                paint.square.right()
+            } else {
+                paint.square.left()
+            };
+            let disks = corner_disks(north, corner_x, paint.square.center().x, right);
+            assert_eq!(
+                disks.iter().map(|(kind, _)| *kind).collect::<Vec<_>>(),
+                vec![RoadElementKind::Sidewalk, RoadElementKind::ParkingLane]
+            );
+            let expected = 100.0
+                * (map::element_world_width(RoadElementKind::Sidewalk)
+                    + map::element_world_width(RoadElementKind::ParkingLane));
+            assert!((disks.last().unwrap().1 - expected).abs() < 0.001);
+        }
+        let zoomed = intersection_paint(
+            &program,
+            &projection,
+            &intersection,
+            rect,
+            egui::Vec2::ZERO,
+            200.0,
+        )
+        .unwrap();
+        assert!((zoomed.square.width() / paint.square.width() - 2.0).abs() < 0.001);
+    }
+
+    #[test]
+    fn three_way_intersection_has_one_closed_side() {
+        let program = starter_program();
+        let projection = map::project(&program);
+        let intersection = map::intersections(&program, &projection)
+            .into_iter()
+            .find(|intersection| intersection.point_ref == "grid_0_1")
+            .unwrap();
+        let rect = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1000.0, 1000.0));
+        let paint = intersection_paint(
+            &program,
+            &projection,
+            &intersection,
+            rect,
+            egui::Vec2::ZERO,
+            100.0,
+        )
+        .unwrap();
+        assert_eq!(paint.ports.len(), 3);
+        assert_eq!(
+            PortSide::ALL
+                .iter()
+                .filter(|side| !paint.ports.iter().any(|port| port.side == **side))
+                .count(),
+            1
+        );
+    }
+
+    #[test]
+    fn right_turn_uses_adjacent_square_ports() {
+        let program = parse(
+            "road lane: sidewalk-carlane-sidewalk; end; \
+            center = map_point(0, 0); west = map_point(-1, 0); north = map_point(0, 1); \
+            a = lane(west, -0.7, 0, -0.3, 0, center); \
+            b = lane(center, 0, 0.3, 0, 0.7, north); \
+            intersection2(center, lane);",
+        )
+        .unwrap();
+        let projection = map::project(&program);
+        let intersection = &map::intersections(&program, &projection)[0];
+        let rect = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1000.0, 1000.0));
+        let paint = intersection_paint(
+            &program,
+            &projection,
+            intersection,
+            rect,
+            egui::Vec2::ZERO,
+            100.0,
+        )
+        .unwrap();
+        assert_eq!(paint.ports.len(), 2);
+        assert!(paint.ports.iter().any(|port| port.side == PortSide::West));
+        assert!(paint.ports.iter().any(|port| port.side == PortSide::North));
+        assert_eq!(paint.closed, RoadElementKind::Sidewalk);
+        let expected = 100.0
+            * (2.0 * map::element_world_width(RoadElementKind::Sidewalk)
+                + map::element_world_width(RoadElementKind::CarLane));
+        assert!((paint.square.width() - expected).abs() < 0.001);
+    }
+
+    #[test]
+    fn placed_intersection_ports_are_pickable_without_any_roads() {
+        let mut program = default_program();
+        let road = program
+            .statements
+            .iter()
+            .find_map(|statement| match statement {
+                Statement::Road(road) => Some(road.clone()),
+                _ => None,
+            })
+            .unwrap();
+        let center_ref = map::place_intersection(
+            &mut program,
+            map::IntersectionKind::FourWay,
+            &road,
+            WorldPoint { x: 0.0, y: 0.0 },
+        );
+        let projection = map::project(&program);
+        let intersection = map::intersections(&program, &projection)
+            .into_iter()
+            .find(|intersection| intersection.point_ref == center_ref)
+            .unwrap();
+        assert_eq!(intersection.ports.len(), 4);
+        let rect = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1000.0, 1000.0));
+        for port in &intersection.ports {
+            let screen = screen_of(rect, egui::Vec2::ZERO, 420.0, port.position);
+            let picked = intersection_port_near(
+                &program,
+                &projection,
+                rect,
+                egui::Vec2::ZERO,
+                420.0,
+                screen,
+            )
+            .unwrap();
+            assert_eq!(picked.1, port.point_ref);
+            assert_eq!(picked.2, road.name);
+        }
+    }
+
+    #[test]
+    fn library_click_places_an_intersection_in_the_visible_map() {
+        let mut editor = sample_editor();
+        editor.program = default_program();
+        editor.selected_road = Some(0);
+        editor.map_rect = Some(egui::Rect::from_min_size(
+            egui::pos2(100.0, 100.0),
+            egui::vec2(800.0, 600.0),
+        ));
+        editor.map_pan = egui::vec2(-200.0, 100.0);
+        editor.map_zoom = 100.0;
+        let reference = editor
+            .add_intersection_from_library(map::IntersectionKind::FourWay)
+            .unwrap();
+        let projection = map::project(&editor.program);
+        let intersection = map::intersections(&editor.program, &projection)
+            .into_iter()
+            .find(|intersection| intersection.point_ref == reference)
+            .unwrap();
+        assert_eq!(intersection.position, WorldPoint { x: 2.0, y: 1.0 });
+        assert_eq!(intersection.ports.len(), 4);
+        assert!(projection.segments.is_empty());
+        assert_eq!(
+            editor.selected_intersection.as_deref(),
+            Some(reference.as_str())
+        );
+        assert!(editor.map_tool == MapTool::Select);
+        let second = editor
+            .add_intersection_from_library(map::IntersectionKind::FourWay)
+            .unwrap();
+        let placed = map::intersections(&editor.program, &map::project(&editor.program));
+        assert_ne!(second, reference);
+        assert_ne!(placed[0].position, placed[1].position);
+    }
+
+    #[test]
+    fn port_bands_meet_on_diagonals_without_overlapping_at_corners() {
+        let center = egui::pos2(50.0, 50.0);
+        let band = egui::Rect::from_min_max(egui::pos2(50.0, 50.0), egui::pos2(100.0, 100.0));
+        for side in [PortSide::East, PortSide::South] {
+            let polygon = clipped_port_band(band, side, center);
+            assert!(polygon.len() >= 3);
+            for point in polygon {
+                for (x, y) in side.wedge_planes() {
+                    assert!(x * (point.x - center.x) + y * (point.y - center.y) >= -0.001);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn design_check_reports_an_approach_that_exceeds_the_intersection_edge() {
+        let program = parse(
+            "road narrow: sidewalk-carlane-sidewalk; end; \
+            road wide: sidewalk-carlane-carlane-sidewalk; end; \
+            center = map_point(0, 0); west = map_point(-1, 0); \
+            east = map_point(1, 0); north = map_point(0, 1); \
+            a = wide(west, -0.7, 0, -0.3, 0, center); \
+            b = narrow(center, 0.3, 0, 0.7, 0, east); \
+            c = narrow(center, 0, 0.3, 0, 0.7, north); \
+            intersection3(center, narrow);",
+        )
+        .unwrap();
+        let projection = map::project(&program);
+        let profiles = paint_profiles(&program, &projection);
+        let issues = design_rule_issues(&program, &projection, &profiles);
+        assert_eq!(issues.len(), 1);
+        assert_eq!(issues[0].code, "intersection_edge_mismatch");
+        assert_eq!(issues[0].roads, ["a", "narrow"]);
     }
 
     #[test]
@@ -3946,12 +5301,30 @@ mod tests {
     #[test]
     fn renaming_a_road_updates_calls_in_blocks() {
         let mut editor = sample_editor();
+        editor
+            .program
+            .statements
+            .push(Statement::Call(opencity::Call {
+                assigns: Vec::new(),
+                name: "intersection3".into(),
+                args: vec![
+                    Argument::Identifier("junction".into()),
+                    Argument::Identifier("normal_road".into()),
+                ],
+            }));
         assert!(editor.rename_road("main_road"));
         let Statement::Block(block) = &editor.program.statements[1] else {
             panic!("expected block")
         };
         assert_eq!(block.calls[0].name, "main_road");
         assert_eq!(block.calls[1].name, "main_road");
+        let Statement::Call(intersection) = editor.program.statements.last().unwrap() else {
+            unreachable!()
+        };
+        assert_eq!(
+            intersection.args[1],
+            Argument::Identifier("main_road".into())
+        );
         assert_eq!(
             parse(&editor.program.to_road_source()).unwrap(),
             editor.program
@@ -4023,7 +5396,7 @@ mod tests {
     #[test]
     fn older_lane_branch_can_switch_to_keep_lane_mode() {
         let mut program = parse(
-            "road highway: verge-carlane-verge; end; road ramp: shoulder-carlane-shoulder; end;",
+            "road highway: verge-carlane-verge; end; road ramp: verge-carlane-verge; end;",
         )
         .unwrap();
         let highway = match &program.statements[0] {

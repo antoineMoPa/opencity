@@ -35,35 +35,35 @@ road farm_track:
 end;
 
 road rural_road:
-    verge-shoulder-carlane-middle-carlane-shoulder-verge;
+    verge-carlane-middle-carlane-verge;
 end;
 
 road rural_highway:
-    verge-shoulder-carlane-carlane-carlane-carlane-shoulder-verge;
+    verge-carlane-carlane-carlane-carlane-verge;
 end;
 
 road mountain_road:
-    shoulder-carlane-middle-carlane-shoulder;
+    carlane-middle-carlane;
 end;
 
 road divided_highway:
-    verge-shoulder-carlane-carlane-middle-carlane-carlane-shoulder-verge;
+    verge-carlane-carlane-middle-carlane-carlane-verge;
 end;
 
 road exit_ramp:
-    verge-shoulder-carlane-shoulder-verge;
+    verge-carlane-verge;
 end;
 
 road interstate_three_lane:
-    verge-shoulder-carlane-carlane-carlane-middle-carlane-carlane-carlane-shoulder-verge;
+    verge-carlane-carlane-carlane-middle-carlane-carlane-carlane-verge;
 end;
 
 road interstate_four_lane:
-    verge-shoulder-carlane-carlane-carlane-carlane-middle-carlane-carlane-carlane-carlane-shoulder-verge;
+    verge-carlane-carlane-carlane-carlane-middle-carlane-carlane-carlane-carlane-verge;
 end;
 
 road ramp_mouth:
-    carlane-shoulder-verge;
+    carlane-verge;
 end;
 
 ew_w9 = map_point(-9.0000, 0.0000);
@@ -176,39 +176,39 @@ country_4 = map_point(-9.1500, 3.5500);
 
 country_5 = map_point(-10.1500, 5.1500);
 
-nw_exit = lane_point(i_ew_03, 2, 1.0000);
+nw_exit = lane_point(i_ew_03, 1, 1.0000);
 
-nw_merge = lane_point(i_ns_04, 2, 1.0000);
+nw_merge = lane_point(i_ns_04, 1, 1.0000);
 
-sw_merge = lane_point(i_ew_03, 8, 1.0000);
+sw_merge = lane_point(i_ew_03, 7, 1.0000);
 
-sw_exit = lane_point(i_ns_02, 2, 1.0000);
+sw_exit = lane_point(i_ns_02, 1, 1.0000);
 
-ne_merge = lane_point(i_ew_05, 2, 1.0000);
+ne_merge = lane_point(i_ew_05, 1, 1.0000);
 
-ne_exit = lane_point(i_ns_04, 8, 1.0000);
+ne_exit = lane_point(i_ns_04, 7, 1.0000);
 
-se_exit = lane_point(i_ew_05, 8, 1.0000);
+se_exit = lane_point(i_ew_05, 7, 1.0000);
 
-se_merge = lane_point(i_ns_02, 8, 1.0000);
+se_merge = lane_point(i_ns_02, 7, 1.0000);
 
-nw_direct_exit = lane_point(i_ns_05, 2, 1.0000);
+nw_direct_exit = lane_point(i_ns_05, 1, 1.0000);
 
-nw_direct_merge = lane_point(i_ew_03, 2, 0.0000);
+nw_direct_merge = lane_point(i_ew_03, 1, 0.0000);
 
-ne_direct_exit = lane_point(i_ew_07, 2, 0.0000);
+ne_direct_exit = lane_point(i_ew_07, 1, 0.0000);
 
-ne_direct_merge = lane_point(i_ns_05, 8, 1.0000);
+ne_direct_merge = lane_point(i_ns_05, 7, 1.0000);
 
-sw_direct_exit = lane_point(i_ew_03, 8, 0.0000);
+sw_direct_exit = lane_point(i_ew_03, 7, 0.0000);
 
-sw_direct_merge = lane_point(i_ns_02, 2, 0.0000);
+sw_direct_merge = lane_point(i_ns_02, 1, 0.0000);
 
-se_direct_exit = lane_point(i_ns_02, 8, 0.0000);
+se_direct_exit = lane_point(i_ns_02, 7, 0.0000);
 
-se_direct_merge = lane_point(i_ew_07, 8, 0.0000);
+se_direct_merge = lane_point(i_ew_07, 7, 0.0000);
 
-town_merge = lane_point(i_ew_02, 8, 0.0000);
+town_merge = lane_point(i_ew_02, 7, 0.0000);
 
 i_ew_01 = interstate_three_lane(ew_w9, -7.7333, 0.0000, -6.4667, 0.0000, ew_w52);
 
