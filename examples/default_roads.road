@@ -10,6 +10,18 @@ end;
 road protected_bikeway:
     sidewalk-bikelane-parkinglane-carlane-middle-carlane-parkinglane-bikelane-sidewalk;
 end;
+road dedicated_bike_path:
+    verge-bikelane-bikelane-verge;
+end;
+road train_line:
+    verge-traintrack-traintrack-verge;
+end;
+road tram_line:
+    sidewalk-tramtrack-tramtrack-sidewalk;
+end;
+road subway_line:
+    verge-subwaytrack-subwaytrack-verge;
+end;
 road transit_corridor:
     sidewalk-busstop-buslane-carlane-middle-carlane-buslane-busstop-sidewalk;
 end;

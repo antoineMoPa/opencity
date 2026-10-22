@@ -1,255 +1,557 @@
 road neighborhood_street:
     sidewalk-parkinglane-carlane-middle-carlane-parkinglane-sidewalk;
 end;
+
 road main_street:
     buildingedge-sidewalk-parkinglane-carlane-middle-carlane-parkinglane-sidewalk-buildingedge;
 end;
+
 road downtown_avenue:
     buildingedge-sidewalk-bikelane-parkinglane-carlane-buslane-middle-buslane-carlane-parkinglane-bikelane-sidewalk-buildingedge;
 end;
+
 road protected_bikeway:
     sidewalk-bikelane-parkinglane-carlane-middle-carlane-parkinglane-bikelane-sidewalk;
 end;
+
 road transit_corridor:
     sidewalk-busstop-buslane-carlane-middle-carlane-buslane-busstop-sidewalk;
 end;
+
 road market_street:
     buildingedge-sidewalk-bikelane-carlane-carlane-parkinglane-sidewalk-buildingedge;
 end;
+
 road pedestrian_mall:
     buildingedge-sidewalk-middle-sidewalk-buildingedge;
 end;
+
 road country_lane:
     verge-carlane-middle-carlane-verge;
 end;
+
 road transition_lane:
     carlane-middle-carlane;
 end;
+
 road farm_track:
     verge-carlane-verge;
 end;
+
 road rural_road:
     verge-carlane-middle-carlane-verge;
 end;
+
 road rural_highway:
     verge-carlane-carlane-carlane-carlane-verge;
 end;
+
 road mountain_road:
     carlane-middle-carlane;
 end;
+
 road divided_highway:
     verge-carlane-carlane-middle-carlane-carlane-verge;
 end;
+
 road exit_ramp:
     verge-carlane-verge;
 end;
+
 road ramp_mouth:
     carlane-verge;
 end;
+
 road interstate_three_lane:
     verge-carlane-carlane-carlane-middle-carlane-carlane-carlane-verge;
 end;
+
 road interstate_four_lane:
     verge-carlane-carlane-carlane-carlane-middle-carlane-carlane-carlane-carlane-verge;
 end;
 
-ew_0 = map_point(-4.5000, -3.0000);
-ew_1 = map_point(-1.5000, -3.0000);
-ew_2 = map_point(0.9000, -3.0000);
-ew_3 = map_point(3.3000, -3.0000);
+road regional_rail:
+    verge-traintrack-traintrack-verge;
+end;
+
+road city_tram:
+    sidewalk-tramtrack-tramtrack-sidewalk;
+end;
+
+road metro_tunnel:
+    subwaytrack-subwaytrack;
+end;
+
+road waterside_cycleway:
+    verge-bikelane-bikelane-verge;
+end;
+
+block cycle_rail_bridge:
+    rail_deck = regional_rail(-0.35, 0, 0.35, 0);
+    cycle_deck = waterside_cycleway(0, -0.60, 0, 0.60);
+    elevation(cycle_deck, 0.18);
+end;
+
+town_land = land(-9.2, -8.8, 10.7, -8.8, 10.7, 5.4, -9.2, 5.4);
+
+west_lake = lake(-8.45, -0.95, -7.65, -0.45, -6.60, -0.58, -5.95, -1.28, -5.92, -2.20, -6.45, -2.95, -7.48, -3.02, -8.32, -2.38);
+
+southwest_river = river(-6.36, -2.85, -5.72, -3.46, -5.08, -4.12, -4.26, -4.45, -3.35, -4.38, -2.57, -4.88, -1.82, -5.27);
+
+elevation(town_land, -0.10);
+
+elevation(west_lake, -0.04);
+
+elevation(southwest_river, -0.05);
+
+ew_0 = map_point(-2.7000, -3.0000);
+
+ew_1 = map_point(-0.3000, -3.0000);
+
+ew_2 = map_point(1.6200, -3.0000);
+
+ew_3 = map_point(3.5400, -3.0000);
+
 ew_4 = map_point(4.5000, -3.0000);
-ew_5 = map_point(5.7000, -3.0000);
-ew_6 = map_point(7.7000, -3.0000);
-ew_7 = map_point(11.0000, -3.0000);
-ns_0 = map_point(4.5000, -9.5000);
-ns_1 = map_point(4.5000, -5.4000);
-ns_2 = map_point(4.5000, -4.2000);
+
+ew_5 = map_point(5.4600, -3.0000);
+
+ew_6 = map_point(7.0600, -3.0000);
+
+ew_7 = map_point(9.7000, -3.0000);
+
+ns_0 = map_point(4.5000, -8.2000);
+
+ns_1 = map_point(4.5000, -4.9200);
+
+ns_2 = map_point(4.5000, -3.9600);
+
 ns_3 = map_point(4.5000, -3.0000);
-ns_4 = map_point(4.5000, -1.8000);
-ns_5 = map_point(4.5000, -0.6000);
-ns_6 = map_point(4.5000, 3.5000);
-nw_outer = map_point(2.1500, -1.8500);
-nw_crown = map_point(3.3500, -0.6500);
-sw_outer = map_point(2.1500, -4.1500);
-sw_crown = map_point(3.3500, -5.3500);
-ne_outer = map_point(6.8500, -1.8500);
-ne_crown = map_point(5.6500, -0.6500);
-se_outer = map_point(6.8500, -4.1500);
-se_crown = map_point(5.6500, -5.3500);
-nw_loop_a_nw_loop_a_seam = map_point(2.8836, -2.8142);
-nw_loop_c_nw_loop_c_merge_seam = map_point(4.3142, -1.3836);
-sw_loop_a_sw_loop_a_seam = map_point(4.3142, -4.6164);
-sw_loop_c_sw_loop_c_merge_seam = map_point(2.8836, -3.1858);
-ne_loop_a_ne_loop_a_seam = map_point(4.6858, -1.3836);
-ne_loop_c_ne_loop_c_merge_seam = map_point(6.1164, -2.8142);
-se_loop_a_se_loop_a_seam = map_point(6.1164, -3.1858);
-se_loop_c_se_loop_c_merge_seam = map_point(4.6858, -4.6164);
-nw_connector_nw_connector_seam = map_point(3.8562, 1.3120);
-nw_connector_nw_connector_merge_seam = map_point(0.1880, -2.3562);
-ne_connector_ne_connector_seam = map_point(8.8120, -2.3562);
-ne_connector_ne_connector_merge_seam = map_point(5.1438, 1.3120);
-sw_connector_sw_connector_seam = map_point(0.1880, -3.6438);
-sw_connector_sw_connector_merge_seam = map_point(3.8562, -7.3120);
-se_connector_se_connector_seam = map_point(5.1438, -7.3120);
-se_connector_se_connector_merge_seam = map_point(8.8120, -3.6438);
+
+ns_4 = map_point(4.5000, -2.0400);
+
+ns_5 = map_point(4.5000, -1.0800);
+
+ns_6 = map_point(4.5000, 2.2000);
+
+nw_outer = map_point(2.6200, -2.0800);
+
+nw_crown = map_point(3.5800, -1.1200);
+
+sw_outer = map_point(2.6200, -3.9200);
+
+sw_crown = map_point(3.5800, -4.8800);
+
+ne_outer = map_point(6.3800, -2.0800);
+
+ne_crown = map_point(5.4200, -1.1200);
+
+se_outer = map_point(6.3800, -3.9200);
+
+se_crown = map_point(5.4200, -4.8800);
+
+nw_loop_a_nw_loop_a_seam = map_point(3.2069, -2.8514);
+
+nw_loop_c_nw_loop_c_merge_seam = map_point(4.3514, -1.7069);
+
+sw_loop_a_sw_loop_a_seam = map_point(4.3514, -4.2931);
+
+sw_loop_c_sw_loop_c_merge_seam = map_point(3.2069, -3.1486);
+
+ne_loop_a_ne_loop_a_seam = map_point(4.6486, -1.7069);
+
+ne_loop_c_ne_loop_c_merge_seam = map_point(5.7931, -2.8514);
+
+se_loop_a_se_loop_a_seam = map_point(5.7931, -3.1486);
+
+se_loop_c_se_loop_c_merge_seam = map_point(4.6486, -4.2931);
+
+nw_connector_nw_connector_seam = map_point(3.9850, 0.4496);
+
+nw_connector_nw_connector_merge_seam = map_point(1.0504, -2.4850);
+
+ne_connector_ne_connector_seam = map_point(7.9496, -2.4850);
+
+ne_connector_ne_connector_merge_seam = map_point(5.0150, 0.4496);
+
+sw_connector_sw_connector_seam = map_point(1.0504, -3.5150);
+
+sw_connector_sw_connector_merge_seam = map_point(3.9850, -6.4496);
+
+se_connector_se_connector_seam = map_point(5.0150, -6.4496);
+
+se_connector_se_connector_merge_seam = map_point(7.9496, -3.5150);
+
 grid_0_0 = map_point(-5.8000, 0.0000);
+
 grid_0_1 = map_point(-4.6000, 0.0000);
+
 grid_0_2 = map_point(-3.4000, 0.0000);
+
 grid_0_3 = map_point(-2.2000, 0.0000);
+
 grid_1_0 = map_point(-5.8000, 1.2000);
+
 grid_1_1 = map_point(-4.6000, 1.2000);
+
 grid_1_2 = map_point(-3.4000, 1.2000);
+
 grid_1_3 = map_point(-2.2000, 1.2000);
+
 grid_2_0 = map_point(-5.8000, 2.4000);
+
 grid_2_1 = map_point(-4.6000, 2.4000);
+
 grid_2_2 = map_point(-3.4000, 2.4000);
+
 grid_2_3 = map_point(-2.2000, 2.4000);
+
 main_west = map_point(-6.8000, 1.2000);
+
 main_east = map_point(-1.4000, 1.2000);
+
 main_west_transition = map_point(-6.1000, 1.2000);
+
 main_east_transition = map_point(-1.9000, 1.2000);
+
 country_1 = map_point(-1.4000, 3.3000);
+
 country_transition_a = map_point(-1.9063, 2.7404);
+
 country_transition_b = map_point(-1.6677, 3.1158);
+
 country_2 = map_point(-0.2000, 3.0000);
+
 country_3 = map_point(0.8000, 4.2000);
+
 country_4 = map_point(1.6000, 3.9000);
 
-interstate_east_west_01 = interstate_three_lane(ew_0, -3.5000, -3.0000, -2.5000, -3.0000, ew_1);
-interstate_east_west_02 = interstate_three_lane(ew_1, -0.7000, -3.0000, 0.1000, -3.0000, ew_2);
-interstate_east_west_03 = interstate_three_lane(ew_2, 1.7000, -3.0000, 2.5000, -3.0000, ew_3);
-interstate_east_west_04 = interstate_three_lane(ew_3, 3.7000, -3.0000, 4.1000, -3.0000, ew_4);
-interstate_east_west_05 = interstate_three_lane(ew_4, 4.9000, -3.0000, 5.3000, -3.0000, ew_5);
-interstate_east_west_06 = interstate_three_lane(ew_5, 6.3667, -3.0000, 7.0333, -3.0000, ew_6);
-interstate_east_west_07 = interstate_three_lane(ew_6, 8.8000, -3.0000, 9.9000, -3.0000, ew_7);
-interstate_north_south_01 = interstate_three_lane(ns_0, 4.5000, -8.1333, 4.5000, -6.7667, ns_1);
-interstate_north_south_02 = interstate_three_lane(ns_1, 4.5000, -5.0000, 4.5000, -4.6000, ns_2);
-interstate_north_south_03 = interstate_three_lane(ns_2, 4.5000, -3.8000, 4.5000, -3.4000, ns_3);
-interstate_north_south_04 = interstate_three_lane(ns_3, 4.5000, -2.6000, 4.5000, -2.2000, ns_4);
-interstate_north_south_05 = interstate_three_lane(ns_4, 4.5000, -1.4000, 4.5000, -1.0000, ns_5);
-interstate_north_south_06 = interstate_three_lane(ns_5, 4.5000, 0.7667, 4.5000, 2.1333, ns_6);
+interstate_east_west_01 = interstate_three_lane(ew_0, -1.9000, -3.0000, -1.1000, -3.0000, ew_1);
+
+interstate_east_west_02 = interstate_three_lane(ew_1, 0.3400, -3.0000, 0.9800, -3.0000, ew_2);
+
+interstate_east_west_03 = interstate_three_lane(ew_2, 2.2600, -3.0000, 2.9000, -3.0000, ew_3);
+
+interstate_east_west_04 = interstate_three_lane(ew_3, 3.8600, -3.0000, 4.1800, -3.0000, ew_4);
+
+interstate_east_west_05 = interstate_three_lane(ew_4, 4.8200, -3.0000, 5.1400, -3.0000, ew_5);
+
+interstate_east_west_06 = interstate_three_lane(ew_5, 5.9934, -3.0000, 6.5266, -3.0000, ew_6);
+
+interstate_east_west_07 = interstate_three_lane(ew_6, 7.9400, -3.0000, 8.8200, -3.0000, ew_7);
+
+interstate_north_south_01 = interstate_three_lane(ns_0, 4.5000, -7.1066, 4.5000, -6.0134, ns_1);
+
+interstate_north_south_02 = interstate_three_lane(ns_1, 4.5000, -4.6000, 4.5000, -4.2800, ns_2);
+
+interstate_north_south_03 = interstate_three_lane(ns_2, 4.5000, -3.6400, 4.5000, -3.3200, ns_3);
+
+interstate_north_south_04 = interstate_three_lane(ns_3, 4.5000, -2.6800, 4.5000, -2.3600, ns_4);
+
+interstate_north_south_05 = interstate_three_lane(ns_4, 4.5000, -1.7200, 4.5000, -1.4000, ns_5);
+
+interstate_north_south_06 = interstate_three_lane(ns_5, 4.5000, 0.0134, 4.5000, 1.1066, ns_6);
+
 nw_exit = lane_point(interstate_east_west_04, 1, 0.5000);
+
 nw_merge = lane_point(interstate_north_south_04, 1, 0.5000);
+
 sw_merge = lane_point(interstate_east_west_04, 7, 0.5000);
+
 sw_exit = lane_point(interstate_north_south_03, 1, 0.5000);
+
 ne_merge = lane_point(interstate_east_west_05, 1, 0.5000);
+
 ne_exit = lane_point(interstate_north_south_04, 7, 0.5000);
+
 se_exit = lane_point(interstate_east_west_05, 7, 0.5000);
+
 se_merge = lane_point(interstate_north_south_03, 7, 0.5000);
-nw_loop_a_mouth = ramp_mouth(nw_exit, 3.2500, -2.8750, 3.0149, -2.8546, nw_loop_a_nw_loop_a_seam);
-nw_loop_a = exit_ramp(nw_loop_a_nw_loop_a_seam, 2.4677, -2.6865, 2.1500, -2.3592, nw_outer);
-nw_loop_b = exit_ramp(nw_outer, 2.1500, -1.1500, 2.6500, -0.6500, nw_crown);
-nw_loop_c = exit_ramp(nw_crown, 3.8592, -0.6500, 4.1865, -0.9677, nw_loop_c_nw_loop_c_merge_seam);
-nw_loop_c_merge = ramp_mouth(nw_loop_c_nw_loop_c_merge_seam, 4.3546, -1.5149, 4.3750, -1.7500, nw_merge);
-sw_loop_a_mouth = ramp_mouth(sw_exit, 4.3750, -4.2500, 4.3546, -4.4851, sw_loop_a_sw_loop_a_seam);
-sw_loop_a = exit_ramp(sw_loop_a_sw_loop_a_seam, 4.1865, -5.0323, 3.8592, -5.3500, sw_crown);
-sw_loop_b = exit_ramp(sw_crown, 2.6500, -5.3500, 2.1500, -4.8500, sw_outer);
-sw_loop_c = exit_ramp(sw_outer, 2.1500, -3.6408, 2.4677, -3.3135, sw_loop_c_sw_loop_c_merge_seam);
-sw_loop_c_merge = ramp_mouth(sw_loop_c_sw_loop_c_merge_seam, 3.0149, -3.1454, 3.2500, -3.1250, sw_merge);
-ne_loop_a_mouth = ramp_mouth(ne_exit, 4.6250, -1.7500, 4.6454, -1.5149, ne_loop_a_ne_loop_a_seam);
-ne_loop_a = exit_ramp(ne_loop_a_ne_loop_a_seam, 4.8135, -0.9677, 5.1408, -0.6500, ne_crown);
-ne_loop_b = exit_ramp(ne_crown, 6.3500, -0.6500, 6.8500, -1.1500, ne_outer);
-ne_loop_c = exit_ramp(ne_outer, 6.8500, -2.3592, 6.5323, -2.6865, ne_loop_c_ne_loop_c_merge_seam);
-ne_loop_c_merge = ramp_mouth(ne_loop_c_ne_loop_c_merge_seam, 5.9851, -2.8546, 5.7500, -2.8750, ne_merge);
-se_loop_a_mouth = ramp_mouth(se_exit, 5.7500, -3.1250, 5.9851, -3.1454, se_loop_a_se_loop_a_seam);
-se_loop_a = exit_ramp(se_loop_a_se_loop_a_seam, 6.5323, -3.3135, 6.8500, -3.6408, se_outer);
-se_loop_b = exit_ramp(se_outer, 6.8500, -4.8500, 6.3500, -5.3500, se_crown);
-se_loop_c = exit_ramp(se_crown, 5.1408, -5.3500, 4.8135, -5.0323, se_loop_c_se_loop_c_merge_seam);
-se_loop_c_merge = ramp_mouth(se_loop_c_se_loop_c_merge_seam, 4.6454, -4.4851, 4.6250, -4.2500, se_merge);
+
+nw_loop_a_mouth = ramp_mouth(nw_exit, 3.5000, -2.8750, 3.3119, -2.8837, nw_loop_a_nw_loop_a_seam);
+
+nw_loop_a = exit_ramp(nw_loop_a_nw_loop_a_seam, 2.8742, -2.7492, 2.6200, -2.4874, nw_outer);
+
+nw_loop_b = exit_ramp(nw_outer, 2.6200, -1.5200, 3.0200, -1.1200, nw_crown);
+
+nw_loop_c = exit_ramp(nw_crown, 3.9874, -1.1200, 4.2492, -1.3742, nw_loop_c_nw_loop_c_merge_seam);
+
+nw_loop_c_merge = ramp_mouth(nw_loop_c_nw_loop_c_merge_seam, 4.3837, -1.8119, 4.3750, -2.0000, nw_merge);
+
+sw_loop_a_mouth = ramp_mouth(sw_exit, 4.3750, -4.0000, 4.3837, -4.1881, sw_loop_a_sw_loop_a_seam);
+
+sw_loop_a = exit_ramp(sw_loop_a_sw_loop_a_seam, 4.2492, -4.6258, 3.9874, -4.8800, sw_crown);
+
+sw_loop_b = exit_ramp(sw_crown, 3.0200, -4.8800, 2.6200, -4.4800, sw_outer);
+
+sw_loop_c = exit_ramp(sw_outer, 2.6200, -3.5126, 2.8742, -3.2508, sw_loop_c_sw_loop_c_merge_seam);
+
+sw_loop_c_merge = ramp_mouth(sw_loop_c_sw_loop_c_merge_seam, 3.3119, -3.1163, 3.5000, -3.1250, sw_merge);
+
+ne_loop_a_mouth = ramp_mouth(ne_exit, 4.6250, -2.0000, 4.6163, -1.8119, ne_loop_a_ne_loop_a_seam);
+
+ne_loop_a = exit_ramp(ne_loop_a_ne_loop_a_seam, 4.7508, -1.3742, 5.0126, -1.1200, ne_crown);
+
+ne_loop_b = exit_ramp(ne_crown, 5.9800, -1.1200, 6.3800, -1.5200, ne_outer);
+
+ne_loop_c = exit_ramp(ne_outer, 6.3800, -2.4874, 6.1258, -2.7492, ne_loop_c_ne_loop_c_merge_seam);
+
+ne_loop_c_merge = ramp_mouth(ne_loop_c_ne_loop_c_merge_seam, 5.6881, -2.8837, 5.5000, -2.8750, ne_merge);
+
+se_loop_a_mouth = ramp_mouth(se_exit, 5.5000, -3.1250, 5.6881, -3.1163, se_loop_a_se_loop_a_seam);
+
+se_loop_a = exit_ramp(se_loop_a_se_loop_a_seam, 6.1258, -3.2508, 6.3800, -3.5126, se_outer);
+
+se_loop_b = exit_ramp(se_outer, 6.3800, -4.4800, 5.9800, -4.8800, se_crown);
+
+se_loop_c = exit_ramp(se_crown, 5.0126, -4.8800, 4.7508, -4.6258, se_loop_c_se_loop_c_merge_seam);
+
+se_loop_c_merge = ramp_mouth(se_loop_c_se_loop_c_merge_seam, 4.6163, -4.1881, 4.6250, -4.0000, se_merge);
+
 nw_direct_exit = lane_point(interstate_north_south_06, 1, 0.756098);
+
 nw_direct_merge = lane_point(interstate_east_west_02, 1, 0.208333);
+
 ne_direct_exit = lane_point(interstate_east_west_07, 1, 0.696970);
+
 ne_direct_merge = lane_point(interstate_north_south_06, 7, 0.756098);
+
 sw_direct_exit = lane_point(interstate_east_west_02, 7, 0.208333);
+
 sw_direct_merge = lane_point(interstate_north_south_01, 1, 0.243902);
+
 se_direct_exit = lane_point(interstate_north_south_01, 7, 0.243902);
+
 se_direct_merge = lane_point(interstate_east_west_07, 7, 0.696970);
-nw_connector_mouth = ramp_mouth(nw_direct_exit, 4.3750, 2.2140, 4.1778, 1.7937, nw_connector_nw_connector_seam);
-nw_connector = exit_ramp(nw_connector_nw_connector_seam, 3.0378, 0.0859, 1.4141, -1.5378, nw_connector_nw_connector_merge_seam);
-nw_connector_merge = ramp_mouth(nw_connector_nw_connector_merge_seam, -0.2937, -2.6778, -0.7140, -2.8750, nw_direct_merge);
-ne_connector_mouth = ramp_mouth(ne_direct_exit, 9.7140, -2.8750, 9.2937, -2.6778, ne_connector_ne_connector_seam);
-ne_connector = exit_ramp(ne_connector_ne_connector_seam, 7.5859, -1.5378, 5.9622, 0.0859, ne_connector_ne_connector_merge_seam);
-ne_connector_merge = ramp_mouth(ne_connector_ne_connector_merge_seam, 4.8222, 1.7937, 4.6250, 2.2140, ne_direct_merge);
-sw_connector_mouth = ramp_mouth(sw_direct_exit, -0.7140, -3.1250, -0.2937, -3.3222, sw_connector_sw_connector_seam);
-sw_connector = exit_ramp(sw_connector_sw_connector_seam, 1.4141, -4.4622, 3.0378, -6.0859, sw_connector_sw_connector_merge_seam);
-sw_connector_merge = ramp_mouth(sw_connector_sw_connector_merge_seam, 4.1778, -7.7937, 4.3750, -8.2140, sw_direct_merge);
-se_connector_mouth = ramp_mouth(se_direct_exit, 4.6250, -8.2140, 4.8222, -7.7937, se_connector_se_connector_seam);
-se_connector = exit_ramp(se_connector_se_connector_seam, 5.9622, -6.0859, 7.5859, -4.4622, se_connector_se_connector_merge_seam);
-se_connector_merge = ramp_mouth(se_connector_se_connector_merge_seam, 9.2937, -3.3222, 9.7140, -3.1250, se_direct_merge);
+
+nw_connector_mouth = ramp_mouth(nw_direct_exit, 4.3750, 1.1712, 4.2422, 0.8350, nw_connector_nw_connector_seam);
+
+nw_connector = exit_ramp(nw_connector_nw_connector_seam, 3.3302, -0.5313, 2.0313, -1.8302, nw_connector_nw_connector_merge_seam);
+
+nw_connector_merge = ramp_mouth(nw_connector_nw_connector_merge_seam, 0.6650, -2.7422, 0.3288, -2.8750, nw_direct_merge);
+
+ne_connector_mouth = ramp_mouth(ne_direct_exit, 8.6712, -2.8750, 8.3350, -2.7422, ne_connector_ne_connector_seam);
+
+ne_connector = exit_ramp(ne_connector_ne_connector_seam, 6.9687, -1.8302, 5.6698, -0.5313, ne_connector_ne_connector_merge_seam);
+
+ne_connector_merge = ramp_mouth(ne_connector_ne_connector_merge_seam, 4.7578, 0.8350, 4.6250, 1.1712, ne_direct_merge);
+
+sw_connector_mouth = ramp_mouth(sw_direct_exit, 0.3288, -3.1250, 0.6650, -3.2578, sw_connector_sw_connector_seam);
+
+sw_connector = exit_ramp(sw_connector_sw_connector_seam, 2.0313, -4.1698, 3.3302, -5.4687, sw_connector_sw_connector_merge_seam);
+
+sw_connector_merge = ramp_mouth(sw_connector_sw_connector_merge_seam, 4.2422, -6.8350, 4.3750, -7.1712, sw_direct_merge);
+
+se_connector_mouth = ramp_mouth(se_direct_exit, 4.6250, -7.1712, 4.7578, -6.8350, se_connector_se_connector_seam);
+
+se_connector = exit_ramp(se_connector_se_connector_seam, 5.6698, -5.4687, 6.9687, -4.1698, se_connector_se_connector_merge_seam);
+
+se_connector_merge = ramp_mouth(se_connector_se_connector_merge_seam, 8.3350, -3.2578, 8.6712, -3.1250, se_direct_merge);
+
 grid_east_west_1_1 = neighborhood_street(grid_0_0_port_east, -5.2785, 0.0000, -5.1215, 0.0000, grid_0_1_port_west);
+
 grid_east_west_1_2 = neighborhood_street(grid_0_1_port_east, -4.0785, 0.0000, -3.9215, 0.0000, grid_0_2_port_west);
+
 grid_east_west_1_3 = neighborhood_street(grid_0_2_port_east, -2.8785, 0.0000, -2.7215, 0.0000, grid_0_3_port_west);
+
 grid_east_west_2_1 = neighborhood_street(grid_1_0_port_east, -5.2785, 1.2000, -5.1215, 1.2000, grid_1_1_port_west);
+
 grid_east_west_2_2 = neighborhood_street(grid_1_1_port_east, -4.0785, 1.2000, -3.9215, 1.2000, grid_1_2_port_west);
+
 grid_east_west_2_3 = neighborhood_street(grid_1_2_port_east, -2.8785, 1.2000, -2.7215, 1.2000, grid_1_3_port_west);
+
 grid_east_west_3_1 = neighborhood_street(grid_2_0_port_east, -5.2785, 2.4000, -5.1215, 2.4000, grid_2_1_port_west);
+
 grid_east_west_3_2 = neighborhood_street(grid_2_1_port_east, -4.0785, 2.4000, -3.9215, 2.4000, grid_2_2_port_west);
+
 grid_east_west_3_3 = neighborhood_street(grid_2_2_port_east, -2.8785, 2.4000, -2.7215, 2.4000, grid_2_3_port_west);
+
 grid_north_south_1_1 = neighborhood_street(grid_0_0_port_north, -5.8000, 0.5215, -5.8000, 0.6785, grid_1_0_port_south);
+
 grid_north_south_1_2 = neighborhood_street(grid_1_0_port_north, -5.8000, 1.7215, -5.8000, 1.8785, grid_2_0_port_south);
+
 grid_north_south_2_1 = neighborhood_street(grid_0_1_port_north, -4.6000, 0.5215, -4.6000, 0.6785, grid_1_1_port_south);
+
 grid_north_south_2_2 = neighborhood_street(grid_1_1_port_north, -4.6000, 1.7215, -4.6000, 1.8785, grid_2_1_port_south);
+
 grid_north_south_3_1 = neighborhood_street(grid_0_2_port_north, -3.4000, 0.5215, -3.4000, 0.6785, grid_1_2_port_south);
+
 grid_north_south_3_2 = neighborhood_street(grid_1_2_port_north, -3.4000, 1.7215, -3.4000, 1.8785, grid_2_2_port_south);
+
 grid_north_south_4_1 = neighborhood_street(grid_0_3_port_north, -2.2000, 0.5215, -2.2000, 0.6785, grid_1_3_port_south);
+
 grid_north_south_4_2 = neighborhood_street(grid_1_3_port_north, -2.2000, 1.7215, -2.2000, 1.8785, grid_2_3_port_south);
+
 main_west_approach = main_street(main_west, -6.5667, 1.2000, -6.3333, 1.2000, main_west_transition);
+
 main_west_edge = neighborhood_street(main_west_transition, -6.0000, 1.2000, -6.0215, 1.2000, grid_1_0_port_west);
+
 main_east_edge = neighborhood_street(grid_1_3_port_east, -1.9785, 1.2000, -2.0000, 1.2000, main_east_transition);
+
 main_east_approach = main_street(main_east_transition, -1.7333, 1.2000, -1.5667, 1.2000, main_east);
+
 country_road_1_edge = neighborhood_street(grid_2_3_port_north, -2.2000, 2.6715, -2.1000, 2.6500, country_transition_a);
+
 country_road_1_merge = transition_lane(country_transition_a, -1.8217, 2.8723, -1.7464, 3.0100, country_transition_b);
+
 country_road_1 = country_lane(country_transition_b, -1.5867, 3.2249, -1.5020, 3.3000, country_1);
+
 country_road_2 = country_lane(country_1, -0.9000, 3.3000, -0.7000, 2.9500, country_2);
+
 country_road_3 = country_lane(country_2, 0.4000, 3.0500, 0.4000, 4.1000, country_3);
+
 country_road_4 = country_lane(country_3, 1.1500, 4.2500, 1.4000, 3.9000, country_4);
 
 grid_0_1_port_north = map_point(-4.6000, 0.1215);
+
 grid_0_1_port_east = map_point(-4.4785, 0.0000);
+
 grid_0_1_port_west = map_point(-4.7215, 0.0000);
+
 intersection3(grid_0_1, neighborhood_street, north, grid_0_1_port_north, east, grid_0_1_port_east, west, grid_0_1_port_west);
+
 grid_0_2_port_north = map_point(-3.4000, 0.1215);
+
 grid_0_2_port_east = map_point(-3.2785, 0.0000);
+
 grid_0_2_port_west = map_point(-3.5215, 0.0000);
+
 intersection3(grid_0_2, neighborhood_street, north, grid_0_2_port_north, east, grid_0_2_port_east, west, grid_0_2_port_west);
+
 grid_2_1_port_east = map_point(-4.4785, 2.4000);
+
 grid_2_1_port_south = map_point(-4.6000, 2.2785);
+
 grid_2_1_port_west = map_point(-4.7215, 2.4000);
+
 intersection3(grid_2_1, neighborhood_street, east, grid_2_1_port_east, south, grid_2_1_port_south, west, grid_2_1_port_west);
+
 grid_2_2_port_east = map_point(-3.2785, 2.4000);
+
 grid_2_2_port_south = map_point(-3.4000, 2.2785);
+
 grid_2_2_port_west = map_point(-3.5215, 2.4000);
+
 intersection3(grid_2_2, neighborhood_street, east, grid_2_2_port_east, south, grid_2_2_port_south, west, grid_2_2_port_west);
+
 grid_2_3_port_north = map_point(-2.2000, 2.5215);
+
 grid_2_3_port_south = map_point(-2.2000, 2.2785);
+
 grid_2_3_port_west = map_point(-2.3215, 2.4000);
+
 intersection3(grid_2_3, neighborhood_street, north, grid_2_3_port_north, south, grid_2_3_port_south, west, grid_2_3_port_west);
+
 grid_0_0_port_north = map_point(-5.8000, 0.1215);
+
 grid_0_0_port_east = map_point(-5.6785, 0.0000);
+
 intersection2(grid_0_0, neighborhood_street, north, grid_0_0_port_north, east, grid_0_0_port_east);
+
 grid_0_3_port_north = map_point(-2.2000, 0.1215);
+
 grid_0_3_port_west = map_point(-2.3215, 0.0000);
+
 intersection2(grid_0_3, neighborhood_street, north, grid_0_3_port_north, west, grid_0_3_port_west);
+
 grid_2_0_port_east = map_point(-5.6785, 2.4000);
+
 grid_2_0_port_south = map_point(-5.8000, 2.2785);
+
 intersection2(grid_2_0, neighborhood_street, east, grid_2_0_port_east, south, grid_2_0_port_south);
+
 grid_1_0_port_north = map_point(-5.8000, 1.3215);
+
 grid_1_0_port_east = map_point(-5.6785, 1.2000);
+
 grid_1_0_port_south = map_point(-5.8000, 1.0785);
+
 grid_1_0_port_west = map_point(-5.9215, 1.2000);
+
 intersection4(grid_1_0, neighborhood_street, north, grid_1_0_port_north, east, grid_1_0_port_east, south, grid_1_0_port_south, west, grid_1_0_port_west);
+
 grid_1_1_port_north = map_point(-4.6000, 1.3215);
+
 grid_1_1_port_east = map_point(-4.4785, 1.2000);
+
 grid_1_1_port_south = map_point(-4.6000, 1.0785);
+
 grid_1_1_port_west = map_point(-4.7215, 1.2000);
+
 intersection4(grid_1_1, neighborhood_street, north, grid_1_1_port_north, east, grid_1_1_port_east, south, grid_1_1_port_south, west, grid_1_1_port_west);
+
 grid_1_2_port_north = map_point(-3.4000, 1.3215);
+
 grid_1_2_port_east = map_point(-3.2785, 1.2000);
+
 grid_1_2_port_south = map_point(-3.4000, 1.0785);
+
 grid_1_2_port_west = map_point(-3.5215, 1.2000);
+
 intersection4(grid_1_2, neighborhood_street, north, grid_1_2_port_north, east, grid_1_2_port_east, south, grid_1_2_port_south, west, grid_1_2_port_west);
+
 grid_1_3_port_north = map_point(-2.2000, 1.3215);
+
 grid_1_3_port_east = map_point(-2.0785, 1.2000);
+
 grid_1_3_port_south = map_point(-2.2000, 1.0785);
+
 grid_1_3_port_west = map_point(-2.3215, 1.2000);
+
 intersection4(grid_1_3, neighborhood_street, north, grid_1_3_port_north, east, grid_1_3_port_east, south, grid_1_3_port_south, west, grid_1_3_port_west);
+
+grade(interstate_north_south_02, 0, 0.24);
+
+elevation(interstate_north_south_03, 0.24);
+
+elevation(interstate_north_south_04, 0.24);
+
+grade(interstate_north_south_05, 0.24, 0);
+
+grade(sw_loop_a_mouth, 0.24, 0.18);
+
+grade(sw_loop_a, 0.18, 0);
+
+grade(ne_loop_a_mouth, 0.24, 0.18);
+
+grade(ne_loop_a, 0.18, 0);
+
+grade(nw_loop_c, 0, 0.18);
+
+grade(nw_loop_c_merge, 0.18, 0.24);
+
+grade(se_loop_c, 0, 0.18);
+
+grade(se_loop_c_merge, 0.18, 0.24);
+
+west_rail = regional_rail(-8.45, -5.80, -5.55, -5.80);
+
+cycle_bridge = cycle_rail_bridge(-5.20, -5.80);
+
+east_rail = regional_rail(-4.85, -5.80, -2.70, -5.91, -0.45, -6.12, 0.90, -6.12);
+
+river_cycleway = waterside_cycleway(-5.45, -3.30, -5.22, -3.75, -5.20, -4.72, -5.20, -5.20);
+
+grade(river_cycleway, 0, 0.18);
+
+south_cycleway = waterside_cycleway(-5.20, -6.40, -5.20, -6.68, -5.10, -6.95, -4.90, -7.22);
+
+grade(south_cycleway, 0.18, 0);
+
+lakefront_path = waterside_cycleway(-8.62, -0.56, -8.48, 0.18, -7.34, 0.06, -6.60, -0.22);
+
+east_shore_path = waterside_cycleway(-6.60, -0.22, -5.86, -0.42, -5.38, -1.75, -5.45, -3.30);
+
+town_tram = city_tram(-5.55, -0.73, -5.15, -0.73, -3.44, -0.73, -1.98, -0.73);
+
+west_portal = metro_tunnel(-7.35, 1.20, -7.15, 1.20, -6.95, 1.20, -6.75, 1.20);
+
+grade(west_portal, 0, -0.30);
+
+main_metro = metro_tunnel(-6.75, 1.20, -5.40, 1.20, -2.85, 1.20, -1.35, 1.20);
+
+elevation(main_metro, -0.30);
+
+east_portal = metro_tunnel(-1.35, 1.20, -1.12, 1.20, -0.94, 1.20, -0.72, 1.20);
+
+grade(east_portal, -0.30, 0);

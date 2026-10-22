@@ -109,9 +109,16 @@ pub struct Segment {
     pub controls: [WorldPoint; 2],
     pub start_ref: Option<String>,
     pub end_ref: Option<String>,
+    pub elevation: f32,
+    pub start_z: f32,
+    pub end_z: f32,
 }
 
 impl Segment {
+    pub fn height_at(&self, t: f32) -> f32 {
+        self.start_z + (self.end_z - self.start_z) * t.clamp(0.0, 1.0)
+    }
+
     pub fn point_at(&self, t: f32) -> WorldPoint {
         let [first, second] = self.controls;
         let u = 1.0 - t;
@@ -729,7 +736,7 @@ fn segment_points(
 }
 
 fn block_origin(call: &Call) -> Option<WorldPoint> {
-    if call.args.len() != 2 {
+    if !matches!(call.args.len(), 2 | 3) {
         return None;
     }
     Some(WorldPoint {
@@ -857,6 +864,15 @@ fn project_with_points(program: &Program, points: &[MapPoint]) -> Projection {
         .collect();
     let mut segments = Vec::new();
     let mut unresolved = 0;
+    let blocks: Vec<_> = program
+        .statements
+        .iter()
+        .enumerate()
+        .filter_map(|(index, statement)| match statement {
+            Statement::Block(block) => Some((index, block)),
+            _ => None,
+        })
+        .collect();
     for (index, statement) in program.statements.iter().enumerate() {
         let Statement::Call(call) = statement else {
             continue;
@@ -864,6 +880,12 @@ fn project_with_points(program: &Program, points: &[MapPoint]) -> Projection {
         if roads.contains(call.name.as_str()) {
             if let Some((start, end, controls, start_ref, end_ref)) = segment_points(call, &points)
             {
+                let (start_z, end_z) = call.assigns.first().map_or((0.0, 0.0), |name| {
+                    opencity::grade_of(program, name).unwrap_or_else(|| {
+                        let z = opencity::elevation_of(program, name).unwrap_or(0.0);
+                        (z, z)
+                    })
+                });
                 segments.push(Segment {
                     source: SegmentSource::TopLevel(index),
                     name: call.assigns.first().cloned(),
@@ -873,45 +895,127 @@ fn project_with_points(program: &Program, points: &[MapPoint]) -> Projection {
                     controls,
                     start_ref,
                     end_ref,
+                    elevation: (start_z + end_z) / 2.0,
+                    start_z,
+                    end_z,
                 });
             } else {
                 unresolved += 1;
             }
             continue;
         }
-        let Some((block_index, block)) =
-            program
-                .statements
-                .iter()
-                .enumerate()
-                .find_map(|(block_index, statement)| match statement {
-                    Statement::Block(block) if block.name == call.name => {
-                        Some((block_index, block))
-                    }
-                    _ => None,
-                })
-        else {
+        if !blocks.iter().any(|(_, block)| block.name == call.name) {
             continue;
+        }
+        let top_calls: Vec<_> = program
+            .statements
+            .iter()
+            .filter_map(|statement| match statement {
+                Statement::Call(call) => Some(call),
+                _ => None,
+            })
+            .collect();
+        let mut stack = Vec::new();
+        let mut next_nested_call = 0;
+        project_block_road_calls(
+            call,
+            index,
+            &blocks,
+            &roads,
+            &top_calls,
+            WorldPoint { x: 0.0, y: 0.0 },
+            0.0,
+            &mut stack,
+            &mut next_nested_call,
+            &mut segments,
+            &mut unresolved,
+        );
+    }
+    Projection {
+        segments,
+        points: points.to_vec(),
+        unresolved,
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn project_block_road_calls(
+    placement: &Call,
+    instance: usize,
+    blocks: &[(usize, &opencity::BlockDefinition)],
+    roads: &HashSet<&str>,
+    parent_calls: &[&Call],
+    parent_origin: WorldPoint,
+    parent_elevation: f32,
+    stack: &mut Vec<usize>,
+    next_nested_call: &mut usize,
+    segments: &mut Vec<Segment>,
+    unresolved: &mut usize,
+) {
+    let Some(&(block_index, block)) = blocks
+        .iter()
+        .find(|(_, block)| block.name == placement.name)
+    else {
+        return;
+    };
+    if stack.contains(&block_index) {
+        *unresolved += 1;
+        return;
+    }
+    let Some(local_origin) = block_origin(placement) else {
+        *unresolved += 1;
+        return;
+    };
+    let local_elevation = if placement.args.len() == 3 {
+        let Some(height) = opencity::block_height(&placement.args) else {
+            *unresolved += 1;
+            return;
         };
-        let Some(origin) = block_origin(call) else {
-            unresolved += block
-                .calls
-                .iter()
-                .filter(|call| roads.contains(call.name.as_str()))
-                .count();
-            continue;
-        };
-        for (call_index, inner) in block.calls.iter().enumerate() {
-            if !roads.contains(inner.name.as_str()) {
-                continue;
-            }
-            if let Some((start, end, controls, start_ref, end_ref)) = segment_points(inner, &points)
-            {
+        height
+    } else {
+        0.0
+    };
+    let origin = parent_origin.translated(local_origin);
+    let elevation = parent_elevation
+        + local_elevation
+        + placement
+            .assigns
+            .first()
+            .and_then(|name| opencity::elevation_in_calls(parent_calls, name))
+            .unwrap_or(0.0);
+    if !origin.x.is_finite() || !origin.y.is_finite() || !elevation.is_finite() {
+        *unresolved += 1;
+        return;
+    }
+    stack.push(block_index);
+    let local_calls: Vec<_> = block.calls.iter().collect();
+    for (call_index, inner) in block.calls.iter().enumerate() {
+        if roads.contains(inner.name.as_str()) {
+            // Block roads use local numeric coordinates; global map points are not local.
+            if let Some((start, end, controls, start_ref, end_ref)) = segment_points(inner, &[]) {
+                let (local_start_z, local_end_z) =
+                    inner.assigns.first().map_or((0.0, 0.0), |name| {
+                        opencity::grade_in_calls(&local_calls, name).unwrap_or_else(|| {
+                            let z = opencity::elevation_in_calls(&local_calls, name).unwrap_or(0.0);
+                            (z, z)
+                        })
+                    });
+                let start_z = elevation + local_start_z;
+                let end_z = elevation + local_end_z;
+                // Direct calls retain their lexical index. Nested calls use a unique
+                // projection index so repeated placements have distinct sources.
+                let source_call = if stack.len() == 1 {
+                    call_index
+                } else {
+                    let projected_call = *next_nested_call;
+                    *next_nested_call += 1;
+                    projected_call
+                };
                 segments.push(Segment {
                     source: SegmentSource::BlockInstance {
-                        instance: index,
+                        instance,
                         block: block_index,
-                        call: call_index,
+                        call: source_call,
                     },
                     name: inner.assigns.first().cloned(),
                     road_name: inner.name.clone(),
@@ -923,17 +1027,30 @@ fn project_with_points(program: &Program, points: &[MapPoint]) -> Projection {
                     ],
                     start_ref,
                     end_ref,
+                    elevation: (start_z + end_z) / 2.0,
+                    start_z,
+                    end_z,
                 });
             } else {
-                unresolved += 1;
+                *unresolved += 1;
             }
+        } else if blocks.iter().any(|(_, block)| block.name == inner.name) {
+            project_block_road_calls(
+                inner,
+                instance,
+                blocks,
+                roads,
+                &local_calls,
+                origin,
+                elevation,
+                stack,
+                next_nested_call,
+                segments,
+                unresolved,
+            );
         }
     }
-    Projection {
-        segments,
-        points: points.to_vec(),
-        unresolved,
-    }
+    stack.pop();
 }
 
 pub fn element_world_width(kind: opencity::RoadElementKind) -> f32 {
@@ -948,6 +1065,9 @@ pub fn element_world_width(kind: opencity::RoadElementKind) -> f32 {
         RoadElementKind::Verge => 0.035,
         RoadElementKind::BuildingEdge => 0.012,
         RoadElementKind::Barrier => 0.008,
+        RoadElementKind::TrainTrack => 0.055,
+        RoadElementKind::TramTrack => 0.048,
+        RoadElementKind::SubwayTrack => 0.052,
     }
 }
 
@@ -2174,6 +2294,12 @@ pub fn set_name(program: &mut Program, source: SegmentSource, name: String) -> b
                         }
                     }
                 }
+            } else if matches!(call.name.as_str(), "elevation" | "grade") {
+                if let Some(Argument::Identifier(road)) = call.args.first_mut() {
+                    if *road == old_name {
+                        *road = name.clone();
+                    }
+                }
             }
         }
     }
@@ -2488,8 +2614,10 @@ pub fn remove(program: &mut Program, source: SegmentSource) -> bool {
     if let Some(name) = removed_name {
         program.statements.retain(|statement| {
             !matches!(statement,
-            Statement::Call(call) if call.name == "lane_split" && call.args.iter().enumerate()
+            Statement::Call(call) if (call.name == "lane_split" && call.args.iter().enumerate()
                 .any(|(index, arg)| index != 2 && matches!(arg, Argument::Identifier(road) if road == &name)))
+                || (matches!(call.name.as_str(), "elevation" | "grade")
+                    && matches!(call.args.first(), Some(Argument::Identifier(road)) if road == &name)))
         });
     }
     prune_unused_points(program);
@@ -3165,6 +3293,93 @@ mod tests {
     }
 
     #[test]
+    fn reusable_crossing_instances_keep_local_levels() {
+        let program = parse(include_str!("../../../examples/interstate_crossing.road")).unwrap();
+        let projection = project(&program);
+        assert_eq!(projection.segments.len(), 6);
+        assert_eq!(projection.unresolved, 0);
+        let west_lower = &projection.segments[0];
+        let west_upper = &projection.segments[1];
+        let west_ramp = &projection.segments[2];
+        let east_lower = &projection.segments[3];
+        let east_ramp = &projection.segments[5];
+        assert_eq!(west_lower.elevation, 0.0);
+        assert_eq!(west_upper.elevation, 0.25);
+        assert_eq!((west_ramp.start_z, west_ramp.end_z), (0.0, 0.25));
+        assert_eq!(west_ramp.height_at(0.5), 0.125);
+        assert_eq!((east_ramp.start_z, east_ramp.end_z), (0.0, 0.25));
+        assert_eq!(west_lower.start.x + 6.0, east_lower.start.x);
+    }
+
+    #[test]
+    fn top_level_and_nested_road_grades_add_instance_heights() {
+        let program = parse("road ramp: carlane; end; direct = ramp(0, 0, 2, 0); grade(direct, 0, 0.25); block inner: local = ramp(0, 0, 2, 0); grade(local, 0, 0.25); end; block outer: nested = inner(0, 0, 0.5); end; outer(4, 0, 1);").unwrap();
+        let projection = project(&program);
+        assert_eq!(projection.unresolved, 0);
+        assert_eq!(
+            (projection.segments[0].start_z, projection.segments[0].end_z),
+            (0.0, 0.25)
+        );
+        assert_eq!(
+            (projection.segments[1].start_z, projection.segments[1].end_z),
+            (1.5, 1.75)
+        );
+    }
+
+    #[test]
+    fn a_block_instance_can_be_raised_independently() {
+        let program = parse("road rail: traintrack; end; block crossing: a = rail(-1, 0, 1, 0); elevation(a, -0.5); end; one = crossing(0, 0); two = crossing(2, 0, 1);").unwrap();
+        let projection = project(&program);
+        assert_eq!(
+            projection
+                .segments
+                .iter()
+                .map(|segment| segment.elevation)
+                .collect::<Vec<_>>(),
+            vec![-0.5, 0.5]
+        );
+    }
+
+    #[test]
+    fn nested_block_roads_translate_and_stack_elevation() {
+        let program = parse("road rail: traintrack; end; block span: rail_line = rail(-1, 0, 1, 0); elevation(rail_line, -0.5); end; block crossing: left = span(-2, 0, 0.25); elevation(left, 0.5); right = span(2, 0); end; crossing(10, 3, 1);").unwrap();
+        let projection = project(&program);
+        assert_eq!(projection.unresolved, 0);
+        assert_eq!(projection.segments.len(), 2);
+        assert_eq!(projection.segments[0].start, WorldPoint { x: 7.0, y: 3.0 });
+        assert_eq!(projection.segments[1].start, WorldPoint { x: 11.0, y: 3.0 });
+        assert_eq!(projection.segments[0].elevation, 1.25);
+        assert_eq!(projection.segments[1].elevation, 0.5);
+        assert_ne!(projection.segments[0].source, projection.segments[1].source);
+        assert!(!projection.segments[0].source.editable());
+    }
+
+    #[test]
+    fn nested_block_recursion_and_bad_placement_are_unresolved() {
+        let program = parse("road rail: traintrack; end; block loop: rail(0, 0, 1, 0); loop(2, 0); end; block outer: loop(0, 0); loop(bad, 0); end; outer(0, 0);").unwrap();
+        let projection = project(&program);
+        assert_eq!(projection.segments.len(), 1);
+        assert_eq!(projection.unresolved, 2);
+    }
+
+    #[test]
+    fn landscape_and_mobility_example_projects_every_road() {
+        let program = parse(include_str!(
+            "../../../examples/landscape_and_mobility.road"
+        ))
+        .unwrap();
+        let projection = project(&program);
+        assert_eq!(projection.segments.len(), 6);
+        assert_eq!(projection.unresolved, 0);
+        assert_eq!(
+            opencity::project_landscape_features(&program)
+                .features
+                .len(),
+            3
+        );
+    }
+
+    #[test]
     fn placed_segment_round_trips_and_moves_with_negative_coordinates() {
         let mut program = parse("road lane: verge-carlane-verge; end;").unwrap();
         let road = match &program.statements[0] {
@@ -3339,7 +3554,10 @@ mod tests {
 
     #[test]
     fn lane_branch_follows_parent_shape_and_name() {
-        let mut program = parse("road highway: verge-carlane-carlane-verge; end; road ramp: verge-carlane-verge; end;").unwrap();
+        let mut program = parse(
+            "road highway: verge-carlane-carlane-verge; end; road ramp: verge-carlane-verge; end;",
+        )
+        .unwrap();
         let parent_road = match &program.statements[0] {
             Statement::Road(road) => road.clone(),
             _ => unreachable!(),
@@ -3480,7 +3698,10 @@ mod tests {
     fn lane_branch_tracks_cross_section_edits_and_detaches_when_lane_is_removed() {
         use opencity::{RoadElement, RoadElementKind};
 
-        let mut program = parse("road highway: verge-carlane-carlane-verge; end; road ramp: verge-carlane-verge; end;").unwrap();
+        let mut program = parse(
+            "road highway: verge-carlane-carlane-verge; end; road ramp: verge-carlane-verge; end;",
+        )
+        .unwrap();
         let parent_road = match &program.statements[0] {
             Statement::Road(road) => road.clone(),
             _ => unreachable!(),

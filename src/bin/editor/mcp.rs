@@ -353,13 +353,28 @@ impl RoadEditor {
                     .collect();
                 let segments: Vec<_> = projection.segments.iter().map(|segment| {
                     json!({"segment_index": match segment.source { SegmentSource::TopLevel(index) => Some(index), _ => None },
-                        "name":segment.name,"road_type":segment.road_name,
+                        "name":segment.name,"road_type":segment.road_name,"elevation":segment.elevation,
+                        "start_z":segment.start_z,"end_z":segment.end_z,
                         "start_ref":segment.start_ref,"end_ref":segment.end_ref,
                         "start":[segment.start.x,segment.start.y],"control1":[segment.controls[0].x,segment.controls[0].y],
                         "control2":[segment.controls[1].x,segment.controls[1].y],"end":[segment.end.x,segment.end.y]})
                 }).collect();
+                let landscape = opencity::project_landscape_features(&self.program);
+                let features: Vec<_> = landscape
+                    .features
+                    .iter()
+                    .map(|feature| {
+                        json!({
+                            "kind":feature.kind.call_name(),"name":feature.name,
+                            "points":feature.points,"elevation":feature.elevation
+                        })
+                    })
+                    .collect();
                 Ok(
-                    json!({"source":self.program.to_road_source(),"segments":segments,"intersections":intersections,"dirty":self.program != self.saved_program}),
+                    json!({"source":self.program.to_road_source(),"segments":segments,
+                    "intersections":intersections,"landscape":features,
+                    "landscape_errors":landscape.errors.iter().map(ToString::to_string).collect::<Vec<_>>(),
+                    "dirty":self.program != self.saved_program}),
                 )
             }
             "get_viewport" => {

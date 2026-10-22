@@ -1,0 +1,20 @@
+road east_west_interstate:
+    verge-carlane-carlane-middle-carlane-carlane-verge;
+end;
+road north_south_interstate:
+    verge-carlane-carlane-middle-carlane-carlane-verge;
+end;
+road exit_ramp:
+    verge-carlane-verge;
+end;
+
+block interstate_crossing:
+    lower = east_west_interstate(-2, 0, 2, 0);
+    upper = north_south_interstate(0, -2, 0, 2);
+    elevation(upper, 0.25);
+    ramp = exit_ramp(-1, 0, -0.6, 0, 0, 0.6, 0, 1);
+    grade(ramp, 0, 0.25);
+end;
+
+west_crossing = interstate_crossing(-3, 0);
+east_crossing = interstate_crossing(3, 0);

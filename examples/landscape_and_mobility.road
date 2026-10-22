@@ -1,0 +1,32 @@
+road rail_line:
+    verge-traintrack-traintrack-verge;
+end;
+road tram_line:
+    sidewalk-tramtrack-tramtrack-sidewalk;
+end;
+road metro_line:
+    subwaytrack-subwaytrack;
+end;
+road cycle_path:
+    verge-bikelane-bikelane-verge;
+end;
+road interstate:
+    verge-carlane-carlane-middle-carlane-carlane-verge;
+end;
+
+mainland = land(-5, -3, 5, -3, 5, 3, -5, 3);
+inlet = lake(-4, 1, -3, 1.6, -1.9, 1.2, -2.2, 0.4, -3.5, 0.2);
+waterway = river(-5, -1.4, -3, -0.7, -1, -0.8, 1, -0.2, 3, -0.5, 5, -1.2);
+
+block raised_crossing:
+    lower = interstate(-1, 0, 1, 0);
+    upper = interstate(0, -1, 0, 1);
+    elevation(upper, 0.25);
+end;
+
+crossing = raised_crossing(1.3, 0.8);
+regional_rail = rail_line(-5, 2.1, 5, 2.1);
+street_tram = tram_line(-4.4, -2.1, 4.2, -2.1);
+underground = metro_line(-4.5, -2.55, 4.5, -2.55);
+elevation(underground, -0.25);
+river_cycleway = cycle_path(-4.6, -1.65, -2.5, -1.1, 2.8, -0.95, 4.8, -1.6);

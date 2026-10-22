@@ -35,6 +35,9 @@ pub enum RoadElementKind {
     BuildingEdge,
     Verge,
     Barrier,
+    TrainTrack,
+    TramTrack,
+    SubwayTrack,
 }
 
 impl RoadElementKind {
@@ -50,6 +53,9 @@ impl RoadElementKind {
             "buildingedge" => Self::BuildingEdge,
             "verge" => Self::Verge,
             "barrier" => Self::Barrier,
+            "traintrack" => Self::TrainTrack,
+            "tramtrack" => Self::TramTrack,
+            "subwaytrack" => Self::SubwayTrack,
             _ => return None,
         })
     }
@@ -66,6 +72,9 @@ impl RoadElementKind {
             Self::BuildingEdge => "buildingedge",
             Self::Verge => "verge",
             Self::Barrier => "barrier",
+            Self::TrainTrack => "traintrack",
+            Self::TramTrack => "tramtrack",
+            Self::SubwayTrack => "subwaytrack",
         }
     }
 }
