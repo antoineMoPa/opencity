@@ -64,7 +64,9 @@ fn write_call(source: &mut String, call: &Call) {
             source.push_str(", ");
         }
         match arg {
-            Argument::Number(value) | Argument::Identifier(value) => source.push_str(value),
+            Argument::Number(value) | Argument::Identifier(value) | Argument::String(value) => {
+                source.push_str(value)
+            }
         }
     }
     source.push_str(");\n");

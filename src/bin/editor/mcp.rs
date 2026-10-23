@@ -344,7 +344,9 @@ impl RoadEditor {
                         map::IntersectionKind::RightTurn => "right_turn",
                         map::IntersectionKind::ThreeWay => "three_way",
                         map::IntersectionKind::FourWay => "four_way",
-                    },"road_type":intersection.road_name,"position":[intersection.position.x,intersection.position.y],
+                    },"road_type":intersection.road_name,"arm_road_types":intersection.arm_roads.iter().map(|(direction, name)| json!({
+                        "direction":[direction.x,direction.y],"road_type":name
+                    })).collect::<Vec<_>>(),"position":[intersection.position.x,intersection.position.y],
                     "ports":intersection.ports.iter().map(|port| json!({
                         "point_ref":port.point_ref,"position":[port.position.x,port.position.y],
                         "direction":[port.direction.x,port.direction.y]
@@ -366,7 +368,9 @@ impl RoadEditor {
                     .map(|feature| {
                         json!({
                             "kind":feature.kind.call_name(),"name":feature.name,
-                            "points":feature.points,"elevation":feature.elevation
+                            "points":feature.points,"elevation":feature.elevation,
+                            "height":feature.height,"terrain_height":feature.terrain_height,"model":feature.model,
+                            "vegetation_type":feature.vegetation_type
                         })
                     })
                     .collect();

@@ -38,6 +38,9 @@ pub enum RoadElementKind {
     TrainTrack,
     TramTrack,
     SubwayTrack,
+    Runway,
+    Taxiway,
+    Apron,
 }
 
 impl RoadElementKind {
@@ -56,6 +59,9 @@ impl RoadElementKind {
             "traintrack" => Self::TrainTrack,
             "tramtrack" => Self::TramTrack,
             "subwaytrack" => Self::SubwayTrack,
+            "runway" => Self::Runway,
+            "taxiway" => Self::Taxiway,
+            "apron" => Self::Apron,
             _ => return None,
         })
     }
@@ -75,6 +81,9 @@ impl RoadElementKind {
             Self::TrainTrack => "traintrack",
             Self::TramTrack => "tramtrack",
             Self::SubwayTrack => "subwaytrack",
+            Self::Runway => "runway",
+            Self::Taxiway => "taxiway",
+            Self::Apron => "apron",
         }
     }
 }
@@ -97,4 +106,6 @@ pub enum Argument {
     /// The source spelling is retained, so formatting a program preserves decimals.
     Number(String),
     Identifier(String),
+    /// A quoted asset path or other literal string.
+    String(String),
 }

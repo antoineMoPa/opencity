@@ -15,6 +15,7 @@ pub enum TokenKind {
     End,
     Identifier,
     Number,
+    String,
     Parameter,
     Colon,
     Equals,
@@ -112,6 +113,30 @@ pub fn tokenize(source: &str) -> Result<Vec<Token>, SyntaxError> {
                     });
                 }
                 TokenKind::Parameter
+            }
+            b'"' => {
+                offset += 1;
+                while offset < bytes.len() && bytes[offset] != b'"' {
+                    if bytes[offset] == b'\\' {
+                        offset += 1;
+                        if offset >= bytes.len() {
+                            break;
+                        }
+                    }
+                    if bytes[offset] == b'\n' {
+                        line += 1;
+                        column = 1;
+                    }
+                    offset += 1;
+                }
+                if offset >= bytes.len() {
+                    return Err(SyntaxError {
+                        span,
+                        message: "unterminated string".into(),
+                    });
+                }
+                offset += 1;
+                TokenKind::String
             }
             b':' => {
                 offset += 1;

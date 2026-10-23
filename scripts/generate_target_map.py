@@ -1,0 +1,678 @@
+"""Write the editable road layout traced from target.png.
+
+Coordinates below are image pixels. Road placements are emitted as cubic
+Bezier segments in the editor's world coordinates. Run this script after
+adjusting the traced paths to refresh examples/target_map.road.
+"""
+
+from pathlib import Path
+
+out = []
+points = {}
+connection_arms = {}
+placements = {}
+road_paths = {}
+road_traces = {}
+mouth_connections = set()
+city_grids = []
+serial = 0
+
+
+def world(point):
+    return ((point[0] - 768) / 60, (512 - point[1]) / 60)
+
+
+def coordinate(point):
+    x, y = world(point)
+    return f"{x:.4f}, {y:.4f}"
+
+
+def point_ref(point):
+    key = (round(point[0], 3), round(point[1], 3))
+    if key not in points:
+        points[key] = f"p_{len(points):04d}"
+    return points[key]
+
+
+def road(name, kind, path, smooth=True):
+    global serial
+    road_paths[name] = (kind, path)
+    trace = [path[0]]
+    road_traces[name] = (kind, trace)
+    for index, (start, end) in enumerate(zip(path, path[1:])):
+        if smooth and len(path) > 2:
+            previous = path[index - 1] if index else start
+            following = path[index + 2] if index + 2 < len(path) else end
+            first = (start[0] + (end[0] - previous[0]) / 6,
+                     start[1] + (end[1] - previous[1]) / 6)
+            second = (end[0] - (following[0] - start[0]) / 6,
+                      end[1] - (following[1] - start[1]) / 6)
+        else:
+            first = (start[0] * 2 / 3 + end[0] / 3,
+                     start[1] * 2 / 3 + end[1] / 3)
+            second = (start[0] / 3 + end[0] * 2 / 3,
+                      start[1] / 3 + end[1] * 2 / 3)
+        for step in range(1, 9):
+            t = step / 8
+            inverse = 1 - t
+            trace.append((inverse ** 3 * start[0]
+                          + 3 * inverse ** 2 * t * first[0]
+                          + 3 * inverse * t ** 2 * second[0]
+                          + t ** 3 * end[0],
+                          inverse ** 3 * start[1]
+                          + 3 * inverse ** 2 * t * first[1]
+                          + 3 * inverse * t ** 2 * second[1]
+                          + t ** 3 * end[1]))
+        a, b = point_ref(start), point_ref(end)
+        if abs(end[0] - start[0]) >= abs(end[1] - start[1]):
+            a_side = "east" if end[0] > start[0] else "west"
+            b_side = "west" if end[0] > start[0] else "east"
+        else:
+            a_side = "south" if end[1] > start[1] else "north"
+            b_side = "north" if end[1] > start[1] else "south"
+        connection_arms.setdefault(a, []).append((a_side, kind))
+        connection_arms.setdefault(b, []).append((b_side, kind))
+        serial += 1
+        placement = f"{name}_{serial:04d}"
+        placements.setdefault(name, []).append(placement)
+        out.append(f"{placement} = {kind}({a}, {coordinate(first)}, "
+                   f"{coordinate(second)}, {b});")
+
+
+def ramp_mouth(name, parent, lane, fraction, freeway_point, loop_point, from_freeway):
+    mouth_connections.add(loop_point)
+    lane_ref = f"{name}_lane"
+    out.append(f"{lane_ref} = lane_point({parent}, {lane}, {fraction:.4f});")
+    start, end = (freeway_point, loop_point) if from_freeway else (loop_point, freeway_point)
+    first = (start[0] * 2 / 3 + end[0] / 3,
+             start[1] * 2 / 3 + end[1] / 3)
+    second = (start[0] / 3 + end[0] * 2 / 3,
+              start[1] / 3 + end[1] * 2 / 3)
+    start_ref = lane_ref if from_freeway else point_ref(loop_point)
+    end_ref = point_ref(loop_point) if from_freeway else lane_ref
+    out.append(f"{name} = ramp_mouth({start_ref}, {coordinate(first)}, "
+               f"{coordinate(second)}, {end_ref});")
+
+
+def grid(name, kind, xs, ys, mask=None):
+    city_grids.append((name, xs, ys))
+    for row, y in enumerate(ys):
+        for col in range(len(xs) - 1):
+            if mask is None or mask(xs[col], y, xs[col + 1], y):
+                road(f"{name}_h{row}_{col}", kind,
+                     [(xs[col], y), (xs[col + 1], y)], False)
+    for col, x in enumerate(xs):
+        for row in range(len(ys) - 1):
+            if mask is None or mask(x, ys[row], x, ys[row + 1]):
+                road(f"{name}_v{col}_{row}", kind,
+                     [(x, ys[row]), (x, ys[row + 1])], False)
+
+
+definitions = """road local: carlane-middle-carlane; end;
+road collector: sidewalk-carlane-middle-carlane-sidewalk; end;
+road arterial: sidewalk-carlane-carlane-middle-carlane-carlane-sidewalk; end;
+road freeway: verge-carlane-carlane-middle-carlane-carlane-verge; end;
+road ramp: verge-carlane-verge; end;
+road ramp_mouth: carlane-verge; end;
+road airport_runway: verge-runway-verge; end;
+road airport_taxiway: verge-taxiway-verge; end;
+road airport_apron: apron; end;
+"""
+
+# Coastline vertices follow the reference at a coarser scale than the roads.
+# Separate polygons keep the outer islands independent of the mainland.
+land_shapes = {
+    "mainland": [
+        (28, 348), (38, 312), (61, 275), (95, 241), (113, 208),
+        (131, 178), (159, 164), (194, 143), (229, 132), (272, 136),
+        (310, 133), (342, 109), (397, 105), (455, 88), (483, 83),
+        (507, 98), (568, 104), (598, 84), (665, 88), (704, 89),
+        (762, 58), (786, 40), (812, 42), (839, 56), (881, 65),
+        (962, 51), (1001, 74), (1036, 107), (1080, 108),
+        (1114, 83), (1130, 52), (1158, 47), (1186, 68),
+        (1210, 97), (1247, 109), (1284, 104), (1320, 115),
+        (1349, 137), (1407, 173), (1458, 178), (1481, 190),
+        (1492, 218), (1471, 254), (1467, 289), (1494, 320),
+        (1504, 353), (1482, 382), (1479, 412), (1491, 445),
+        (1489, 479), (1472, 514), (1458, 540), (1463, 570),
+        (1450, 606), (1425, 627), (1380, 635), (1350, 650),
+        (1338, 670), (1360, 708),
+        (1343, 747), (1300, 773), (1277, 784), (1253, 818),
+        (1220, 805), (1192, 786), (1155, 811), (1112, 805),
+        (1072, 778), (1032, 735), (1005, 692), (980, 686),
+        (938, 706), (909, 694), (881, 666), (839, 665),
+        (802, 678), (769, 663), (724, 661), (694, 637),
+        (649, 633), (622, 650), (584, 625), (553, 620),
+        (515, 595), (474, 579), (436, 558), (387, 550),
+        (356, 552), (339, 589), (311, 602), (270, 585),
+        (230, 590), (202, 568), (169, 554), (154, 527),
+        (145, 498), (125, 470), (120, 443), (96, 420),
+        (73, 403), (54, 374),
+    ],
+    "northwest_island": [
+        (10, 46), (15, 31), (29, 18), (53, 14), (80, 22),
+        (98, 38), (99, 67), (88, 88), (60, 98), (29, 91), (13, 75),
+    ],
+    "northwest_islet": [(122, 73), (126, 65), (136, 65), (143, 74),
+                         (138, 84), (128, 84)],
+    "southwest_island": [(329, 608), (337, 594), (353, 586),
+                          (370, 592), (382, 608), (373, 624),
+                          (354, 632), (336, 624)],
+    "southwest_islet": [(379, 664), (386, 650), (400, 650),
+                         (412, 664), (404, 680), (389, 680)],
+    "southwest_rock": [(427, 668), (434, 663), (443, 667),
+                        (447, 676), (439, 682), (430, 678)],
+    "southern_island": [
+        (826, 853), (851, 830), (878, 821), (906, 804),
+        (931, 798), (956, 780), (989, 773), (1015, 788),
+        (1020, 813), (1038, 826), (1070, 835), (1091, 855),
+        (1081, 890), (1070, 930), (1045, 952), (1013, 961),
+        (975, 968), (942, 958), (909, 971), (874, 959),
+        (853, 938), (839, 910), (826, 882),
+    ],
+}
+
+# Broad wooded regions, raised ground, and city building lots.
+# Vegetation polygons mark cover only; they do not generate individual trees.
+vegetation_shapes = {
+    "central_forest": [(601, 135), (699, 112), (778, 150), (791, 264),
+                       (737, 317), (637, 304), (588, 240)],
+    "east_forest": [(852, 129), (952, 113), (997, 168), (968, 271),
+                    (909, 310), (848, 262)],
+    "north_forest": [(1116, 118), (1148, 105), (1192, 113),
+                     (1213, 138), (1190, 167), (1135, 157),
+                     (1104, 135)],
+}
+terrain_shapes = {
+    "central_hill": (0.15, [(612, 185), (667, 165), (715, 192),
+                             (730, 251), (682, 280), (626, 259)]),
+    "central_ridge": (0.27, [(643, 184), (685, 175), (720, 208),
+                               (714, 246), (673, 260), (635, 228)]),
+    "central_peak": (0.41, [(664, 196), (689, 193), (706, 213),
+                              (692, 239), (666, 231)]),
+    "southern_hill": (0.12, [(685, 405), (739, 390), (773, 437),
+                              (753, 483), (699, 489)]),
+    "southern_summit": (0.24, [(716, 423), (745, 412), (759, 439),
+                                 (741, 466), (714, 458)]),
+}
+building_shapes = {}
+
+
+def building_lots(label, bounds, columns, rows):
+    """Place separate footprints inside one street block, clear of the roads."""
+    left, top, right, bottom = bounds
+    inset = 5.5
+    gap = 2
+    usable_width = right - left - inset * 2 - gap * (columns - 1)
+    usable_height = bottom - top - inset * 2 - gap * (rows - 1)
+    width = usable_width / columns
+    depth = usable_height / rows
+    if width < 3 or depth < 3:
+        return 0
+    placed = 0
+    for row in range(rows):
+        for col in range(columns):
+            x = left + inset + col * (width + gap)
+            y = top + inset + row * (depth + gap)
+            name = f"{label}_{row + 1}_{col + 1}"
+            height = 0.08 + 0.025 * ((row + col) % 4)
+            outline = [(x, y), (x + width, y),
+                       (x + width, y + depth), (x, y + depth)]
+            if footprint_clear(outline):
+                building_shapes[name] = (height, outline)
+                placed += 1
+    return placed
+
+
+# East-west I-10: the coastline interchange, central cloverleaf, and southeast
+# trumpet are distinct from the surrounding street network.
+road("i10", "freeway", [(178, 193), (235, 212), (343, 233), (445, 301),
+                         (566, 339), (700, 349), (817, 351), (961, 356),
+                         (1090, 365), (1190, 395), (1303, 451), (1442, 489)])
+road("i95", "freeway", [(816, 76), (816, 155), (817, 254), (817, 351),
+                         (817, 441), (817, 528), (817, 642)])
+
+# Central cloverleaf: four circular loops and the long diagonal direct ramps.
+for label, path in [
+    ("nw_loop", [(783, 351), (777, 338), (784, 321), (800, 317), (817, 323)]),
+    ("ne_loop", [(817, 323), (833, 316), (851, 320), (858, 338), (850, 352)]),
+    ("se_loop", [(850, 352), (858, 368), (850, 385), (833, 388), (817, 379)]),
+    ("sw_loop", [(817, 379), (800, 388), (783, 384), (776, 367), (783, 351)]),
+    ("nw_direct", [(807, 270), (792, 303), (759, 330), (717, 338)]),
+    ("ne_direct", [(932, 343), (878, 337), (842, 300), (826, 270)]),
+    ("sw_direct", [(717, 363), (759, 375), (797, 422), (807, 510)]),
+    ("se_direct", [(827, 510), (842, 422), (879, 379), (932, 368)]),
+]:
+    road(label, "ramp", path)
+
+# Every direct turning ramp begins and ends at an outside freeway lane. The
+# short mouths provide a visible taper instead of ending on a centerline.
+for name, parent, lane, fraction, freeway, turn, from_freeway in [
+    ("nw_direct_from_95", placements["i95"][2], 5, 0.16, (817, 270), (807, 270), True),
+    ("nw_direct_to_10", placements["i10"][5], 1, 0.13, (715, 349), (717, 338), False),
+    ("ne_direct_from_10", placements["i10"][6], 1, 0.80, (932, 355), (932, 343), True),
+    ("ne_direct_to_95", placements["i95"][2], 1, 0.16, (817, 270), (826, 270), False),
+    ("sw_direct_from_10", placements["i10"][5], 5, 0.13, (715, 349), (717, 363), True),
+    ("sw_direct_to_95", placements["i95"][4], 5, 0.82, (817, 512), (807, 510), False),
+    ("se_direct_from_95", placements["i95"][4], 1, 0.82, (817, 512), (827, 510), True),
+    ("se_direct_to_10", placements["i10"][6], 5, 0.80, (932, 355), (932, 368), False),
+]:
+    ramp_mouth(name, parent, lane, fraction, freeway, turn, from_freeway)
+
+ramp_mouth("nw_loop_entry", placements["i10"][5], 1, 0.56,
+           (766, 349), (783, 351), True)
+ramp_mouth("nw_loop_merge", placements["i95"][2], 5, 0.53,
+           (817, 305), (817, 323), False)
+ramp_mouth("ne_loop_entry", placements["i95"][2], 1, 0.53,
+           (817, 305), (817, 323), True)
+ramp_mouth("ne_loop_merge", placements["i10"][6], 1, 0.37,
+           (870, 353), (850, 352), False)
+ramp_mouth("se_loop_entry", placements["i10"][6], 5, 0.37,
+           (870, 353), (850, 352), True)
+ramp_mouth("se_loop_merge", placements["i95"][3], 1, 0.60,
+           (817, 405), (817, 379), False)
+ramp_mouth("sw_loop_entry", placements["i95"][3], 5, 0.60,
+           (817, 405), (817, 379), True)
+ramp_mouth("sw_loop_merge", placements["i10"][5], 5, 0.56,
+           (766, 349), (783, 351), False)
+
+# The northwest and southeast terminals have large free-flow turning ramps.
+for label, path in [
+    ("west_ramp_n", [(164, 201), (180, 190), (199, 184), (229, 185)]),
+    ("west_ramp_s", [(190, 207), (211, 215), (223, 236), (226, 278)]),
+    ("west_ramp_e", [(229, 185), (250, 191), (331, 206), (368, 228)]),
+    ("east_ramp_n", [(1320, 436), (1354, 445), (1398, 460), (1442, 463)]),
+    ("east_ramp_s", [(1319, 470), (1354, 485), (1396, 506), (1417, 525)]),
+    ("west_ramp_to_grid", [(223, 236), (250, 244), (286, 259), (346, 278)]),
+    ("west_grid_to_freeway", [(346, 305), (375, 296), (393, 300), (418, 303)]),
+    ("east_ramp_loop", [(1442, 463), (1459, 454), (1474, 469),
+                          (1470, 490), (1448, 495), (1428, 469)]),
+]:
+    road(label, "ramp", path)
+
+for name, parent, lane, fraction, freeway, turn, from_freeway in [
+    ("west_depart_10", placements["i10"][0], 5, 0.22, (190, 197), (190, 207), True),
+    ("west_merge_10", placements["i10"][2], 1, 0.25, (368, 248), (368, 228), False),
+    ("west_grid_merge_10", placements["i10"][2], 5, 0.78, (423, 287), (418, 303), False),
+    ("east_depart_10_n", placements["i10"][10], 1, 0.12, (1319, 457), (1320, 436), True),
+    ("east_depart_10_s", placements["i10"][10], 5, 0.12, (1319, 457), (1319, 470), True),
+]:
+    ramp_mouth(name, parent, lane, fraction, freeway, turn, from_freeway)
+
+# Small trumpet turns join I-95 to the road running along each shore.
+for label, path in [
+    ("i95_north_west", [(807, 85), (799, 72), (784, 83), (775, 89)]),
+    ("i95_north_east", [(826, 85), (833, 87), (851, 90), (881, 88)]),
+    ("i95_north_return", [(784, 83), (807, 85), (829, 83), (851, 90)]),
+    ("i95_south_west", [(807, 613), (792, 635), (766, 635), (745, 650)]),
+    ("i95_south_east", [(827, 613), (842, 637), (877, 629), (901, 623)]),
+    ("i95_south_turn", [(766, 635), (787, 647), (818, 646), (842, 637)]),
+]:
+    road(label, "ramp", path)
+
+for name, parent, lane, fraction, freeway, turn in [
+    ("north_depart_95_w", placements["i95"][0], 5, 0.12, (816, 85), (807, 85)),
+    ("north_depart_95_e", placements["i95"][0], 1, 0.12, (816, 85), (826, 85)),
+    ("south_depart_95_w", placements["i95"][5], 5, 0.74, (817, 612), (807, 613)),
+    ("south_depart_95_e", placements["i95"][5], 1, 0.74, (817, 612), (827, 613)),
+]:
+    ramp_mouth(name, parent, lane, fraction, freeway, turn, True)
+
+# North shore and west city approaches.
+for label, kind, path in [
+    ("north_coast", "collector", [(146, 246), (164, 201), (180, 180), (250, 143), (322, 153),
+                                     (377, 126), (430, 137), (453, 162), (451, 187),
+                                     (408, 211), (368, 228)]),
+    ("north_arterial", "arterial", [(76, 321), (104, 276), (146, 246)]),
+    ("west_bypass", "collector", [(109, 321), (149, 322), (177, 360), (222, 401),
+                                    (242, 440), (266, 481), (248, 545)]),
+    ("west_south_coast", "collector", [(248, 545), (309, 503), (364, 509),
+                                         (453, 508), (505, 517), (563, 555),
+                                         (633, 577), (701, 597), (759, 628)]),
+    ("west_to_mid", "collector", [(442, 298), (466, 360), (506, 408),
+                                    (553, 412), (622, 428), (660, 415)]),
+    ("north_mid", "collector", [(453, 162), (526, 143), (580, 143), (606, 173),
+                                  (602, 233), (572, 283), (505, 304), (442, 298)]),
+    ("north_to_95", "collector", [(606, 173), (658, 122), (727, 119),
+                                    (775, 89)]),
+    ("northeast_coast", "collector", [(816, 76), (881, 88), (913, 88), (969, 96),
+                                        (1020, 128), (1067, 150), (1123, 151),
+                                        (1194, 140), (1270, 148), (1332, 174)]),
+    ("east_north_loop", "collector", [(1067, 150), (1069, 228), (1090, 287),
+                                        (1128, 323), (1135, 363), (1129, 420), (1144, 465)]),
+    ("east_airport_access", "collector", [(1135, 363), (1160, 373), (1191, 373),
+                                            (1268, 372), (1337, 374), (1361, 325),
+                                            (1359, 264), (1332, 174)]),
+    ("airport_ring", "collector", [(1128, 323), (1138, 267), (1177, 216),
+                                     (1223, 178), (1270, 148), (1317, 190),
+                                     (1352, 224), (1359, 264)]),
+    ("east_coast_north", "collector", [(1332, 174), (1405, 228), (1439, 293),
+                                         (1442, 323)]),
+    ("east_coast_south", "collector", [(1442, 349), (1435, 401), (1428, 469)]),
+    ("east_south", "collector", [(1442, 489), (1417, 525), (1375, 544),
+                                   (1298, 539), (1247, 556), (1237, 601),
+                                   (1170, 628), (1090, 633), (1046, 668),
+                                   (996, 626), (966, 571), (902, 527), (817, 528)]),
+    ("south_95_access", "ramp", [(901, 623), (937, 621),
+                                        (991, 623), (1046, 668)]),
+]:
+    road(label, kind, path)
+
+# A connected west-side lattice, with smaller blocks near the waterfront.
+grid("west", "local", [196, 226, 257, 287, 317, 346, 376, 405, 434],
+     [254, 278, 305, 321, 358, 384, 410, 438, 467, 494],
+     lambda x1, y1, x2, y2: (x1 >= 226 or y1 >= 305)
+     and (x1 <= 376 or y1 >= 321)
+     and not (x1 >= 376 and y1 <= 278)
+     and not (y1 == y2 == 321))
+grid("west_north", "local", [290, 315, 339, 365, 390],
+     [162, 185, 209, 232],
+     lambda x1, y1, x2, y2: (x1 >= 339 or y1 >= 185)
+     and not (x1 == x2 == 365 and y1 == 209))
+grid("west_waterfront", "local", [81, 109, 138, 168, 196],
+     [264, 290, 321, 341],
+     lambda x1, y1, x2, y2: (x1 <= 168 or y1 >= 290)
+     and not (x1 <= 109 and y1 <= 290)
+     and not (x1 == x2 == 196)
+     and not (y1 == y2 == 321))
+grid("west_harbor", "local", [155, 178, 201, 224],
+     [423, 450, 476, 503, 530, 550],
+     lambda x1, y1, x2, y2: (x1 >= 178 or y1 >= 476)
+     and not (x1 <= 178 and y1 >= 503))
+grid("west_south", "local", [248, 276, 305, 335],
+     [495, 520, 545, 570],
+     lambda x1, y1, x2, y2: x1 <= 305 or y1 <= 520)
+road("west_main", "arterial", [(76, 321), (81, 321), (109, 321),
+                                  (138, 321), (168, 321), (196, 321),
+                                  (226, 321), (257, 321), (287, 321),
+                                  (317, 321), (346, 321), (376, 321),
+                                  (405, 321), (434, 321), (442, 298)])
+road("west_diagonal", "collector", [(168, 321), (207, 365), (249, 398),
+                                       (271, 429), (287, 467)])
+
+# East city: blocks cluster southeast of the interchange and run to the quay.
+grid("east", "local", [1058, 1085, 1115, 1144, 1160, 1173, 1202, 1231, 1260, 1289, 1318, 1347],
+     [465, 492, 520, 548, 576, 604, 632, 660, 689, 718, 747],
+     lambda x1, y1, x2, y2: (x1 >= 1115 or y1 <= 604)
+     and (x1 <= 1289 or y1 <= 548)
+     and (y1 <= 660 or x1 >= 1144)
+     and not (x1 >= 1289 and y1 >= 604)
+     and not (x1 == x2 == 1160)
+     and not (y1 == y2 == 520))
+grid("east_north", "local", [1346, 1370, 1395, 1420],
+     [242, 268, 294, 320],
+     lambda x1, y1, x2, y2: x1 <= 1395 or y1 >= 268)
+grid("east_edge", "local", [1361, 1385, 1410, 1434],
+     [540, 566, 592],
+     lambda x1, y1, x2, y2: x1 >= 1385 or y1 <= 540)
+road("east_main", "arterial", [(1058, 520), (1085, 520), (1115, 520),
+                                  (1144, 520), (1160, 520), (1173, 520),
+                                  (1202, 520), (1231, 520), (1260, 520),
+                                  (1289, 520), (1318, 520), (1347, 520),
+                                  (1375, 544)])
+road("east_spine", "arterial", [(1160, 422), (1160, 465), (1160, 492),
+                                   (1160, 520), (1160, 548), (1160, 576),
+                                   (1160, 604), (1160, 632), (1160, 660),
+                                   (1160, 689), (1160, 718), (1160, 747), (1160, 749)])
+road("east_diag", "collector", [(1303, 451), (1272, 480), (1250, 520),
+                                   (1240, 559), (1237, 601)])
+road("east_port_approach", "collector", [(1202, 660), (1199, 694),
+                                            (1234, 718), (1289, 718)])
+
+# Small southern island neighborhood and its loop approach.
+grid("island", "local", [930, 952, 975, 998], [874, 897, 921, 943])
+road("island_loop", "collector", [(930, 897), (895, 881), (883, 850),
+                                    (899, 829), (926, 837), (939, 868),
+                                    (932, 901), (952, 921)])
+
+# Local connectors that provide the shape of the waterfront street ends.
+for label, path in [
+    ("west_quay", [(196, 341), (196, 390), (198, 447), (220, 477), (248, 495)]),
+    ("west_shore", [(346, 467), (360, 500), (421, 508), (453, 508)]),
+    ("mid_woods", [(817, 528), (785, 590), (759, 628), (745, 650)]),
+    ("east_quay", [(1160, 749), (1185, 767), (1232, 771)]),
+    ("airport_feeder", [(1361, 325), (1401, 325), (1429, 336)]),
+    ("airport_to_east_city", [(1160, 373), (1160, 422)]),
+]:
+    road(label, "arterial" if label == "airport_to_east_city" else "collector", path)
+
+# The circular turnaround at the northeastern cape joins the shore road and
+# airport approach without forcing a sharp T turn.
+road("east_roundabout", "collector", [(1442, 323), (1451, 327), (1455, 336),
+                                        (1451, 345), (1442, 349), (1433, 345),
+                                        (1429, 336), (1433, 327), (1442, 323)])
+
+# The airport has two crossing runways, a parallel taxi route, and terminal
+# access. The runway and taxiway element implementations are owned separately.
+road("airport_runway_primary", "airport_runway", [(1185, 332), (1298, 220)], False)
+road("airport_runway_cross", "airport_runway", [(1208, 245), (1262, 296)], False)
+road("airport_taxi", "airport_taxiway", [(1241, 276), (1260, 286), (1311, 286), (1334, 322)], False)
+road("airport_taxi_apron", "airport_taxiway", [(1280, 322), (1334, 322)], False)
+road("airport_apron_link", "airport_taxiway", [(1334, 322), (1335, 338)], False)
+road("airport_apron", "airport_apron", [(1302, 338), (1335, 338)], False)
+road("airport_terminal", "collector", [(1334, 322), (1337, 374)], False)
+
+
+def point_in_polygon(point, outline):
+    x, y = point
+    inside = False
+    for a, b in zip(outline, outline[1:] + outline[:1]):
+        if (a[1] > y) != (b[1] > y):
+            crossing_x = a[0] + (y - a[1]) * (b[0] - a[0]) / (b[1] - a[1])
+            if x < crossing_x:
+                inside = not inside
+    return inside
+
+
+def segment_hits_rectangle(a, b, rectangle):
+    """Liang-Barsky clip against the footprint plus the road's half-width."""
+    left, top, right, bottom = rectangle
+    dx, dy = b[0] - a[0], b[1] - a[1]
+    low, high = 0.0, 1.0
+    for p, q in ((-dx, a[0] - left), (dx, right - a[0]),
+                 (-dy, a[1] - top), (dy, bottom - a[1])):
+        if p == 0:
+            if q < 0:
+                return False
+        else:
+            fraction = q / p
+            if p < 0:
+                low = max(low, fraction)
+            else:
+                high = min(high, fraction)
+            if low > high:
+                return False
+    return True
+
+
+road_half_width = {
+    "local": 3.5, "collector": 5.4, "arterial": 8.1,
+    "freeway": 8.3, "ramp": 3.5, "airport_runway": 7.5,
+    "airport_taxiway": 5, "airport_apron": 7.2,
+}
+
+
+def footprint_clear(outline):
+    if not all(any(point_in_polygon(corner, land) for land in land_shapes.values())
+               for corner in outline):
+        return False
+    xs = [point[0] for point in outline]
+    ys = [point[1] for point in outline]
+    left, top, right, bottom = min(xs), min(ys), max(xs), max(ys)
+    candidates = set()
+    for tile_x in range(int(left // 64), int(right // 64) + 1):
+        for tile_y in range(int(top // 64), int(bottom // 64) + 1):
+            candidates.update(road_segments_by_tile.get((tile_x, tile_y), ()))
+    for index in candidates:
+        a, b, clearance, extent = road_segments[index]
+        if right < extent[0] or left > extent[2] or bottom < extent[1] or top > extent[3]:
+            continue
+        rectangle = (left - clearance, top - clearance,
+                     right + clearance, bottom + clearance)
+        if segment_hits_rectangle(a, b, rectangle):
+            return False
+    return True
+
+
+def road_covers_edge(start, end):
+    """Check that local streets or an arterial enclose the whole block side."""
+    horizontal = start[1] == end[1]
+    fixed = start[1] if horizontal else start[0]
+    first = min(start[0], end[0]) if horizontal else min(start[1], end[1])
+    last = max(start[0], end[0]) if horizontal else max(start[1], end[1])
+    spans = []
+    for kind, path in road_paths.values():
+        if kind not in ("local", "arterial"):
+            continue
+        for a, b in zip(path, path[1:]):
+            if horizontal and a[1] == b[1] == fixed:
+                spans.append((min(a[0], b[0]), max(a[0], b[0])))
+            elif not horizontal and a[0] == b[0] == fixed:
+                spans.append((min(a[1], b[1]), max(a[1], b[1])))
+    covered = first
+    for low, high in sorted(spans):
+        if low <= covered:
+            covered = max(covered, high)
+        if covered >= last:
+            return True
+    return False
+
+
+def compact_lot(label, bounds):
+    """Find a small safe footprint in blocks cut by a diagonal or shore road."""
+    left, top, right, bottom = bounds
+    for size in (6, 4, 3):
+        positions = [(x, y)
+                     for x in range(left + 4, right - size - 3)
+                     for y in range(top + 4, bottom - size - 3)]
+        positions.sort(key=lambda point: ((point[0] + size / 2 - (left + right) / 2) ** 2
+                                          + (point[1] + size / 2 - (top + bottom) / 2) ** 2))
+        for x, y in positions:
+            outline = [(x, y), (x + size, y),
+                       (x + size, y + size), (x, y + size)]
+            if footprint_clear(outline):
+                building_shapes[f"{label}_compact"] = (0.08, outline)
+                return True
+    return False
+
+
+road_segments = []
+road_segments_by_tile = {}
+for kind, trace in road_traces.values():
+    clearance = road_half_width[kind] + 1
+    for a, b in zip(trace, trace[1:]):
+        extent = (min(a[0], b[0]) - clearance, min(a[1], b[1]) - clearance,
+                  max(a[0], b[0]) + clearance, max(a[1], b[1]) + clearance)
+        index = len(road_segments)
+        road_segments.append((a, b, clearance, extent))
+        for tile_x in range(int(extent[0] // 64), int(extent[2] // 64) + 1):
+            for tile_y in range(int(extent[1] // 64), int(extent[3] // 64) + 1):
+                road_segments_by_tile.setdefault((tile_x, tile_y), []).append(index)
+
+city_blocks = 0
+unbuildable_blocks = []
+for grid_name, xs, ys in city_grids:
+    for row, (top, bottom) in enumerate(zip(ys, ys[1:])):
+        for col, (left, right) in enumerate(zip(xs, xs[1:])):
+            corners = [(left, top), (right, top), (right, bottom), (left, bottom)]
+            bordered_sides = sum(road_covers_edge(a, b)
+                                 for a, b in zip(corners, corners[1:] + corners[:1]))
+            # Edge parcels can have only two street sides when a grid ends at
+            # the shore or an older road. Fewer sides are outside the city.
+            if bordered_sides < 2:
+                continue
+            # The grid is only a candidate: coast and highway approaches can
+            # cross its outer cells. The footprint check leaves those clear.
+            label = f"{grid_name}_block_{row + 1}_{col + 1}"
+            columns = 2 if right - left >= 22 else 1
+            rows = 2 if bottom - top >= 22 else 1
+            placed = building_lots(label, (left, top, right, bottom), columns, rows)
+            if placed or compact_lot(label, (left, top, right, bottom)):
+                city_blocks += 1
+            else:
+                unbuildable_blocks.append(label)
+
+print(f"filled {city_blocks} street-grid blocks with {len(building_shapes)} buildings")
+if unbuildable_blocks:
+    print(f"left {len(unbuildable_blocks)} blocks occupied by roads/coast clear")
+
+# A ramp endpoint must have an explicit shared road junction or a lane mouth.
+# This catches near misses that look connected in a zoomed-out screenshot.
+for name, (kind, path) in road_paths.items():
+    if kind != "ramp":
+        continue
+    for endpoint in (path[0], path[-1]):
+        neighbors = [other for other, (_, other_path) in road_paths.items()
+                     if other != name and endpoint in other_path]
+        if endpoint not in mouth_connections and not neighbors:
+            raise ValueError(f"{name} has an unconnected ramp endpoint at {endpoint}")
+for endpoint in mouth_connections:
+    if not any(kind == "ramp" and endpoint in path
+               for kind, path in road_paths.values()):
+        raise ValueError(f"lane mouth has no ramp at {endpoint}")
+
+with Path("examples/target_map.road").open("w") as stream:
+    stream.write(definitions + "\n")
+    for (x, y), name in points.items():
+        stream.write(f"{name} = map_point({coordinate((x, y))});\n")
+    stream.write("\n")
+    for name, outline in land_shapes.items():
+        coordinates = ", ".join(coordinate(point) for point in outline)
+        stream.write(f"{name} = land({coordinates});\n")
+    for name, outline in vegetation_shapes.items():
+        coordinates = ", ".join(coordinate(point) for point in outline)
+        stream.write(f"{name} = vegetation(forest, {coordinates});\n")
+    for name, (height, outline) in terrain_shapes.items():
+        coordinates = ", ".join(coordinate(point) for point in outline)
+        stream.write(f"{name} = terrain({height:.4f}, {coordinates});\n")
+    for name, (height, outline) in building_shapes.items():
+        coordinates = ", ".join(coordinate(point) for point in outline)
+        stream.write(f"{name} = building({height:.4f}, {coordinates});\n")
+    stream.write("\n")
+    stream.write("\n".join(out) + "\n")
+    stream.write("\n")
+    for reference, arms in connection_arms.items():
+        sides = {side for side, _ in arms}
+        if len(arms) not in (2, 3, 4) or len(sides) != len(arms):
+            continue
+        if len(arms) == 2 and sides in ({"north", "south"}, {"east", "west"}):
+            continue
+        kinds = {kind for _, kind in arms}
+        if len(arms) == 2 and kinds == {"arterial"}:
+            continue
+        if kinds == {"local"} or kinds == {"arterial"}:
+            stream.write(f"intersection{len(arms)}({reference}, {next(iter(kinds))});\n")
+        elif kinds == {"local", "arterial"}:
+            overrides = ", ".join(f"{side}, local" for side, kind in arms if kind == "local")
+            stream.write(f"intersection{len(arms)}({reference}, arterial, {overrides});\n")
+    stream.write("\n")
+    for index, placement in enumerate(placements["i95"]):
+        if index == 1:
+            stream.write(f"grade({placement}, 0, 0.24);\n")
+        elif index in (2, 3):
+            stream.write(f"elevation({placement}, 0.24);\n")
+        elif index == 4:
+            stream.write(f"grade({placement}, 0.24, 0);\n")
+    for index, placement in enumerate(placements["i10"]):
+        if index == 7:
+            stream.write(f"grade({placement}, 0, 0.18);\n")
+        elif index == 8:
+            stream.write(f"elevation({placement}, 0.18);\n")
+        elif index == 9:
+            stream.write(f"grade({placement}, 0.18, 0);\n")
+    flyovers = {
+        "i95_north_return": [(0, 0.16), (0.16, 0.16), (0.16, 0)],
+        "west_ramp_e": [(0, 0.18), (0.18, 0.18), (0.18, 0)],
+        "west_ramp_to_grid": [(0, 0.16), (0.16, 0.16), (0.16, 0)],
+        "east_ramp_n": [(0, 0.18), (0.18, 0.18), (0.18, 0.18)],
+        "east_ramp_s": [(0, 0.18), (0.18, 0.18), (0.18, 0)],
+        "east_ramp_loop": [(0.18, 0.18)] * 4 + [(0.18, 0)],
+    }
+    for name, grades in flyovers.items():
+        if len(placements[name]) != len(grades):
+            raise ValueError(f"{name} has {len(placements[name])} road pieces but {len(grades)} grades")
+        for placement, (start, end) in zip(placements[name], grades):
+            stream.write(f"grade({placement}, {start}, {end});\n")
+
+mouth_count = sum(" = ramp_mouth(" in line for line in out)
+print(f"wrote {serial + mouth_count} road segments and {len(points)} junction points")

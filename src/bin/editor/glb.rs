@@ -61,6 +61,9 @@ fn band_color(kind: RoadElementKind) -> [u8; 4] {
         RoadElementKind::TrainTrack => [109, 95, 80],
         RoadElementKind::TramTrack => [110, 122, 126],
         RoadElementKind::SubwayTrack => [80, 91, 123],
+        RoadElementKind::Runway => [83, 89, 94],
+        RoadElementKind::Taxiway => [111, 117, 120],
+        RoadElementKind::Apron => [158, 163, 160],
     };
     [rgb[0], rgb[1], rgb[2], 255]
 }
@@ -151,16 +154,24 @@ pub fn export(program: &Program) -> Vec<u8> {
         let width = program
             .statements
             .iter()
-            .find_map(|statement| match statement {
-                Statement::Road(road) if road.name == intersection.road_name => Some(
-                    road.elements
-                        .iter()
-                        .map(|element| map::element_world_width(element.kind))
-                        .sum::<f32>(),
-                ),
+            .filter_map(|statement| match statement {
+                Statement::Road(road)
+                    if road.name == intersection.road_name
+                        || intersection
+                            .arm_roads
+                            .iter()
+                            .any(|(_, name)| *name == road.name) =>
+                {
+                    Some(
+                        road.elements
+                            .iter()
+                            .map(|element| map::element_world_width(element.kind))
+                            .sum::<f32>(),
+                    )
+                }
                 _ => None,
             })
-            .unwrap_or(0.2);
+            .fold(0.2_f32, f32::max);
         let half = width / 2.0;
         let p = intersection.position;
         mesh.quad(
@@ -197,11 +208,15 @@ pub fn export(program: &Program) -> Vec<u8> {
             [72, 83, 90, 255],
         );
     }
-    for feature in project_landscape_features(program).features {
+    let features = project_landscape_features(program).features;
+    for feature in &features {
         let color = match feature.kind {
             LandscapeKind::Land => [77, 128, 79, 255],
             LandscapeKind::Lake => [48, 116, 158, 255],
             LandscapeKind::River => [52, 130, 167, 255],
+            LandscapeKind::Vegetation => [53, 134, 68, 255],
+            LandscapeKind::Terrain => [157, 132, 92, 255],
+            LandscapeKind::Building => [158, 166, 172, 255],
         };
         if feature.kind == LandscapeKind::River {
             for pair in feature.points.windows(2) {
@@ -258,12 +273,64 @@ pub fn export(program: &Program) -> Vec<u8> {
                             x: point.x,
                             y: point.y,
                         },
-                        feature.elevation,
+                        feature.elevation + feature.height.unwrap_or(0.0),
                         color,
                     );
                 }
                 mesh.indices
                     .extend_from_slice(&[start, start + 2, start + 1]);
+            }
+            if let Some(height) = feature.height {
+                for index in 0..feature.points.len() {
+                    let a = feature.points[index];
+                    let b = feature.points[(index + 1) % feature.points.len()];
+                    mesh.quad(
+                        [
+                            (WorldPoint { x: a[0], y: a[1] }, feature.elevation),
+                            (WorldPoint { x: b[0], y: b[1] }, feature.elevation),
+                            (WorldPoint { x: b[0], y: b[1] }, feature.elevation + height),
+                            (WorldPoint { x: a[0], y: a[1] }, feature.elevation + height),
+                        ],
+                        color,
+                    );
+                }
+            }
+            if feature.kind == LandscapeKind::Terrain {
+                for wall in opencity::terrain_walls(feature, &features) {
+                    mesh.quad(
+                        [
+                            (
+                                WorldPoint {
+                                    x: wall.start[0],
+                                    y: wall.start[1],
+                                },
+                                wall.bottom,
+                            ),
+                            (
+                                WorldPoint {
+                                    x: wall.end[0],
+                                    y: wall.end[1],
+                                },
+                                wall.bottom,
+                            ),
+                            (
+                                WorldPoint {
+                                    x: wall.end[0],
+                                    y: wall.end[1],
+                                },
+                                wall.top,
+                            ),
+                            (
+                                WorldPoint {
+                                    x: wall.start[0],
+                                    y: wall.start[1],
+                                },
+                                wall.top,
+                            ),
+                        ],
+                        [125, 103, 72, 255],
+                    );
+                }
             }
         }
     }
@@ -287,8 +354,12 @@ pub fn export(program: &Program) -> Vec<u8> {
         bin.extend_from_slice(&index.to_le_bytes());
     }
     let index_length = bin.len() - index_offset;
+    let building_models: Vec<_> = features.iter()
+        .filter_map(|feature| feature.model.as_ref().map(|model| json!({"name": feature.name, "glb": model, "footprint": feature.points, "height": feature.height})))
+        .collect();
     let document = json!({
         "asset": {"version": "2.0", "generator": "OpenCity"},
+        "extras": {"buildingModels": building_models},
         "scene": 0, "scenes": [{"nodes": [0]}], "nodes": [{"mesh": 0, "name": "OpenCity roads"}],
         "meshes": [{"primitives": [{"attributes": {"POSITION": 0, "COLOR_0": 1},
             "indices": 2, "material": 0, "mode": 4}]}],
@@ -343,5 +414,32 @@ mod tests {
         let json: serde_json::Value = serde_json::from_slice(&bytes[20..20 + json_length]).unwrap();
         assert!(json["accessors"][0]["count"].as_u64().unwrap() > 0);
         assert!(json["accessors"][2]["count"].as_u64().unwrap() > 0);
+    }
+
+    #[test]
+    fn building_export_has_roof_walls_and_model_reference() {
+        let program =
+            opencity::parse("hall = building(0.5, \"assets/hall.glb\", 0, 0, 1, 0, 1, 1, 0, 1);")
+                .unwrap();
+        let bytes = export(&program);
+        let json_length = u32::from_le_bytes(bytes[12..16].try_into().unwrap()) as usize;
+        let json: serde_json::Value = serde_json::from_slice(&bytes[20..20 + json_length]).unwrap();
+        assert_eq!(
+            json["extras"]["buildingModels"][0]["glb"],
+            "assets/hall.glb"
+        );
+        assert!(json["accessors"][0]["count"].as_u64().unwrap() > 6);
+        assert_eq!(json["accessors"][0]["max"][1], 0.5);
+    }
+
+    #[test]
+    fn overlapping_terrain_exports_exposed_mountain_sides() {
+        let program = opencity::parse("low = terrain(0.2, 0, 0, 2, 0, 2, 2, 0, 2); high = terrain(0.4, 1, 1, 3, 1, 3, 3, 1, 3);").unwrap();
+        let bytes = export(&program);
+        let json_length = u32::from_le_bytes(bytes[12..16].try_into().unwrap()) as usize;
+        let json: serde_json::Value = serde_json::from_slice(&bytes[20..20 + json_length]).unwrap();
+        assert!(json["accessors"][0]["count"].as_u64().unwrap() > 40);
+        assert_eq!(json["accessors"][0]["min"][1], 0.0);
+        assert!((json["accessors"][0]["max"][1].as_f64().unwrap() - 0.4).abs() < 0.00001);
     }
 }

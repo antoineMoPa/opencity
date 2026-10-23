@@ -2,7 +2,8 @@
 //! painters are tessellated in world space, then drawn with wgpu depth testing.
 use super::*;
 use eframe::{egui_wgpu, wgpu};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, OnceLock};
+use std::{collections::HashMap, path::Path};
 use wgpu::util::DeviceExt;
 
 const GEOMETRY_SCALE: f32 = 100.0;
@@ -11,7 +12,7 @@ const GEOMETRY_RECT: egui::Rect = egui::Rect::from_min_max(
     egui::pos2(100_000.0, 100_000.0),
 );
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct WorldVertex {
     pub point: WorldPoint,
     pub height: f32,
@@ -24,6 +25,29 @@ pub struct WorldVertex {
 #[derive(Default)]
 pub struct Scene {
     pub vertices: Vec<WorldVertex>,
+    gpu_vertices: std::sync::OnceLock<Vec<GpuVertex>>,
+}
+
+impl Scene {
+    fn gpu_vertices(&self) -> &[GpuVertex] {
+        self.gpu_vertices.get_or_init(|| {
+            self.vertices
+                .iter()
+                .map(|vertex| {
+                    let rgba = vertex.color.to_array();
+                    GpuVertex {
+                        world: [
+                            vertex.point.x,
+                            vertex.point.y,
+                            vertex.height,
+                            vertex.depth_bias,
+                        ],
+                        color: rgba.map(|channel| channel as f32 / 255.0),
+                    }
+                })
+                .collect()
+        })
+    }
 }
 
 fn capture_geometry(
@@ -57,19 +81,203 @@ fn capture_geometry(
             {
                 continue;
             }
-            for triangle in mesh.indices.chunks_exact(3) {
-                for index in triangle {
-                    let vertex = &mesh.vertices[*index as usize];
+            let vertices: Vec<_> = mesh
+                .vertices
+                .iter()
+                .map(|vertex| {
                     let world =
                         world_of(GEOMETRY_RECT, egui::Vec2::ZERO, GEOMETRY_SCALE, vertex.pos);
-                    scene.vertices.push(WorldVertex {
+                    WorldVertex {
                         point: world,
                         height: height(world),
                         depth_bias: -(layer as f32) * 0.0003,
                         color: vertex.color,
-                    });
-                }
-            }
+                    }
+                })
+                .collect();
+            scene.vertices.reserve(mesh.indices.len());
+            scene
+                .vertices
+                .extend(mesh.indices.iter().map(|index| vertices[*index as usize]));
+        }
+    }
+}
+
+fn add_building_walls(
+    scene: &mut Scene,
+    feature: &opencity::LandscapeFeature,
+    palette: EditorPalette,
+) {
+    let Some(height) = feature.height else {
+        return;
+    };
+    if feature.kind != LandscapeKind::Building {
+        return;
+    }
+    let color = match palette.theme {
+        egui::Theme::Dark => Color32::from_rgb(79, 87, 96),
+        egui::Theme::Light => Color32::from_rgb(141, 151, 159),
+    };
+    for index in 0..feature.points.len() {
+        let a = feature.points[index];
+        let b = feature.points[(index + 1) % feature.points.len()];
+        let corners = [
+            (a, feature.elevation),
+            (b, feature.elevation),
+            (b, feature.elevation + height),
+            (a, feature.elevation + height),
+        ];
+        for corner in [0, 1, 2, 0, 2, 3] {
+            let (point, height) = corners[corner];
+            scene.vertices.push(WorldVertex {
+                point: WorldPoint {
+                    x: point[0],
+                    y: point[1],
+                },
+                height,
+                depth_bias: -0.002,
+                color,
+            });
+        }
+    }
+}
+
+type ModelResult = Result<Arc<model::ModelMesh>, String>;
+
+fn model_cache() -> &'static Mutex<HashMap<String, ModelResult>> {
+    static MODELS: OnceLock<Mutex<HashMap<String, ModelResult>>> = OnceLock::new();
+    MODELS.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+#[cfg(target_arch = "wasm32")]
+pub fn register_model(path: &str, bytes: &[u8]) -> Result<(), String> {
+    let parsed = model::parse_glb(bytes).map(Arc::new);
+    model_cache()
+        .lock()
+        .unwrap()
+        .insert(path.to_owned(), parsed.clone());
+    parsed.map(|_| ())
+}
+
+fn model_for(path: &str, base: Option<&Path>) -> Option<Arc<model::ModelMesh>> {
+    #[cfg(target_arch = "wasm32")]
+    let _ = base;
+    #[cfg(not(target_arch = "wasm32"))]
+    let key = {
+        let source = Path::new(path);
+        if source.is_absolute() {
+            source.to_path_buf()
+        } else {
+            base.unwrap_or_else(|| Path::new(".")).join(source)
+        }
+        .to_string_lossy()
+        .into_owned()
+    };
+    #[cfg(target_arch = "wasm32")]
+    let key = path.to_owned();
+    if let Some(Ok(mesh)) = model_cache().lock().unwrap().get(&key) {
+        return Some(Arc::clone(mesh));
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let parsed = std::fs::read(&key)
+            .map_err(|error| error.to_string())
+            .and_then(|bytes| model::parse_glb(&bytes))
+            .map(Arc::new);
+        let result = parsed.as_ref().ok().cloned();
+        if parsed.is_ok() {
+            model_cache().lock().unwrap().insert(key, parsed);
+        }
+        result
+    }
+    #[cfg(target_arch = "wasm32")]
+    {
+        None
+    }
+}
+
+fn add_building_model(
+    scene: &mut Scene,
+    feature: &opencity::LandscapeFeature,
+    mesh: &model::ModelMesh,
+) {
+    let Some(height) = feature.height else {
+        return;
+    };
+    let min_x = feature
+        .points
+        .iter()
+        .map(|point| point[0])
+        .fold(f32::INFINITY, f32::min);
+    let max_x = feature
+        .points
+        .iter()
+        .map(|point| point[0])
+        .fold(f32::NEG_INFINITY, f32::max);
+    let min_y = feature
+        .points
+        .iter()
+        .map(|point| point[1])
+        .fold(f32::INFINITY, f32::min);
+    let max_y = feature
+        .points
+        .iter()
+        .map(|point| point[1])
+        .fold(f32::NEG_INFINITY, f32::max);
+    let source_width = (mesh.max[0] - mesh.min[0]).max(0.0001);
+    let source_depth = (mesh.max[2] - mesh.min[2]).max(0.0001);
+    let horizontal = ((max_x - min_x) / source_width).min((max_y - min_y) / source_depth);
+    let vertical = height / (mesh.max[1] - mesh.min[1]).max(0.0001);
+    let source_center_x = (mesh.max[0] + mesh.min[0]) * 0.5;
+    let source_center_z = (mesh.max[2] + mesh.min[2]) * 0.5;
+    let center_x = (max_x + min_x) * 0.5;
+    let center_y = (max_y + min_y) * 0.5;
+    for triangle in &mesh.triangles {
+        for vertex in triangle {
+            let position = vertex.position;
+            scene.vertices.push(WorldVertex {
+                point: WorldPoint {
+                    x: center_x + (position[0] - source_center_x) * horizontal,
+                    y: center_y - (position[2] - source_center_z) * horizontal,
+                },
+                height: feature.elevation + (position[1] - mesh.min[1]) * vertical,
+                depth_bias: -0.01,
+                color: Color32::from_rgba_unmultiplied(
+                    (vertex.color[0].clamp(0.0, 1.0) * 255.0) as u8,
+                    (vertex.color[1].clamp(0.0, 1.0) * 255.0) as u8,
+                    (vertex.color[2].clamp(0.0, 1.0) * 255.0) as u8,
+                    (vertex.color[3].clamp(0.0, 1.0) * 255.0) as u8,
+                ),
+            });
+        }
+    }
+}
+
+fn add_terrain_walls(
+    scene: &mut Scene,
+    feature: &opencity::LandscapeFeature,
+    features: &[opencity::LandscapeFeature],
+    palette: EditorPalette,
+) {
+    let color = match palette.theme {
+        egui::Theme::Dark => Color32::from_rgb(68, 59, 44),
+        egui::Theme::Light => Color32::from_rgb(147, 124, 87),
+    };
+    for wall in opencity::terrain_walls(feature, features) {
+        let corners = [
+            (wall.start, wall.bottom),
+            (wall.end, wall.bottom),
+            (wall.end, wall.top),
+            (wall.start, wall.top),
+        ];
+        for corner in [0, 1, 2, 0, 2, 3] {
+            let (at, height) = corners[corner];
+            scene.vertices.push(WorldVertex {
+                point: WorldPoint { x: at[0], y: at[1] },
+                height,
+                depth_bias: -0.001,
+                color,
+            });
         }
     }
 }
@@ -97,6 +305,78 @@ fn road_height(samples: &[WorldPoint; 17], heights: &[f32; 17], point: WorldPoin
     best.1
 }
 
+fn append_landscape(
+    scene: &mut Scene,
+    ctx: &egui::Context,
+    features: &[opencity::LandscapeFeature],
+    palette: EditorPalette,
+    selected_landscape: Option<&str>,
+    model_base: Option<&Path>,
+) {
+    for feature in features {
+        let mesh = feature
+            .model
+            .as_deref()
+            .and_then(|path| model_for(path, model_base));
+        capture_geometry(
+            ctx,
+            |painter| {
+                paint_landscape_feature(
+                    painter,
+                    GEOMETRY_RECT,
+                    egui::Vec2::ZERO,
+                    GEOMETRY_SCALE,
+                    feature,
+                    selected_landscape == feature.name.as_deref(),
+                    palette,
+                );
+            },
+            |_| {
+                feature.elevation
+                    + if mesh.is_some() {
+                        0.0
+                    } else {
+                        feature.height.unwrap_or(0.0)
+                    }
+                    - 0.02
+            },
+            scene,
+        );
+        if let Some(mesh) = mesh {
+            add_building_model(scene, feature, &mesh);
+        } else {
+            add_building_walls(scene, feature, palette);
+        }
+        add_terrain_walls(scene, feature, features, palette);
+    }
+}
+
+fn grid_vertices(palette: EditorPalette) -> &'static [WorldVertex] {
+    static DARK: std::sync::OnceLock<Vec<WorldVertex>> = std::sync::OnceLock::new();
+    static LIGHT: std::sync::OnceLock<Vec<WorldVertex>> = std::sync::OnceLock::new();
+    let cache = match palette.theme {
+        egui::Theme::Dark => &DARK,
+        egui::Theme::Light => &LIGHT,
+    };
+    cache.get_or_init(|| {
+        let mut grid = Scene::default();
+        let ctx = egui::Context::default();
+        let rect = egui::Rect::from_center_size(egui::Pos2::ZERO, egui::vec2(20_000.0, 20_000.0));
+        capture_geometry(
+            &ctx,
+            |painter| {
+                paint_grid(painter, rect, egui::Vec2::ZERO, GEOMETRY_SCALE, palette);
+            },
+            |_| 0.0,
+            &mut grid,
+        );
+        for vertex in &mut grid.vertices {
+            vertex.depth_bias = 100.0;
+        }
+        grid.vertices
+    })
+}
+
 fn add_elevated_edges(
     scene: &mut Scene,
     segment: &map::Segment,
@@ -104,10 +384,14 @@ fn add_elevated_edges(
     profile: &PaintProfile,
     color: Color32,
 ) {
+    if segment.start_z.max(segment.end_z) <= 0.05 {
+        return;
+    }
     for side in [0, 1] {
         let mut previous = None;
-        for step in 0..=64 {
-            let t = step as f32 / 64.0;
+        let steps = road_curve_samples(segment);
+        for step in 0..=steps {
+            let t = step as f32 / steps as f32;
             let center = segment.point_at(t);
             let tangent = segment.tangent_at(t);
             let length = (tangent.x * tangent.x + tangent.y * tangent.y)
@@ -159,6 +443,79 @@ fn add_elevated_edges(
     }
 }
 
+fn append_road(
+    scene: &mut Scene,
+    ctx: &egui::Context,
+    program: &Program,
+    projection: &map::Projection,
+    profiles: &[PaintProfile],
+    index: usize,
+    palette: EditorPalette,
+    selected: &[SegmentSource],
+) {
+    let segment = &projection.segments[index];
+    let road = program
+        .statements
+        .iter()
+        .find_map(|statement| match statement {
+            Statement::Road(road) if road.name == segment.road_name => Some(road),
+            _ => None,
+        });
+    let is_selected = selected.contains(&segment.source);
+    let samples = std::array::from_fn(|step| segment.point_at(step as f32 / 16.0));
+    let heights = std::array::from_fn(|step| segment.height_at(step as f32 / 16.0));
+    capture_geometry(
+        ctx,
+        |painter| {
+            if let Some(road) = road.filter(|_| {
+                profiles[index].start_alignment.is_some()
+                    || profiles[index].merge_alignment.is_some()
+                    || !profiles[index].start_taper.is_empty()
+                    || !profiles[index].end_taper.is_empty()
+            }) {
+                paint_profiled_road(
+                    painter,
+                    GEOMETRY_RECT,
+                    egui::Vec2::ZERO,
+                    GEOMETRY_SCALE,
+                    segment,
+                    road,
+                    is_selected,
+                    palette,
+                    &profiles[index],
+                );
+            } else {
+                paint_road_segment(
+                    painter,
+                    GEOMETRY_RECT,
+                    egui::Vec2::ZERO,
+                    GEOMETRY_SCALE,
+                    segment,
+                    road,
+                    is_selected,
+                    palette,
+                );
+            }
+        },
+        |point| {
+            if segment.start_z == segment.end_z {
+                segment.start_z + 0.005
+            } else {
+                road_height(&samples, &heights, point) + 0.005
+            }
+        },
+        scene,
+    );
+    add_elevated_edges(
+        scene,
+        segment,
+        road,
+        &profiles[index],
+        palette.map_outline.gamma_multiply(0.75),
+    );
+}
+
+#[cfg(test)]
 pub fn build_scene(
     program: &Program,
     projection: &map::Projection,
@@ -166,103 +523,49 @@ pub fn build_scene(
     selected: &[SegmentSource],
     selected_landscape: Option<&str>,
 ) -> Scene {
+    build_scene_with_model_base(
+        program,
+        projection,
+        palette,
+        selected,
+        selected_landscape,
+        None,
+    )
+}
+
+pub fn build_scene_with_model_base(
+    program: &Program,
+    projection: &map::Projection,
+    palette: EditorPalette,
+    selected: &[SegmentSource],
+    selected_landscape: Option<&str>,
+    model_base: Option<&Path>,
+) -> Scene {
+    #[cfg(test)]
+    let started = std::time::Instant::now();
     let mut scene = Scene::default();
     let ctx = egui::Context::default();
     let profiles = paint_profiles(program, projection);
-    let grid_rect = egui::Rect::from_center_size(egui::Pos2::ZERO, egui::vec2(20_000.0, 20_000.0));
-    capture_geometry(
-        &ctx,
-        |painter| {
-            paint_grid(
-                painter,
-                grid_rect,
-                egui::Vec2::ZERO,
-                GEOMETRY_SCALE,
-                palette,
-            );
-        },
-        |_| 0.0,
-        &mut scene,
-    );
-    for vertex in &mut scene.vertices {
-        vertex.depth_bias = 100.0;
-    }
+    scene.vertices.extend_from_slice(grid_vertices(palette));
     let mut features = project_landscape_features(program).features;
     features.sort_by(|a, b| a.elevation.total_cmp(&b.elevation));
-    for feature in &features {
-        capture_geometry(
-            &ctx,
-            |painter| {
-                paint_landscape_feature(
-                    painter,
-                    GEOMETRY_RECT,
-                    egui::Vec2::ZERO,
-                    GEOMETRY_SCALE,
-                    feature,
-                    selected_landscape == feature.name.as_deref(),
-                    palette,
-                );
-            },
-            |_| feature.elevation - 0.02,
-            &mut scene,
-        );
-    }
+    append_landscape(
+        &mut scene,
+        &ctx,
+        &features,
+        palette,
+        selected_landscape,
+        model_base,
+    );
+    #[cfg(test)]
+    let (before_roads, landscape_time) = (scene.vertices.len(), started.elapsed());
     for index in road_paint_order(program, projection, &profiles) {
-        let segment = &projection.segments[index];
-        let road = program
-            .statements
-            .iter()
-            .find_map(|statement| match statement {
-                Statement::Road(road) if road.name == segment.road_name => Some(road),
-                _ => None,
-            });
-        let is_selected = selected.contains(&segment.source);
-        let samples = std::array::from_fn(|step| segment.point_at(step as f32 / 16.0));
-        let heights = std::array::from_fn(|step| segment.height_at(step as f32 / 16.0));
-        capture_geometry(
-            &ctx,
-            |painter| {
-                if let Some(road) = road.filter(|_| {
-                    profiles[index].start_alignment.is_some()
-                        || profiles[index].merge_alignment.is_some()
-                        || !profiles[index].start_taper.is_empty()
-                        || !profiles[index].end_taper.is_empty()
-                }) {
-                    paint_profiled_road(
-                        painter,
-                        GEOMETRY_RECT,
-                        egui::Vec2::ZERO,
-                        GEOMETRY_SCALE,
-                        segment,
-                        road,
-                        is_selected,
-                        palette,
-                        &profiles[index],
-                    );
-                } else {
-                    paint_road_segment(
-                        painter,
-                        GEOMETRY_RECT,
-                        egui::Vec2::ZERO,
-                        GEOMETRY_SCALE,
-                        segment,
-                        road,
-                        is_selected,
-                        palette,
-                    );
-                }
-            },
-            |point| road_height(&samples, &heights, point) + 0.005,
-            &mut scene,
-        );
-        add_elevated_edges(
-            &mut scene,
-            segment,
-            road,
-            &profiles[index],
-            palette.map_outline.gamma_multiply(0.75),
+        append_road(
+            &mut scene, &ctx, program, projection, &profiles, index, palette, selected,
         );
     }
+    #[cfg(test)]
+    let (before_intersections, roads_time) = (scene.vertices.len(), started.elapsed());
     for intersection in map::intersections(program, projection) {
         capture_geometry(
             &ctx,
@@ -282,7 +585,128 @@ pub fn build_scene(
             &mut scene,
         );
     }
+    #[cfg(test)]
+    if std::env::var_os("OPENCITY_SCENE_PROFILE").is_some() {
+        eprintln!("scene parts: terrain={} vertices/{:?}, roads={} vertices/{:?}, intersections={} vertices/{:?}",
+            before_roads, landscape_time,
+            before_intersections - before_roads, roads_time - landscape_time,
+            scene.vertices.len() - before_intersections, started.elapsed() - roads_time);
+    }
+    // Convert vertices while the scene builder still runs on its worker thread.
+    scene.gpu_vertices();
     scene
+}
+
+// The browser has one execution thread. Spread a rebuild across animation
+// frames so a large map never holds the UI thread for the entire scene build.
+#[cfg(any(target_arch = "wasm32", test))]
+pub struct WebSceneBuild {
+    pub program: Program,
+    pub theme: egui::Theme,
+    pub selected_landscape: Option<String>,
+    projection: map::Projection,
+    palette: EditorPalette,
+    profiles: Vec<PaintProfile>,
+    road_order: Vec<usize>,
+    intersections: Vec<map::Intersection>,
+    road_index: usize,
+    intersection_index: usize,
+    scene: Scene,
+    ctx: egui::Context,
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
+impl WebSceneBuild {
+    pub fn new(
+        program: Program,
+        projection: map::Projection,
+        palette: EditorPalette,
+        selected_landscape: Option<String>,
+    ) -> Self {
+        let ctx = egui::Context::default();
+        let profiles = paint_profiles(&program, &projection);
+        let road_order = road_paint_order(&program, &projection, &profiles);
+        let intersections = map::intersections(&program, &projection);
+        let mut scene = Scene::default();
+        scene.vertices.extend_from_slice(grid_vertices(palette));
+        let mut features = project_landscape_features(&program).features;
+        features.sort_by(|a, b| a.elevation.total_cmp(&b.elevation));
+        append_landscape(
+            &mut scene,
+            &ctx,
+            &features,
+            palette,
+            selected_landscape.as_deref(),
+            None,
+        );
+        Self {
+            program,
+            theme: palette.theme,
+            selected_landscape,
+            projection,
+            palette,
+            profiles,
+            road_order,
+            intersections,
+            road_index: 0,
+            intersection_index: 0,
+            scene,
+            ctx,
+        }
+    }
+
+    // Returns a complete scene when the frame budget permits. A partially
+    // built scene is never handed to the GPU; the prior scene stays visible.
+    pub fn advance(&mut self, budget: std::time::Duration) -> bool {
+        let started = std::time::Instant::now();
+        while self.road_index < self.road_order.len() {
+            let index = self.road_order[self.road_index];
+            append_road(
+                &mut self.scene,
+                &self.ctx,
+                &self.program,
+                &self.projection,
+                &self.profiles,
+                index,
+                self.palette,
+                &[],
+            );
+            self.road_index += 1;
+            if started.elapsed() >= budget {
+                return false;
+            }
+        }
+        while self.intersection_index < self.intersections.len() {
+            let intersection = &self.intersections[self.intersection_index];
+            capture_geometry(
+                &self.ctx,
+                |painter| {
+                    paint_intersection(
+                        painter,
+                        GEOMETRY_RECT,
+                        egui::Vec2::ZERO,
+                        GEOMETRY_SCALE,
+                        &self.program,
+                        &self.projection,
+                        intersection,
+                        self.palette,
+                    )
+                },
+                |_| 0.02,
+                &mut self.scene,
+            );
+            self.intersection_index += 1;
+            if started.elapsed() >= budget {
+                return false;
+            }
+        }
+        self.scene.gpu_vertices();
+        true
+    }
+
+    pub fn finish(self) -> Scene {
+        self.scene
+    }
 }
 
 #[repr(C)]
@@ -377,26 +801,10 @@ impl egui_wgpu::CallbackTrait for SceneCallback {
             .as_ref()
             .is_none_or(|(scene, _)| !Arc::ptr_eq(scene, &self.scene))
         {
-            let vertices: Vec<_> = self
-                .scene
-                .vertices
-                .iter()
-                .map(|vertex| {
-                    let rgba = vertex.color.to_array();
-                    GpuVertex {
-                        world: [
-                            vertex.point.x,
-                            vertex.point.y,
-                            vertex.height,
-                            vertex.depth_bias,
-                        ],
-                        color: rgba.map(|channel| channel as f32 / 255.0),
-                    }
-                })
-                .collect();
+            let vertices = self.scene.gpu_vertices();
             let buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
                 label: Some("opencity scene vertices"),
-                contents: bytes_of(&vertices),
+                contents: bytes_of(vertices),
                 usage: wgpu::BufferUsages::VERTEX,
             });
             renderer.scene_buffer = Some((Arc::clone(&self.scene), buffer));
@@ -720,6 +1128,189 @@ mod tests {
     use super::*;
 
     #[test]
+    fn overlapping_terrain_outlines_expose_both_mountain_levels() {
+        let program = parse("lower = terrain(0.2, 0, 0, 2, 0, 2, 2, 0, 2); upper = terrain(0.4, 1, 1, 3, 1, 3, 3, 1, 3);").unwrap();
+        let features = project_landscape_features(&program).features;
+        let mut scene = Scene::default();
+        add_terrain_walls(
+            &mut scene,
+            &features[1],
+            &features,
+            editor_palette(egui::Theme::Dark),
+        );
+        assert!(scene.vertices.iter().any(|vertex| vertex.height == 0.0));
+        assert!(scene.vertices.iter().any(|vertex| vertex.height == 0.2));
+        assert!(scene.vertices.iter().any(|vertex| vertex.height == 0.4));
+    }
+
+    #[test]
+    #[cfg(not(target_arch = "wasm32"))]
+    fn referenced_glb_replaces_building_extrusion_in_scene() {
+        let source = opencity::parse("building(0.5, 0, 0, 1, 0, 1, 1, 0, 1);").unwrap();
+        let bytes = glb::export(&source);
+        let directory =
+            std::env::temp_dir().join(format!("opencity-glb-test-{}", std::process::id()));
+        std::fs::create_dir_all(&directory).unwrap();
+        std::fs::write(directory.join("test.glb"), bytes).unwrap();
+        let program = parse("hall = building(0.8, \"test.glb\", 2, 2, 4, 2, 4, 4, 2, 4);").unwrap();
+        let projection = map::project(&program);
+        let scene = build_scene_with_model_base(
+            &program,
+            &projection,
+            editor_palette(egui::Theme::Dark),
+            &[],
+            None,
+            Some(&directory),
+        );
+        assert!(scene.vertices.iter().any(|vertex| vertex.color
+            == Color32::from_rgb(158, 166, 172)
+            && vertex.point.x >= 2.0
+            && vertex.point.x <= 4.0
+            && vertex.height > 0.0
+            && vertex.height <= 0.8));
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn incremental_web_scene_matches_full_scene() {
+        let program = boot_program();
+        let projection = map::project(&program);
+        let palette = editor_palette(egui::Theme::Dark);
+        let full = build_scene(&program, &projection, palette, &[], None);
+        let mut incremental = WebSceneBuild::new(program, projection, palette, None);
+        assert_eq!(incremental.theme, egui::Theme::Dark);
+        assert_eq!(incremental.selected_landscape, None);
+        let mut passes = 0;
+        while !incremental.advance(std::time::Duration::from_millis(1)) {
+            passes += 1;
+            assert!(passes < 1000, "scene builder did not finish");
+        }
+        let incremental = incremental.finish();
+        assert_eq!(incremental.vertices, full.vertices);
+        assert_eq!(incremental.gpu_vertices().len(), full.gpu_vertices().len());
+    }
+
+    #[test]
+    #[ignore = "manual browser rebuild budget timing"]
+    fn profile_web_scene_slices() {
+        let program = boot_program();
+        let projection = map::project(&program);
+        let palette = editor_palette(egui::Theme::Dark);
+        let _ = grid_vertices(palette);
+        let start = std::time::Instant::now();
+        let mut builder = WebSceneBuild::new(program, projection, palette, None);
+        let setup = start.elapsed();
+        let mut slices = Vec::new();
+        loop {
+            let start = std::time::Instant::now();
+            let complete = builder.advance(std::time::Duration::from_millis(6));
+            slices.push(start.elapsed());
+            if complete {
+                break;
+            }
+        }
+        eprintln!(
+            "web scene setup={setup:?}, slices={slices:?}, vertices={}",
+            builder.scene.vertices.len()
+        );
+    }
+
+    #[test]
+    #[ignore = "manual CPU scene timing"]
+    fn profile_target_scene_cpu() {
+        let program = boot_program();
+        let projection = map::project(&program);
+        eprintln!(
+            "straight segments={}/{}",
+            projection
+                .segments
+                .iter()
+                .filter(|segment| segment_is_straight(segment))
+                .count(),
+            projection.segments.len()
+        );
+        let bins = [0.01, 0.05, 0.1, 0.25, 0.5, 1.0, f32::INFINITY];
+        eprintln!(
+            "curve deviation bins={:?}",
+            bins.map(|limit| projection
+                .segments
+                .iter()
+                .filter(|segment| {
+                    let dx = segment.end.x - segment.start.x;
+                    let dy = segment.end.y - segment.start.y;
+                    let length = (dx * dx + dy * dy).sqrt().max(0.00001);
+                    segment
+                        .controls
+                        .iter()
+                        .map(|point| {
+                            ((point.x - segment.start.x) * dy - (point.y - segment.start.y) * dx)
+                                .abs()
+                                / length
+                        })
+                        .fold(0.0, f32::max)
+                        <= limit
+                })
+                .count())
+        );
+        let start = std::time::Instant::now();
+        let scene = build_scene(
+            &program,
+            &projection,
+            editor_palette(egui::Theme::Dark),
+            &[],
+            None,
+        );
+        eprintln!(
+            "scene build={:?} vertices={}",
+            start.elapsed(),
+            scene.vertices.len()
+        );
+        let start = std::time::Instant::now();
+        let scene = build_scene(
+            &program,
+            &projection,
+            editor_palette(egui::Theme::Dark),
+            &[],
+            None,
+        );
+        eprintln!(
+            "warm scene build={:?} vertices={}",
+            start.elapsed(),
+            scene.vertices.len()
+        );
+    }
+
+    #[test]
+    fn airport_surfaces_and_markings_reach_shared_scene() {
+        let source = "road strip: runway; end; road connector: taxiway; end; road stand: apron; end; strip(0, 0, 3, 0); connector(0, 1, 3, 1); stand(0, 2, 3, 2);";
+        let program = parse(source).unwrap();
+        assert_eq!(parse(&program.to_road_source()).unwrap(), program);
+        let scene = build_scene(
+            &program,
+            &map::project(&program),
+            editor_palette(egui::Theme::Dark),
+            &[],
+            None,
+        );
+        for color in [
+            kind_color(RoadElementKind::Runway, egui::Theme::Dark),
+            kind_color(RoadElementKind::Taxiway, egui::Theme::Dark),
+            kind_color(RoadElementKind::Apron, egui::Theme::Dark),
+            Color32::from_rgb(235, 236, 224),
+            Color32::from_rgb(233, 191, 73),
+        ] {
+            assert!(
+                scene.vertices.iter().any(|vertex| {
+                    vertex.color.r() == color.r()
+                        && vertex.color.g() == color.g()
+                        && vertex.color.b() == color.b()
+                }),
+                "missing {color:?}"
+            );
+        }
+    }
+
+    #[test]
     fn shared_scene_contains_detailed_starter_roads_landscape_and_junctions() {
         let program = starter_program();
         let projection = map::project(&program);
@@ -764,8 +1355,20 @@ mod gpu_tests {
     #[test]
     #[ignore = "manual GPU frame timing"]
     fn profile_starter_camera_frames() {
-        let program = starter_program();
+        let qa_target = std::env::var_os("OPENCITY_QA_TARGET").is_some();
+        let program = if qa_target {
+            boot_program()
+        } else {
+            starter_program()
+        };
+        let project_start = std::time::Instant::now();
         let projection = map::project(&program);
+        eprintln!(
+            "projection={:?} segments={} unresolved={}",
+            project_start.elapsed(),
+            projection.segments.len(),
+            projection.unresolved
+        );
         let start = std::time::Instant::now();
         let scene = Arc::new(build_scene(
             &program,
@@ -809,10 +1412,22 @@ mod gpu_tests {
             queue.submit([encoder.finish()]);
         }
         device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
+        let warm = start.elapsed() / 100;
+        callback.scene = Arc::new(build_scene(
+            &program,
+            &projection,
+            editor_palette(egui::Theme::Dark),
+            &[],
+            None,
+        ));
+        let start = std::time::Instant::now();
+        let mut encoder = device.create_command_encoder(&Default::default());
+        callback.prepare(&device, &queue, &screen, &mut encoder, &mut resources);
+        queue.submit([encoder.finish()]);
+        let scene_swap = start.elapsed();
         eprintln!(
-            "starter vertices={} scene_build={build:?} cold_frame={cold:?} warm_frame={:?}",
+            "starter vertices={} scene_build={build:?} cold_frame={cold:?} warm_frame={warm:?} scene_swap={scene_swap:?}",
             scene.vertices.len(),
-            start.elapsed() / 100
         );
     }
 
@@ -869,6 +1484,7 @@ mod gpu_tests {
                         color: Color32::RED,
                     },
                 ],
+                ..Default::default()
             }),
             rect: egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(128.0, 128.0)),
             pan: egui::Vec2::ZERO,
@@ -995,7 +1611,12 @@ mod gpu_tests {
             block_on(instance.request_adapter(&wgpu::RequestAdapterOptions::default())).unwrap();
         let (device, queue) =
             block_on(adapter.request_device(&wgpu::DeviceDescriptor::default())).unwrap();
-        let program = starter_program();
+        let qa_target = std::env::var_os("OPENCITY_QA_TARGET").is_some();
+        let program = if qa_target {
+            boot_program()
+        } else {
+            starter_program()
+        };
         let projection = map::project(&program);
         let palette = editor_palette(egui::Theme::Dark);
         let scene = Arc::new(build_scene(&program, &projection, palette, &[], None));
@@ -1029,15 +1650,38 @@ mod gpu_tests {
             .find(|item| item.point_ref == "grid_1_1")
             .map(|item| item.position)
             .unwrap_or(center);
-        let interchange = WorldPoint { x: 4.7, y: -3.0 };
-        for (name, camera, target, zoom) in [
+        let interchange = if qa_target {
+            WorldPoint { x: 0.82, y: 2.68 }
+        } else {
+            WorldPoint { x: 4.7, y: -3.0 }
+        };
+        let mut views = vec![
             ("top-full", CameraView::Top, center, fit),
             ("iso-full", CameraView::Isometric, center, fit * 0.72),
             ("top-intersection", CameraView::Top, junction, 125.0),
             ("iso-intersection", CameraView::Isometric, junction, 125.0),
             ("top-interchange", CameraView::Top, interchange, 115.0),
             ("iso-interchange", CameraView::Isometric, interchange, 115.0),
-        ] {
+        ];
+        if qa_target {
+            for (name, x, y) in [
+                ("top-west-junction", 265.0, 242.0),
+                ("top-east-junction", 1385.0, 486.0),
+                ("top-north-terminal", 816.0, 90.0),
+                ("top-south-terminal", 817.0, 628.0),
+            ] {
+                views.push((
+                    name,
+                    CameraView::Top,
+                    WorldPoint {
+                        x: (x - 768.0) / 60.0,
+                        y: (512.0 - y) / 60.0,
+                    },
+                    90.0,
+                ));
+            }
+        }
+        for (name, camera, target, zoom) in views {
             let rect = egui::Rect::from_min_size(
                 egui::Pos2::ZERO,
                 egui::vec2(WIDTH as f32, HEIGHT as f32),
@@ -1157,7 +1801,8 @@ mod gpu_tests {
             }
             drop(mapped);
             readback.unmap();
-            let path = format!("/private/tmp/opencity-{name}-qa.png");
+            let prefix = if qa_target { "target" } else { "starter" };
+            let path = format!("/private/tmp/opencity-{prefix}-{name}-qa.png");
             let file = std::fs::File::create(&path).unwrap();
             let mut encoder = png::Encoder::new(file, WIDTH, HEIGHT);
             encoder.set_color(png::ColorType::Rgba);

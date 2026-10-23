@@ -127,6 +127,7 @@ impl Parser {
                 args.push(match token.kind {
                     TokenKind::Number => Argument::Number(token.text),
                     TokenKind::Identifier => Argument::Identifier(token.text),
+                    TokenKind::String => Argument::String(token.text),
                     _ => {
                         return Err(SyntaxError {
                             span: token.span,

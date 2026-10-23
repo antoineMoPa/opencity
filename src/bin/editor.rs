@@ -4,22 +4,22 @@ use eframe::egui::{self, Color32, RichText};
 use egui_command_palette::{Command as PaletteCommand, CommandPalette};
 use egui_frames::{DropSide, Frames, FramesEvent, FramesStyle, Layout, PaneId, PaneView, Tab};
 use opencity::{
-    parse, parse_road_file, project_landscape_features, set_elevation, set_grade, Argument, Call,
-    LandscapeKind, Program, RoadDefinition, RoadElement, RoadElementKind, Statement,
+    map, parse, parse_road_file, project_landscape_features, set_elevation, set_grade, Argument,
+    Call, LandscapeKind, Program, RoadDefinition, RoadElement, RoadElementKind, Statement,
 };
 
 #[path = "editor/glb.rs"]
 mod glb;
-#[path = "editor/map.rs"]
-mod map;
 #[cfg(not(target_arch = "wasm32"))]
 #[path = "editor/mcp.rs"]
 mod mcp;
+#[path = "editor/model.rs"]
+mod model;
 #[path = "editor/scene3d.rs"]
 mod scene3d;
 use map::{SegmentSource, WorldPoint};
 
-const KINDS: [RoadElementKind; 13] = [
+const KINDS: [RoadElementKind; 16] = [
     RoadElementKind::BuildingEdge,
     RoadElementKind::Sidewalk,
     RoadElementKind::BikeLane,
@@ -33,6 +33,9 @@ const KINDS: [RoadElementKind; 13] = [
     RoadElementKind::TrainTrack,
     RoadElementKind::TramTrack,
     RoadElementKind::SubwayTrack,
+    RoadElementKind::Runway,
+    RoadElementKind::Taxiway,
+    RoadElementKind::Apron,
 ];
 
 #[derive(Clone, Copy)]
@@ -161,15 +164,30 @@ struct CopiedSegment {
 struct SceneCache {
     program: Program,
     theme: egui::Theme,
-    selected: Vec<SegmentSource>,
     selected_landscape: Option<String>,
     scene: Arc<scene3d::Scene>,
 }
 
+struct DesignAnalysisCache {
+    program: Program,
+    issues: Vec<DesignIssue>,
+}
+
 #[cfg(target_arch = "wasm32")]
 enum WebFileEvent {
-    Opened { name: String, source: String },
-    Saved { name: String, program: Program },
+    Opened {
+        name: String,
+        source: String,
+    },
+    Saved {
+        name: String,
+        program: Program,
+    },
+    ModelLoaded {
+        building: String,
+        name: String,
+        bytes: Vec<u8>,
+    },
     Message(String),
 }
 
@@ -178,6 +196,9 @@ fn landscape_label(kind: LandscapeKind) -> &'static str {
         LandscapeKind::Land => "Land boundary",
         LandscapeKind::Lake => "Lake",
         LandscapeKind::River => "River",
+        LandscapeKind::Vegetation => "Vegetation area",
+        LandscapeKind::Terrain => "Terrain elevation",
+        LandscapeKind::Building => "Building",
     }
 }
 
@@ -186,6 +207,7 @@ enum PresetCategory {
     City,
     Rural,
     Interstate,
+    Airport,
     Custom,
 }
 
@@ -195,6 +217,7 @@ impl PresetCategory {
             Self::City => "CITY",
             Self::Rural => "COUNTRYSIDE",
             Self::Interstate => "HIGHWAYS & INTERSTATES",
+            Self::Airport => "AIRPORT",
             Self::Custom => "CUSTOM",
         }
     }
@@ -219,6 +242,7 @@ fn preset_category(name: &str) -> PresetCategory {
         "divided_highway" | "exit_ramp" | "interstate_three_lane" | "interstate_four_lane" => {
             PresetCategory::Interstate
         }
+        "airport_runway" | "airport_taxiway" | "airport_apron" => PresetCategory::Airport,
         _ => PresetCategory::Custom,
     }
 }
@@ -245,6 +269,9 @@ fn preset_label(name: &str) -> &str {
         "exit_ramp" => "Exit ramp",
         "interstate_three_lane" => "Interstate | 3 lanes/way",
         "interstate_four_lane" => "Interstate | 4 lanes/way",
+        "airport_runway" => "Airport runway",
+        "airport_taxiway" => "Airport taxiway",
+        "airport_apron" => "Airport apron",
         _ => name,
     }
 }
@@ -253,8 +280,13 @@ fn default_program() -> Program {
     parse(include_str!("../../examples/default_roads.road")).expect("bundled road library parses")
 }
 
+#[cfg(test)]
 fn starter_program() -> Program {
     parse(include_str!("../../examples/starter_city.road")).expect("bundled starter city parses")
+}
+
+fn boot_program() -> Program {
+    parse(include_str!("../../examples/target_map.road")).expect("bundled target map parses")
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -317,7 +349,13 @@ struct RoadEditor {
     map_tool: MapTool,
     camera_view: CameraView,
     render_format: eframe::wgpu::TextureFormat,
+    projection_cache: Option<(Program, Arc<map::Projection>)>,
     scene_cache: Option<SceneCache>,
+    #[cfg(target_arch = "wasm32")]
+    web_scene_build: Option<scene3d::WebSceneBuild>,
+    #[cfg(not(target_arch = "wasm32"))]
+    scene_build: Option<std::sync::mpsc::Receiver<SceneCache>>,
+    design_analysis_cache: Option<DesignAnalysisCache>,
     top_camera: (egui::Vec2, f32),
     iso_camera: (egui::Vec2, f32),
     orbit_angle: f32,
@@ -462,38 +500,196 @@ impl RoadEditor {
         }
     }
 
-    fn scene_geometry(&mut self, palette: EditorPalette) -> Arc<scene3d::Scene> {
-        let mut selected = self.selected_segments.clone();
-        if let Some(source) = self.selected_segment {
-            if !selected.contains(&source) {
-                selected.push(source);
+    fn projected_map(&mut self) -> Arc<map::Projection> {
+        if let Some((program, projection)) = &self.projection_cache {
+            if *program == self.program {
+                return Arc::clone(projection);
+            }
+        }
+        let projection = Arc::new(map::project(&self.program));
+        self.projection_cache = Some((self.program.clone(), Arc::clone(&projection)));
+        projection
+    }
+
+    fn scene_geometry(
+        &mut self,
+        ctx: &egui::Context,
+        palette: EditorPalette,
+        projection: &map::Projection,
+    ) -> Arc<scene3d::Scene> {
+        #[cfg(not(target_arch = "wasm32"))]
+        if let Some(receiver) = &self.scene_build {
+            match receiver.try_recv() {
+                Ok(cache) => {
+                    self.scene_cache = Some(cache);
+                    self.scene_build = None;
+                }
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => self.scene_build = None,
+                Err(std::sync::mpsc::TryRecvError::Empty) => {}
             }
         }
         if let Some(cache) = &self.scene_cache {
             if cache.program == self.program
                 && cache.theme == palette.theme
-                && cache.selected == selected
                 && cache.selected_landscape == self.selected_landscape
             {
+                #[cfg(target_arch = "wasm32")]
+                {
+                    self.web_scene_build = None;
+                }
                 return Arc::clone(&cache.scene);
             }
         }
-        let projection = map::project(&self.program);
-        let scene = Arc::new(scene3d::build_scene(
+        #[cfg(target_arch = "wasm32")]
+        if self.dragging_control.is_some()
+            || self.dragging_endpoint.is_some()
+            || self.dragging_intersection.is_some()
+        {
+            if let Some(cache) = &self.scene_cache {
+                return Arc::clone(&cache.scene);
+            }
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        if let Some(cache) = &self.scene_cache {
+            if self.scene_build.is_none() {
+                let (sender, receiver) = std::sync::mpsc::channel();
+                let program = self.program.clone();
+                let selected_landscape = self.selected_landscape.clone();
+                let model_base = self
+                    .path
+                    .as_ref()
+                    .and_then(|path| path.parent())
+                    .map(PathBuf::from);
+                let ctx = ctx.clone();
+                std::thread::spawn(move || {
+                    let projection = map::project(&program);
+                    let scene = Arc::new(scene3d::build_scene_with_model_base(
+                        &program,
+                        &projection,
+                        palette,
+                        &[],
+                        selected_landscape.as_deref(),
+                        model_base.as_deref(),
+                    ));
+                    let _ = sender.send(SceneCache {
+                        program,
+                        theme: palette.theme,
+                        selected_landscape,
+                        scene,
+                    });
+                    ctx.request_repaint();
+                });
+                self.scene_build = Some(receiver);
+            }
+            return Arc::clone(&cache.scene);
+        }
+        #[cfg(target_arch = "wasm32")]
+        if let Some(cache) = &self.scene_cache {
+            let needs_build = self.web_scene_build.as_ref().is_none_or(|build| {
+                build.program != self.program
+                    || build.theme != palette.theme
+                    || build.selected_landscape != self.selected_landscape
+            });
+            if needs_build {
+                self.web_scene_build = Some(scene3d::WebSceneBuild::new(
+                    self.program.clone(),
+                    projection.clone(),
+                    palette,
+                    self.selected_landscape.clone(),
+                ));
+            } else if self
+                .web_scene_build
+                .as_mut()
+                .unwrap()
+                .advance(std::time::Duration::from_millis(6))
+            {
+                let build = self.web_scene_build.take().unwrap();
+                let scene = Arc::new(build.finish());
+                self.scene_cache = Some(SceneCache {
+                    program: self.program.clone(),
+                    theme: palette.theme,
+                    selected_landscape: self.selected_landscape.clone(),
+                    scene: Arc::clone(&scene),
+                });
+                return scene;
+            }
+            ctx.request_repaint();
+            return Arc::clone(&cache.scene);
+        }
+        let scene = Arc::new(scene3d::build_scene_with_model_base(
             &self.program,
-            &projection,
+            projection,
             palette,
-            &selected,
+            &[],
             self.selected_landscape.as_deref(),
+            self.path.as_ref().and_then(|path| path.parent()),
         ));
         self.scene_cache = Some(SceneCache {
             program: self.program.clone(),
             theme: palette.theme,
-            selected,
             selected_landscape: self.selected_landscape.clone(),
             scene: Arc::clone(&scene),
         });
         scene
+    }
+
+    fn design_issues(&mut self, projection: &map::Projection) -> Vec<DesignIssue> {
+        if let Some(cache) = &self.design_analysis_cache {
+            if cache.program == self.program
+                || self.dragging_endpoint.is_some()
+                || self.dragging_control.is_some()
+                || self.dragging_intersection.is_some()
+            {
+                return cache.issues.clone();
+            }
+        }
+        let profiles = paint_profiles(&self.program, projection);
+        let issues = design_rule_issues(&self.program, projection, &profiles);
+        self.design_analysis_cache = Some(DesignAnalysisCache {
+            program: self.program.clone(),
+            issues: issues.clone(),
+        });
+        issues
+    }
+
+    fn paint_selection_overlay(
+        &self,
+        painter: &egui::Painter,
+        rect: egui::Rect,
+        projection: &map::Projection,
+        palette: EditorPalette,
+        camera: CameraView,
+    ) {
+        for segment in &projection.segments {
+            if self.selected_segment != Some(segment.source)
+                && !self.selected_segments.contains(&segment.source)
+            {
+                continue;
+            }
+            let steps = if segment_is_straight(segment) { 1 } else { 32 };
+            let path = (0..=steps)
+                .map(|step| {
+                    let t = step as f32 / steps as f32;
+                    let world = segment.point_at(t);
+                    match camera {
+                        CameraView::Top => screen_of(rect, self.map_pan, self.map_zoom, world),
+                        CameraView::Isometric => iso_screen(
+                            rect,
+                            self.map_pan,
+                            self.map_zoom,
+                            self.orbit_target,
+                            self.orbit_angle,
+                            world,
+                            segment.height_at(t),
+                        ),
+                    }
+                })
+                .collect();
+            painter.add(egui::Shape::line(
+                path,
+                egui::Stroke::new(3.0, palette.map_selected),
+            ));
+        }
     }
 
     fn set_camera_view(&mut self, view: CameraView) {
@@ -695,8 +891,8 @@ impl RoadEditor {
             frames: Frames::new().with_new_tab_button(false),
             layout,
             command_palette: CommandPalette::default(),
-            program: starter_program(),
-            saved_program: starter_program(),
+            program: boot_program(),
+            saved_program: boot_program(),
             undo_stack: Vec::new(),
             redo_stack: Vec::new(),
             history_drag_active: false,
@@ -721,7 +917,13 @@ impl RoadEditor {
                 .as_ref()
                 .map(|state| state.target_format)
                 .unwrap_or(eframe::wgpu::TextureFormat::Bgra8Unorm),
+            projection_cache: None,
             scene_cache: None,
+            #[cfg(target_arch = "wasm32")]
+            web_scene_build: None,
+            #[cfg(not(target_arch = "wasm32"))]
+            scene_build: None,
+            design_analysis_cache: None,
             top_camera: (egui::Vec2::ZERO, 75.0),
             iso_camera: (egui::Vec2::ZERO, 55.0),
             orbit_angle: std::f32::consts::FRAC_PI_4,
@@ -920,7 +1122,13 @@ impl RoadEditor {
             }
             suffix += 1;
         };
-        let mut args = Vec::with_capacity(self.landscape_points.len() * 2);
+        let mut args = Vec::with_capacity(self.landscape_points.len() * 2 + 1);
+        match kind {
+            LandscapeKind::Vegetation => args.push(Argument::Identifier("forest".into())),
+            LandscapeKind::Terrain => args.push(Argument::Number("0.25".into())),
+            LandscapeKind::Building => args.push(Argument::Number("0.25".into())),
+            _ => {}
+        }
         for point in &self.landscape_points {
             args.push(Argument::Number(format!("{:.4}", point.x)));
             args.push(Argument::Number(format!("{:.4}", point.y)));
@@ -1355,6 +1563,15 @@ impl RoadEditor {
         self.map_pan = egui::Vec2::ZERO;
         self.map_zoom = 75.0;
         self.path = path;
+        self.scene_cache = None;
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            self.scene_build = None;
+        }
+        #[cfg(target_arch = "wasm32")]
+        {
+            self.web_scene_build = None;
+        }
         self.dirty = false;
         self.confirm_delete_road = false;
     }
@@ -1368,6 +1585,8 @@ impl RoadEditor {
         match self.program.write_road_file(&path) {
             Ok(()) => {
                 self.path = Some(path.clone());
+                self.scene_cache = None;
+                self.scene_build = None;
                 self.saved_program = self.program.clone();
                 self.dirty = false;
                 self.status = format!("Saved {}", path.display());
@@ -1505,6 +1724,27 @@ impl RoadEditor {
                 let event = match String::from_utf8(file.read().await) {
                     Ok(source) => WebFileEvent::Opened { name, source },
                     Err(error) => WebFileEvent::Message(format!("Could not read {name}: {error}")),
+                };
+                let _ = sender.send(event);
+                ctx.request_repaint();
+            }
+        });
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    fn pick_building_glb(&mut self, building: String) {
+        let sender = self.web_event_sender.clone();
+        let ctx = self.web_ctx.clone();
+        wasm_bindgen_futures::spawn_local(async move {
+            if let Some(file) = rfd::AsyncFileDialog::new()
+                .add_filter("GLB model", &["glb"])
+                .pick_file()
+                .await
+            {
+                let event = WebFileEvent::ModelLoaded {
+                    building,
+                    name: file.file_name(),
+                    bytes: file.read().await,
                 };
                 let _ = sender.send(event);
                 ctx.request_repaint();
@@ -2067,6 +2307,9 @@ impl RoadEditor {
                             LandscapeKind::Land,
                             LandscapeKind::Lake,
                             LandscapeKind::River,
+                            LandscapeKind::Vegetation,
+                            LandscapeKind::Terrain,
+                            LandscapeKind::Building,
                         ] {
                             if ui.button(format!("+ {}", landscape_label(kind))).clicked() {
                                 self.start_landscape(kind);
@@ -2391,8 +2634,7 @@ impl RoadEditor {
 
     fn map_inspector(&mut self, ui: &mut egui::Ui) {
         let projection = map::project(&self.program);
-        let profiles = paint_profiles(&self.program, &projection);
-        let issues = design_rule_issues(&self.program, &projection, &profiles);
+        let issues = self.design_issues(&projection);
         ui.collapsing(
             format!(
                 "Design checks: {} issue{}",
@@ -2434,13 +2676,87 @@ impl RoadEditor {
                 ui.heading(landscape_label(feature.kind));
                 ui.label(name);
                 ui.label(format!("{} points", feature.points.len()));
+                if let Some(kind) = &feature.vegetation_type {
+                    ui.label(format!("Type: {kind}"));
+                }
+                if let Some(model) = &feature.model {
+                    ui.label(format!("Model: {model}"));
+                }
                 let top_level = self.program.statements.iter().any(|statement| {
                     matches!(statement,
                 Statement::Call(call) if call.assigns.first() == Some(name)
                     && LandscapeKind::from_call_name(&call.name) == Some(feature.kind))
                 });
-                let mut elevation = feature.elevation;
+                let mut elevation = feature.elevation - feature.terrain_height.unwrap_or(0.0);
                 if top_level {
+                    if feature.kind == LandscapeKind::Building
+                        || feature.kind == LandscapeKind::Terrain
+                    {
+                        let mut value = if feature.kind == LandscapeKind::Building {
+                            feature.height.unwrap_or(0.0)
+                        } else {
+                            feature.terrain_height.unwrap_or(0.0)
+                        };
+                        ui.horizontal(|ui| {
+                            ui.label(if feature.kind == LandscapeKind::Building { "Height" } else { "Terrain height" });
+                            if ui.add(egui::DragValue::new(&mut value).speed(0.05).suffix(" units")).changed()
+                                && (feature.kind == LandscapeKind::Terrain || value > 0.0) {
+                                if let Some(Statement::Call(call)) = self.program.statements.iter_mut().find(|statement| matches!(statement, Statement::Call(call) if call.assigns.first() == Some(name))) {
+                                    call.args[0] = Argument::Number(format!("{value:.4}"));
+                                    self.dirty = true;
+                                }
+                            }
+                        });
+                    }
+                    if feature.kind == LandscapeKind::Building {
+                        let mut model = feature.model.clone().unwrap_or_default();
+                        ui.horizontal(|ui| {
+                            ui.label("GLB path");
+                            if ui.text_edit_singleline(&mut model).changed() {
+                                if let Some(Statement::Call(call)) = self.program.statements.iter_mut().find(|statement| matches!(statement, Statement::Call(call) if call.assigns.first() == Some(name))) {
+                                    if matches!(call.args.get(1), Some(Argument::String(_))) { call.args.remove(1); }
+                                    if !model.is_empty() { call.args.insert(1, Argument::String(format!("\"{}\"", model.replace('"', "")))); }
+                                    self.dirty = true;
+                                }
+                            }
+                        });
+                        if ui.button("Choose GLB…").clicked() {
+                            #[cfg(target_arch = "wasm32")]
+                            self.pick_building_glb(name.clone());
+                            #[cfg(not(target_arch = "wasm32"))]
+                            if let Some(path) = rfd::FileDialog::new()
+                                .add_filter("GLB model", &["glb"])
+                                .pick_file()
+                            {
+                                let relative = self
+                                    .path
+                                    .as_ref()
+                                    .and_then(|document| document.parent())
+                                    .and_then(|parent| path.strip_prefix(parent).ok())
+                                    .unwrap_or(path.as_path());
+                                if let Some(Statement::Call(call)) = self.program.statements.iter_mut().find(|statement| matches!(statement, Statement::Call(call) if call.assigns.first() == Some(name))) {
+                                    if matches!(call.args.get(1), Some(Argument::String(_))) { call.args.remove(1); }
+                                    call.args.insert(1, Argument::String(format!("\"{}\"", relative.to_string_lossy())));
+                                    self.dirty = true;
+                                }
+                            }
+                        }
+                    }
+                    if feature.kind == LandscapeKind::Vegetation {
+                        let mut vegetation_type =
+                            feature.vegetation_type.clone().unwrap_or_default();
+                        ui.horizontal(|ui| {
+                            ui.label("Vegetation type");
+                            if ui.text_edit_singleline(&mut vegetation_type).changed()
+                                && !vegetation_type.is_empty()
+                                && vegetation_type.chars().all(|character| character.is_ascii_alphanumeric() || character == '_') {
+                                if let Some(Statement::Call(call)) = self.program.statements.iter_mut().find(|statement| matches!(statement, Statement::Call(call) if call.assigns.first() == Some(name))) {
+                                    call.args[0] = Argument::Identifier(vegetation_type);
+                                    self.dirty = true;
+                                }
+                            }
+                        });
+                    }
                     ui.horizontal(|ui| {
                         ui.label("Elevation");
                         if ui
@@ -2981,7 +3297,7 @@ impl RoadEditor {
             let (rect, response) = ui.allocate_exact_size(ui.available_size(), egui::Sense::click_and_drag());
             self.map_rect = Some(rect);
             let palette = editor_palette(ui.ctx().theme());
-            let projection = map::project(&self.program);
+            let projection = self.projected_map();
             if self.fit_scene_once {
                 self.fit_scene_once = false;
                 if !projection.segments.is_empty() {
@@ -2995,7 +3311,18 @@ impl RoadEditor {
             }
             if response.hovered() {
                 let scroll = ui.input(|input| input.smooth_scroll_delta.y);
-                if scroll != 0.0 { self.map_zoom = (self.map_zoom * (1.0 + scroll * 0.002)).clamp(18.0, 420.0); }
+                if scroll != 0.0 {
+                    let pointer = ui.ctx().pointer_hover_pos().unwrap_or(rect.center());
+                    iso_zoom_at_pointer(
+                        rect,
+                        &mut self.map_pan,
+                        &mut self.map_zoom,
+                        self.orbit_target,
+                        self.orbit_angle,
+                        pointer,
+                        scroll,
+                    );
+                }
             }
             if response.dragged_by(egui::PointerButton::Middle) { self.map_pan += response.drag_delta(); }
             if response.drag_started_by(egui::PointerButton::Primary) {
@@ -3391,7 +3718,7 @@ impl RoadEditor {
             }
             let projection = map::project(&self.program);
             let painter = ui.painter_at(rect);
-            let scene = self.scene_geometry(palette);
+            let scene = self.scene_geometry(ui.ctx(), palette, &projection);
             painter.add(egui::Shape::Callback(eframe::egui_wgpu::Callback::new_paint_callback(
                 rect, scene3d::SceneCallback {
                     scene, rect, pan: self.map_pan, zoom: self.map_zoom,
@@ -3399,6 +3726,7 @@ impl RoadEditor {
                     camera: CameraView::Isometric, background: palette.map_background,
                     target_format: self.render_format,
                 })));
+            self.paint_selection_overlay(&painter, rect, &projection, palette, CameraView::Isometric);
             for intersection in map::intersections(&self.program, &projection) {
                 if self.selected_intersection.as_deref() == Some(&intersection.point_ref) {
                     let point = iso_screen(rect, self.map_pan, self.map_zoom, self.orbit_target,
@@ -3551,7 +3879,7 @@ impl RoadEditor {
             let (rect, response) =
                 ui.allocate_exact_size(ui.available_size(), egui::Sense::click_and_drag());
             self.map_rect = Some(rect);
-            let before = map::project(&self.program);
+            let before = self.projected_map();
             if self.fit_scene_once {
                 self.fit_scene_once = false;
                 let landscape = project_landscape_features(&self.program);
@@ -4054,10 +4382,9 @@ impl RoadEditor {
             }
 
             let painter = ui.painter_at(rect);
-            let projection = map::project(&self.program);
-            let profiles = paint_profiles(&self.program, &projection);
-            let issues = design_rule_issues(&self.program, &projection, &profiles);
-            let scene = self.scene_geometry(palette);
+            let projection = self.projected_map();
+            let issues = self.design_issues(&projection);
+            let scene = self.scene_geometry(ui.ctx(), palette, &projection);
             painter.add(egui::Shape::Callback(eframe::egui_wgpu::Callback::new_paint_callback(
                 rect, scene3d::SceneCallback {
                     scene, rect, pan: self.map_pan, zoom: self.map_zoom,
@@ -4065,14 +4392,28 @@ impl RoadEditor {
                     camera: CameraView::Top, background: palette.map_background,
                     target_format: self.render_format,
                 })));
+            self.paint_selection_overlay(&painter, rect, &projection, palette, CameraView::Top);
             if let (Some(start), Some(pointer)) = (self.box_start, response.interact_pointer_pos()) {
                 painter.rect_stroke(egui::Rect::from_two_pos(start, pointer), 0.0,
                     egui::Stroke::new(1.5, palette.map_selected), egui::StrokeKind::Inside);
             }
             let intersections = map::intersections(&self.program, &projection);
-            let intersection_squares: Vec<_> = intersections.iter().filter_map(|intersection|
-                intersection_paint(&self.program, &projection, intersection, rect,
-                    self.map_pan, self.map_zoom).map(|paint| paint.square)).collect();
+            let road_widths: HashMap<_, _> = self.program.statements.iter().filter_map(|statement| {
+                let Statement::Road(road) = statement else { return None; };
+                Some((road.name.as_str(), road.elements.iter()
+                    .map(|element| map::element_world_width(element.kind)).sum::<f32>()))
+            }).collect();
+            let intersection_squares: Vec<_> = intersections.iter().filter_map(|intersection| {
+                let mut width = *road_widths.get(intersection.road_name.as_str())?;
+                for (_, road_name) in &intersection.arm_roads {
+                    if let Some(arm_width) = road_widths.get(road_name.as_str()) {
+                        width = width.max(*arm_width);
+                    }
+                }
+                let center = screen_of(rect, self.map_pan, self.map_zoom, intersection.position);
+                let size = width * self.map_zoom;
+                Some(egui::Rect::from_center_size(center, egui::vec2(size, size)))
+            }).collect();
             for intersection in &intersections {
                 if self.selected_intersection.as_deref() == Some(&intersection.point_ref) {
                     if let Some(paint) = intersection_paint(&self.program, &projection,
@@ -4580,6 +4921,20 @@ fn iso_ground_point(
     iso_world_at_height(rect, pan, zoom, target, angle, screen, 0.0)
 }
 
+fn iso_zoom_at_pointer(
+    rect: egui::Rect,
+    pan: &mut egui::Vec2,
+    zoom: &mut f32,
+    target: WorldPoint,
+    angle: f32,
+    pointer: egui::Pos2,
+    scroll: f32,
+) {
+    let anchored = iso_ground_point(rect, *pan, *zoom, target, angle, pointer);
+    *zoom = (*zoom * (1.0 + scroll * 0.002)).clamp(18.0, 420.0);
+    *pan += pointer - iso_screen(rect, *pan, *zoom, target, angle, anchored, 0.0);
+}
+
 fn iso_world_at_height(
     rect: egui::Rect,
     pan: egui::Vec2,
@@ -4848,6 +5203,30 @@ fn paint_landscape_feature(
             Color32::from_rgb(194, 224, 180),
             Color32::from_rgb(80, 139, 75),
         ),
+        (egui::Theme::Dark, LandscapeKind::Vegetation) => (
+            Color32::from_rgb(34, 91, 54),
+            Color32::from_rgb(72, 156, 87),
+        ),
+        (egui::Theme::Light, LandscapeKind::Vegetation) => (
+            Color32::from_rgb(140, 191, 126),
+            Color32::from_rgb(49, 119, 62),
+        ),
+        (egui::Theme::Dark, LandscapeKind::Terrain) => (
+            Color32::from_rgb(92, 81, 62),
+            Color32::from_rgb(173, 147, 99),
+        ),
+        (egui::Theme::Light, LandscapeKind::Terrain) => (
+            Color32::from_rgb(206, 188, 152),
+            Color32::from_rgb(138, 112, 70),
+        ),
+        (egui::Theme::Dark, LandscapeKind::Building) => (
+            Color32::from_rgb(114, 119, 126),
+            Color32::from_rgb(186, 195, 204),
+        ),
+        (egui::Theme::Light, LandscapeKind::Building) => (
+            Color32::from_rgb(178, 184, 189),
+            Color32::from_rgb(86, 97, 105),
+        ),
         (egui::Theme::Dark, LandscapeKind::Lake | LandscapeKind::River) => (
             Color32::from_rgb(26, 76, 112),
             Color32::from_rgb(69, 165, 204),
@@ -4875,14 +5254,21 @@ fn paint_landscape_feature(
                 egui::Stroke::NONE,
             ));
         } else {
-            // Concave shorelines need separate triangles to keep their inlets open.
+            // A single mesh keeps internal triangle edges out of the shoreline.
+            // Separate antialiased polygons leave visible seams in large areas.
+            let mut mesh = egui::Mesh::default();
             for [a, b, c] in landscape_triangles(&points) {
-                painter.add(egui::Shape::convex_polygon(
-                    vec![a, b, c],
-                    fill,
-                    egui::Stroke::NONE,
-                ));
+                let base = mesh.vertices.len() as u32;
+                for pos in [a, b, c] {
+                    mesh.vertices.push(egui::epaint::Vertex {
+                        pos,
+                        uv: egui::epaint::WHITE_UV,
+                        color: fill,
+                    });
+                }
+                mesh.indices.extend_from_slice(&[base, base + 1, base + 2]);
             }
+            painter.add(egui::Shape::mesh(mesh));
         }
         painter.add(egui::Shape::closed_line(points.clone(), stroke));
     }
@@ -5657,7 +6043,16 @@ fn design_rule_issues(
     projection: &map::Projection,
     profiles: &[PaintProfile],
 ) -> Vec<DesignIssue> {
-    let mut issues = Vec::new();
+    let mut issues: Vec<DesignIssue> =
+        opencity::check_design_rules_with_projection(program, projection)
+            .into_iter()
+            .map(|issue| DesignIssue {
+                code: issue.rule.code(),
+                message: issue.message,
+                at: issue.at,
+                roads: issue.roads,
+            })
+            .collect();
     for (incoming, outgoing) in road_joins(projection) {
         let a = &projection.segments[incoming];
         let b = &projection.segments[outgoing];
@@ -5688,20 +6083,10 @@ fn design_rule_issues(
         }
     }
     for intersection in map::intersections(program, projection) {
-        let Some(edge) = program
-            .statements
-            .iter()
-            .find_map(|statement| match statement {
-                Statement::Road(road) if road.name == intersection.road_name => Some(road),
-                _ => None,
-            })
-        else {
-            continue;
-        };
         let attached: Vec<_> = if intersection.ports.is_empty() {
             map::intersection_arms(projection, &intersection.point_ref)
                 .into_iter()
-                .map(|(index, _)| index)
+                .map(|(index, is_end)| (index, is_end, None))
                 .collect()
         } else {
             projection
@@ -5712,17 +6097,36 @@ fn design_rule_issues(
                     intersection
                         .ports
                         .iter()
-                        .any(|port| {
+                        .find(|port| {
                             segment.start_ref.as_deref() == Some(&port.point_ref)
                                 || segment.end_ref.as_deref() == Some(&port.point_ref)
                         })
-                        .then_some(index)
+                        .map(|port| {
+                            (
+                                index,
+                                segment.end_ref.as_deref() == Some(&port.point_ref),
+                                Some(port.direction),
+                            )
+                        })
                 })
                 .collect()
         };
-        for index in attached {
+        for (index, is_end, direction) in attached {
             let segment = &projection.segments[index];
             let Some(approach) = road_for_segment(program, segment) else {
+                continue;
+            };
+            let edge_name = direction
+                .map(|direction| intersection.road_name_for_direction(direction))
+                .unwrap_or_else(|| intersection.road_name_for_segment(segment, is_end));
+            let Some(edge) = program
+                .statements
+                .iter()
+                .find_map(|statement| match statement {
+                    Statement::Road(road) if road.name == edge_name => Some(road),
+                    _ => None,
+                })
+            else {
                 continue;
             };
             if !approach
@@ -6089,6 +6493,7 @@ struct IntersectionPaint {
     square: egui::Rect,
     closed: RoadElementKind,
     ports: Vec<IntersectionPort>,
+    mixed: bool,
 }
 
 fn port_sides(arms: &[IntersectionArm<'_>]) -> Vec<PortSide> {
@@ -6147,7 +6552,13 @@ fn intersection_port_with_sign(
     sign: f32,
 ) -> IntersectionPort {
     let depth = half * 0.44;
-    let mut offset = -half;
+    let mut offset = -road
+        .elements
+        .iter()
+        .map(|element| map::element_world_width(element.kind))
+        .sum::<f32>()
+        * zoom
+        * 0.5;
     let bands = road
         .elements
         .iter()
@@ -6193,11 +6604,28 @@ fn intersection_paint(
             direction,
         });
     }
-    let half = road
-        .elements
+    let half = program
+        .statements
         .iter()
-        .map(|element| map::element_world_width(element.kind))
-        .sum::<f32>()
+        .filter_map(|statement| match statement {
+            Statement::Road(profile)
+                if profile.name == intersection.road_name
+                    || intersection
+                        .arm_roads
+                        .iter()
+                        .any(|(_, name)| *name == profile.name) =>
+            {
+                Some(
+                    profile
+                        .elements
+                        .iter()
+                        .map(|element| map::element_world_width(element.kind))
+                        .sum::<f32>(),
+                )
+            }
+            _ => None,
+        })
+        .fold(0.0_f32, f32::max)
         * zoom
         * 0.5;
     let closed = if road
@@ -6219,7 +6647,17 @@ fn intersection_paint(
         port_sides(&arms)
             .into_iter()
             .zip(&arms)
-            .map(|(side, arm)| intersection_port(arm, side, junction, half, road, zoom))
+            .filter_map(|(side, arm)| {
+                let name = intersection.road_name_for_segment(arm.segment, arm.is_end);
+                let profile = program
+                    .statements
+                    .iter()
+                    .find_map(|statement| match statement {
+                        Statement::Road(profile) if profile.name == name => Some(profile),
+                        _ => None,
+                    })?;
+                Some(intersection_port(arm, side, junction, half, profile, zoom))
+            })
             .collect()
     } else {
         intersection
@@ -6237,6 +6675,7 @@ fn intersection_paint(
         square: egui::Rect::from_center_size(junction, egui::vec2(half * 2.0, half * 2.0)),
         closed,
         ports,
+        mixed: !intersection.arm_roads.is_empty(),
     })
 }
 
@@ -6260,7 +6699,7 @@ fn paint_intersection(
     );
     let center = paint.square.center();
     let half = paint.square.width() * 0.5;
-    if paint.ports.len() == 4 {
+    if paint.ports.len() == 4 && !paint.mixed {
         // Each corner follows the port's outer bands. The carriageway stays
         // clear across the junction instead of forming four pointed wedges.
         if let Some(north) = paint.ports.iter().find(|port| port.side == PortSide::North) {
@@ -6397,6 +6836,49 @@ fn corner_disks(
         .collect()
 }
 
+fn segment_is_straight(segment: &map::Segment) -> bool {
+    let dx = segment.end.x - segment.start.x;
+    let dy = segment.end.y - segment.start.y;
+    let length_sq = dx * dx + dy * dy;
+    if length_sq < 0.000001 {
+        return false;
+    }
+    let mut prior_t = 0.0;
+    for control in segment.controls {
+        let px = control.x - segment.start.x;
+        let py = control.y - segment.start.y;
+        let t = (px * dx + py * dy) / length_sq;
+        if (px * dy - py * dx).abs() > length_sq * 0.0001 || t < prior_t || t > 1.0 {
+            return false;
+        }
+        prior_t = t;
+    }
+    true
+}
+
+fn road_curve_samples(segment: &map::Segment) -> usize {
+    if segment_is_straight(segment) {
+        return 1;
+    }
+    let dx = segment.end.x - segment.start.x;
+    let dy = segment.end.y - segment.start.y;
+    let length = (dx * dx + dy * dy).sqrt().max(0.00001);
+    let deviation = segment
+        .controls
+        .iter()
+        .map(|point| {
+            ((point.x - segment.start.x) * dy - (point.y - segment.start.y) * dx).abs() / length
+        })
+        .fold(0.0, f32::max);
+    if deviation <= 0.025 {
+        4
+    } else if deviation <= 0.15 {
+        8
+    } else {
+        32
+    }
+}
+
 fn paint_road_segment(
     painter: &egui::Painter,
     rect: egui::Rect,
@@ -6407,7 +6889,23 @@ fn paint_road_segment(
     selected: bool,
     palette: EditorPalette,
 ) {
-    let samples = 32;
+    let detailed_markings = road.is_some_and(|road| {
+        road.elements.iter().any(|element| {
+            matches!(
+                element.kind,
+                RoadElementKind::TrainTrack
+                    | RoadElementKind::TramTrack
+                    | RoadElementKind::SubwayTrack
+                    | RoadElementKind::Runway
+                    | RoadElementKind::Taxiway
+            )
+        })
+    });
+    let samples = if detailed_markings {
+        32
+    } else {
+        road_curve_samples(segment)
+    };
     let spine: Vec<_> = (0..=samples)
         .map(|step| {
             screen_of(
@@ -6441,6 +6939,7 @@ fn paint_road_segment(
     ));
     let mut offset = -total / 2.0;
     let mut track_bands = Vec::new();
+    let mut airfield_bands = Vec::new();
     for kind in kinds {
         let width = map_element_width(kind, zoom);
         let center = offset + width / 2.0;
@@ -6459,12 +6958,24 @@ fn paint_road_segment(
         ) {
             track_bands.push((kind, center, width));
         }
+        if matches!(kind, RoadElementKind::Runway | RoadElementKind::Taxiway) {
+            airfield_bands.push((kind, center, width));
+        }
         offset += width;
     }
-    painter.add(egui::Shape::line(
-        spine.clone(),
-        egui::Stroke::new((zoom * 0.004).clamp(0.8, 12.0), palette.map_centerline),
-    ));
+    if !road.is_some_and(|road| {
+        road.elements.iter().any(|element| {
+            matches!(
+                element.kind,
+                RoadElementKind::Runway | RoadElementKind::Taxiway | RoadElementKind::Apron
+            )
+        })
+    }) {
+        painter.add(egui::Shape::line(
+            spine.clone(),
+            egui::Stroke::new((zoom * 0.004).clamp(0.8, 12.0), palette.map_centerline),
+        ));
+    }
     for (kind, center, width) in track_bands {
         paint_track_markings(
             painter,
@@ -6475,6 +6986,69 @@ fn paint_road_segment(
             kind,
             palette.theme,
         );
+    }
+    for (kind, center, width) in airfield_bands {
+        paint_airfield_markings(painter, &spine, &normals, center, width, kind);
+    }
+}
+
+fn paint_airfield_markings(
+    painter: &egui::Painter,
+    spine: &[egui::Pos2],
+    normals: &[egui::Vec2],
+    center: f32,
+    width: f32,
+    kind: RoadElementKind,
+) {
+    match kind {
+        RoadElementKind::Runway => {
+            let white = Color32::from_rgb(235, 236, 224);
+            let stroke = egui::Stroke::new((width * 0.022).clamp(0.8, 2.5), white);
+            for side in [-1.0, 1.0] {
+                let edge: Vec<_> = spine
+                    .iter()
+                    .zip(normals)
+                    .map(|(point, normal)| *point + *normal * (center + side * width * 0.43))
+                    .collect();
+                painter.add(egui::Shape::line(edge, stroke));
+            }
+            for step in (3..spine.len().saturating_sub(3)).step_by(4) {
+                painter.line_segment(
+                    [
+                        spine[step] + normals[step] * center,
+                        spine[(step + 2).min(spine.len() - 1)]
+                            + normals[(step + 2).min(spine.len() - 1)] * center,
+                    ],
+                    egui::Stroke::new((width * 0.06).clamp(1.0, 5.0), white),
+                );
+            }
+            for step in [2, spine.len().saturating_sub(3)] {
+                if let (Some(point), Some(normal)) = (spine.get(step), normals.get(step)) {
+                    painter.line_segment(
+                        [
+                            *point + *normal * (center - width * 0.30),
+                            *point + *normal * (center + width * 0.30),
+                        ],
+                        egui::Stroke::new((width * 0.05).clamp(1.0, 4.0), white),
+                    );
+                }
+            }
+        }
+        RoadElementKind::Taxiway => {
+            let path: Vec<_> = spine
+                .iter()
+                .zip(normals)
+                .map(|(point, normal)| *point + *normal * center)
+                .collect();
+            painter.add(egui::Shape::line(
+                path,
+                egui::Stroke::new(
+                    (width * 0.1).clamp(1.5, 2.5),
+                    Color32::from_rgb(233, 191, 73),
+                ),
+            ));
+        }
+        _ => {}
     }
 }
 
@@ -6721,6 +7295,21 @@ impl eframe::App for RoadEditor {
                     self.dirty = self.program != self.saved_program;
                     self.status = format!("Saved {name}");
                 }
+                WebFileEvent::ModelLoaded { building, name, bytes } => {
+                    match scene3d::register_model(&name, &bytes) {
+                        Ok(()) => {
+                            if let Some(Statement::Call(call)) = self.program.statements.iter_mut().find(|statement| matches!(statement, Statement::Call(call) if call.assigns.first() == Some(&building) && call.name == "building")) {
+                                if matches!(call.args.get(1), Some(Argument::String(_))) { call.args.remove(1); }
+                                call.args.insert(1, Argument::String(format!("\"{name}\"")));
+                                self.dirty = true;
+                                self.scene_cache = None;
+                                self.web_scene_build = None;
+                                self.status = format!("Loaded {name} for {building}");
+                            }
+                        }
+                        Err(error) => self.status = format!("Could not load {name}: {error}"),
+                    }
+                }
                 WebFileEvent::Message(message) => self.status = message,
             }
         }
@@ -6899,6 +7488,9 @@ fn kind_label(kind: RoadElementKind) -> &'static str {
         RoadElementKind::TrainTrack => "Train track",
         RoadElementKind::TramTrack => "Tram track",
         RoadElementKind::SubwayTrack => "Subway track",
+        RoadElementKind::Runway => "Runway",
+        RoadElementKind::Taxiway => "Taxiway",
+        RoadElementKind::Apron => "Apron",
     }
 }
 
@@ -6917,6 +7509,9 @@ fn kind_short(kind: RoadElementKind) -> &'static str {
         RoadElementKind::TrainTrack => "TRAIN",
         RoadElementKind::TramTrack => "TRAM",
         RoadElementKind::SubwayTrack => "SUBWAY",
+        RoadElementKind::Runway => "RUNWAY",
+        RoadElementKind::Taxiway => "TAXI",
+        RoadElementKind::Apron => "APRON",
     }
 }
 
@@ -6936,6 +7531,9 @@ fn kind_color(kind: RoadElementKind, theme: egui::Theme) -> Color32 {
             RoadElementKind::TrainTrack => Color32::from_rgb(102, 91, 77),
             RoadElementKind::TramTrack => Color32::from_rgb(93, 105, 112),
             RoadElementKind::SubwayTrack => Color32::from_rgb(65, 73, 102),
+            RoadElementKind::Runway => Color32::from_rgb(65, 70, 76),
+            RoadElementKind::Taxiway => Color32::from_rgb(75, 81, 87),
+            RoadElementKind::Apron => Color32::from_rgb(101, 109, 113),
         },
         egui::Theme::Light => match kind {
             RoadElementKind::BuildingEdge => Color32::from_rgb(190, 198, 205),
@@ -6951,6 +7549,9 @@ fn kind_color(kind: RoadElementKind, theme: egui::Theme) -> Color32 {
             RoadElementKind::TrainTrack => Color32::from_rgb(166, 151, 130),
             RoadElementKind::TramTrack => Color32::from_rgb(169, 178, 182),
             RoadElementKind::SubwayTrack => Color32::from_rgb(111, 123, 158),
+            RoadElementKind::Runway => Color32::from_rgb(83, 89, 94),
+            RoadElementKind::Taxiway => Color32::from_rgb(111, 117, 120),
+            RoadElementKind::Apron => Color32::from_rgb(158, 163, 160),
         },
     }
 }
@@ -6970,6 +7571,9 @@ fn element_width(kind: RoadElementKind) -> f32 {
         RoadElementKind::TrainTrack => 122.0,
         RoadElementKind::TramTrack => 112.0,
         RoadElementKind::SubwayTrack => 118.0,
+        RoadElementKind::Runway => 380.0,
+        RoadElementKind::Taxiway => 188.0,
+        RoadElementKind::Apron => 480.0,
     }
 }
 
@@ -7298,7 +7902,13 @@ mod tests {
             map_tool: MapTool::Select,
             camera_view: CameraView::Top,
             render_format: eframe::wgpu::TextureFormat::Bgra8Unorm,
+            projection_cache: None,
             scene_cache: None,
+            #[cfg(target_arch = "wasm32")]
+            web_scene_build: None,
+            #[cfg(not(target_arch = "wasm32"))]
+            scene_build: None,
+            design_analysis_cache: None,
             top_camera: (egui::Vec2::ZERO, 100.0),
             iso_camera: (egui::Vec2::ZERO, 55.0),
             orbit_angle: std::f32::consts::FRAC_PI_4,
@@ -7330,6 +7940,135 @@ mod tests {
             native_menu: None,
             mcp: None,
             map_rect: None,
+        }
+    }
+
+    #[test]
+    #[ignore = "manual target map scene timing"]
+    fn profile_target_scene_selection_cache() {
+        let mut editor = sample_editor();
+        editor.program = boot_program();
+        let projection = map::project(&editor.program);
+        let palette = editor_palette(egui::Theme::Dark);
+        let ctx = egui::Context::default();
+        let first = editor.scene_geometry(&ctx, palette, &projection);
+        editor.selected_segment = Some(projection.segments[0].source);
+        let start = std::time::Instant::now();
+        let second = editor.scene_geometry(&ctx, palette, &projection);
+        eprintln!("selection scene lookup={:?}", start.elapsed());
+        assert!(Arc::ptr_eq(&first, &second));
+    }
+
+    #[test]
+    fn projection_cache_tracks_edits_across_zoom_frames() {
+        let mut editor = sample_editor();
+        editor.program = boot_program();
+        let first = editor.projected_map();
+        editor.map_zoom += 10.0;
+        assert!(Arc::ptr_eq(&first, &editor.projected_map()));
+        let segment = first
+            .segments
+            .iter()
+            .find(|segment| segment.source.editable())
+            .unwrap();
+        let control = segment.controls[0];
+        assert!(map::set_control(
+            &mut editor.program,
+            segment.source,
+            false,
+            WorldPoint {
+                x: control.x + 0.5,
+                y: control.y
+            }
+        ));
+        let edited = editor.projected_map();
+        assert!(!Arc::ptr_eq(&first, &edited));
+        let changed = edited
+            .segments
+            .iter()
+            .find(|candidate| candidate.source == segment.source)
+            .unwrap();
+        assert_ne!(segment.controls, changed.controls);
+    }
+
+    #[test]
+    #[ignore = "manual target map scroll timing"]
+    fn profile_target_zoom_ui_frames() {
+        for camera in [CameraView::Top, CameraView::Isometric] {
+            let mut editor = sample_editor();
+            editor.program = boot_program();
+            editor.camera_view = camera;
+            let ctx = egui::Context::default();
+            let mut frames = Vec::new();
+            for frame in 0..24 {
+                editor.map_zoom = 45.0 + frame as f32 * 2.0;
+                let start = std::time::Instant::now();
+                let mut output = ctx.run_ui(egui::RawInput::default(), |ui| editor.map_canvas(ui));
+                output.textures_delta.clear();
+                if frame >= 4 {
+                    frames.push(start.elapsed());
+                }
+            }
+            frames.sort();
+            let label = match camera {
+                CameraView::Top => "Top",
+                CameraView::Isometric => "Isometric",
+            };
+            eprintln!(
+                "{label} zoom UI: median={:?} p95={:?} max={:?}",
+                frames[frames.len() / 2],
+                frames[frames.len() * 95 / 100],
+                frames.last().unwrap()
+            );
+        }
+    }
+
+    #[test]
+    #[ignore = "manual target map edit timing"]
+    fn profile_target_geometry_edit() {
+        let mut editor = sample_editor();
+        editor.program = boot_program();
+        let first = map::project(&editor.program);
+        let segment = first
+            .segments
+            .iter()
+            .find(|segment| segment.source.editable())
+            .unwrap();
+        let control = segment.controls[0];
+        let ctx = egui::Context::default();
+        let _ = editor.design_issues(&first);
+        let previous_scene = editor.scene_geometry(&ctx, editor_palette(egui::Theme::Dark), &first);
+        editor.dragging_control = Some((segment.source, false));
+        let start = std::time::Instant::now();
+        assert!(map::set_control(
+            &mut editor.program,
+            segment.source,
+            false,
+            WorldPoint {
+                x: control.x + 0.01,
+                y: control.y
+            }
+        ));
+        let edit = start.elapsed();
+        let projection = map::project(&editor.program);
+        let projected = start.elapsed();
+        let _issues = editor.design_issues(&projection);
+        let analysis = start.elapsed();
+        let scene = editor.scene_geometry(&ctx, editor_palette(egui::Theme::Dark), &projection);
+        assert!(Arc::ptr_eq(&previous_scene, &scene));
+        eprintln!(
+            "edit={:?} projection={:?} analysis={:?} scene={:?} total={:?}",
+            edit,
+            projected - edit,
+            analysis - projected,
+            start.elapsed() - analysis,
+            start.elapsed()
+        );
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            let completed = editor.scene_build.take().unwrap().recv().unwrap();
+            assert_eq!(completed.program, editor.program);
+            eprintln!("background scene ready after {:?}", start.elapsed());
         }
     }
 
@@ -7659,8 +8398,64 @@ mod tests {
             categories.insert(preset_category(&road.name));
         }
         assert!(program.statements.len() >= 12);
-        assert_eq!(categories.len(), 3);
+        assert_eq!(categories.len(), 4);
         assert_eq!(parse(&program.to_road_source()).unwrap(), program);
+    }
+
+    #[test]
+    fn target_boot_map_projects_all_road_placements_and_junctions() {
+        let program = boot_program();
+        let projection = map::project(&program);
+        assert_eq!(projection.unresolved, 0);
+        assert!(projection.segments.len() >= 700);
+        assert!(map::intersections(&program, &projection).len() >= 200);
+        let landscape = project_landscape_features(&program);
+        assert!(landscape.errors.is_empty());
+        let buildings = landscape
+            .features
+            .iter()
+            .filter(|feature| feature.kind == LandscapeKind::Building)
+            .count();
+        assert!(buildings >= 400, "the boot map should fill the city grids");
+        assert_eq!(landscape.features.len(), buildings + 15);
+        assert_eq!(
+            landscape
+                .features
+                .iter()
+                .filter(|feature| feature.kind == LandscapeKind::Land)
+                .count(),
+            7
+        );
+        let issues = design_rule_issues(
+            &program,
+            &projection,
+            &paint_profiles(&program, &projection),
+        );
+        assert!(
+            issues.is_empty(),
+            "target design issues: {:?}",
+            issues
+                .iter()
+                .map(|issue| (&issue.code, &issue.message))
+                .take(12)
+                .collect::<Vec<_>>()
+        );
+        for road_name in [
+            "freeway",
+            "ramp",
+            "local",
+            "airport_runway",
+            "airport_taxiway",
+            "airport_apron",
+        ] {
+            assert!(
+                projection
+                    .segments
+                    .iter()
+                    .any(|segment| segment.road_name == road_name),
+                "missing {road_name}"
+            );
+        }
     }
 
     #[test]
@@ -7671,6 +8466,9 @@ mod tests {
             ("train_line", RoadElementKind::TrainTrack),
             ("tram_line", RoadElementKind::TramTrack),
             ("subway_line", RoadElementKind::SubwayTrack),
+            ("airport_runway", RoadElementKind::Runway),
+            ("airport_taxiway", RoadElementKind::Taxiway),
+            ("airport_apron", RoadElementKind::Apron),
         ] {
             let road = program
                 .statements
@@ -7685,7 +8483,14 @@ mod tests {
                     .iter()
                     .filter(|element| element.kind == kind)
                     .count(),
-                2
+                if matches!(
+                    kind,
+                    RoadElementKind::Runway | RoadElementKind::Taxiway | RoadElementKind::Apron
+                ) {
+                    1
+                } else {
+                    2
+                }
             );
             assert!(map::element_world_width(kind) > 0.0);
             assert!(!kind_label(kind).is_empty());
@@ -8090,6 +8895,47 @@ mod tests {
     }
 
     #[test]
+    fn design_check_reports_a_ramp_that_nearly_meets_a_road() {
+        let program = parse("road ramp: verge-carlane-verge; end; road street: carlane; end; a = map_point(0, 0); b = map_point(1, 0); near = map_point(1.02, 0); c = map_point(2, 0); exit = ramp(a, 0.3, 0, 0.7, 0, b); street(near, 1.3, 0, 1.7, 0, c);").unwrap();
+        let projection = map::project(&program);
+        let issues = design_rule_issues(
+            &program,
+            &projection,
+            &paint_profiles(&program, &projection),
+        );
+        assert!(issues
+            .iter()
+            .any(|issue| issue.code == "unconnected_ramp_end"
+                && issue.at == WorldPoint { x: 1.0, y: 0.0 }));
+    }
+
+    #[test]
+    fn design_check_requires_a_junction_or_height_for_a_ramp_crossing() {
+        let source = "road ramp: verge-carlane-verge; end; road street: carlane; end; a = map_point(-2, 0); b = map_point(2, 0); c = map_point(0, -2); d = map_point(0, 2); exit = ramp(a, -0.7, 0, 0.7, 0, b); street(c, 0, -0.7, 0, 0.7, d);";
+        let at_grade = parse(source).unwrap();
+        let projection = map::project(&at_grade);
+        let issues = design_rule_issues(
+            &at_grade,
+            &projection,
+            &paint_profiles(&at_grade, &projection),
+        );
+        assert!(issues
+            .iter()
+            .any(|issue| issue.code == "ramp_at_grade_crossing"));
+
+        let bridged = parse(&format!("{source} elevation(exit, 0.2);")).unwrap();
+        let projection = map::project(&bridged);
+        let issues = design_rule_issues(
+            &bridged,
+            &projection,
+            &paint_profiles(&bridged, &projection),
+        );
+        assert!(!issues
+            .iter()
+            .any(|issue| issue.code == "ramp_at_grade_crossing"));
+    }
+
+    #[test]
     fn starter_city_defines_street_intersections_without_filling_the_cloverleaf() {
         let program = starter_program();
         let projection = map::project(&program);
@@ -8376,6 +9222,47 @@ mod tests {
                 .count(),
             1
         );
+    }
+
+    #[test]
+    fn mixed_intersection_paints_narrow_local_arm_without_design_mismatch() {
+        let program = parse("\
+            road arterial: sidewalk-carlane-carlane-sidewalk; end; \
+            road local: sidewalk-carlane-sidewalk; end; \
+            center = map_point(0, 0); west = map_point(-1, 0); east = map_point(1, 0); north = map_point(0, 1); \
+            arterial(west, -0.7, 0, -0.3, 0, center); \
+            arterial(center, 0.3, 0, 0.7, 0, east); \
+            local(center, 0, 0.3, 0, 0.7, north); \
+            intersection3(center, arterial, north, local);").unwrap();
+        let projection = map::project(&program);
+        let junction = map::intersections(&program, &projection).pop().unwrap();
+        let profiles = paint_profiles(&program, &projection);
+        assert!(design_rule_issues(&program, &projection, &profiles).is_empty());
+        let rect = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1000.0, 1000.0));
+        let paint = intersection_paint(
+            &program,
+            &projection,
+            &junction,
+            rect,
+            egui::Vec2::ZERO,
+            100.0,
+        )
+        .unwrap();
+        assert_eq!(paint.ports.len(), 3);
+        assert!(paint.mixed);
+        let north = paint
+            .ports
+            .iter()
+            .find(|port| port.side == PortSide::North)
+            .unwrap();
+        let east = paint
+            .ports
+            .iter()
+            .find(|port| port.side == PortSide::East)
+            .unwrap();
+        let north_width: f32 = north.bands.iter().map(|(_, band)| band.width()).sum();
+        let east_width: f32 = east.bands.iter().map(|(_, band)| band.height()).sum();
+        assert!(north_width < east_width);
     }
 
     #[test]
@@ -8855,6 +9742,26 @@ mod tests {
                 iso_ground_point(rect, egui::vec2(31.0, -14.0), 73.0, target, angle, screen);
             assert!((recovered.x - point.x).abs() < 0.0001);
             assert!((recovered.y - point.y).abs() < 0.0001);
+        }
+    }
+
+    #[test]
+    fn isometric_zoom_keeps_cursor_ground_point_fixed() {
+        let rect = egui::Rect::from_min_size(egui::pos2(10.0, 20.0), egui::vec2(640.0, 480.0));
+        let pointer = egui::pos2(531.0, 147.0);
+        let target = WorldPoint { x: 2.0, y: -3.0 };
+        for angle in [0.0, 0.7, 2.3] {
+            let mut pan = egui::vec2(31.0, -14.0);
+            let mut zoom = 73.0;
+            let anchored = iso_ground_point(rect, pan, zoom, target, angle, pointer);
+            for scroll in [120.0, -90.0, 10000.0, -10000.0] {
+                iso_zoom_at_pointer(rect, &mut pan, &mut zoom, target, angle, pointer, scroll);
+                assert!(
+                    pointer.distance(iso_screen(rect, pan, zoom, target, angle, anchored, 0.0))
+                        < 0.01
+                );
+            }
+            assert_eq!(zoom, 18.0);
         }
     }
 

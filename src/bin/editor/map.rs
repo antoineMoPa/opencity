@@ -1,7 +1,7 @@
 //! Roads use cubic Bézier control points. A junction call gives connected roads
 //! a persistent shared endpoint; older numeric road calls remain readable.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use opencity::{Argument, Call, Program, RoadDefinition, RoadElement, RoadElementKind, Statement};
 
@@ -147,6 +147,7 @@ impl Segment {
     }
 }
 
+#[derive(Clone)]
 pub struct Projection {
     pub segments: Vec<Segment>,
     pub points: Vec<MapPoint>,
@@ -193,7 +194,42 @@ pub struct Intersection {
     pub position: WorldPoint,
     pub kind: IntersectionKind,
     pub road_name: String,
+    pub arm_roads: Vec<(WorldPoint, String)>,
     pub ports: Vec<IntersectionPort>,
+}
+
+impl Intersection {
+    pub fn road_name_for_direction(&self, direction: WorldPoint) -> &str {
+        self.arm_roads
+            .iter()
+            .find(|(side, _)| side.x == direction.x && side.y == direction.y)
+            .map(|(_, name)| name.as_str())
+            .unwrap_or(&self.road_name)
+    }
+
+    pub fn road_name_for_segment(&self, segment: &Segment, is_end: bool) -> &str {
+        let tangent = segment.tangent_at(if is_end { 1.0 } else { 0.0 });
+        let outward = if is_end {
+            WorldPoint {
+                x: -tangent.x,
+                y: -tangent.y,
+            }
+        } else {
+            tangent
+        };
+        let direction = if outward.x.abs() > outward.y.abs() {
+            WorldPoint {
+                x: outward.x.signum(),
+                y: 0.0,
+            }
+        } else {
+            WorldPoint {
+                x: 0.0,
+                y: outward.y.signum(),
+            }
+        };
+        self.road_name_for_direction(direction)
+    }
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -237,7 +273,11 @@ fn port_direction_from_name(name: &str) -> Option<WorldPoint> {
 
 pub fn right_angle(projection: &Projection, point_ref: &str) -> bool {
     let arms = intersection_arms(projection, point_ref);
-    let [(first, first_end), (second, second_end)] = arms.as_slice() else {
+    right_angle_arms(projection, &arms)
+}
+
+fn right_angle_arms(projection: &Projection, arms: &[(usize, bool)]) -> bool {
+    let [(first, first_end), (second, second_end)] = arms else {
         return false;
     };
     let a = projection.segments[*first].tangent_at(if *first_end { 1.0 } else { 0.0 });
@@ -264,38 +304,126 @@ pub fn intersection_arms(projection: &Projection, point_ref: &str) -> Vec<(usize
 }
 
 pub fn intersections(program: &Program, projection: &Projection) -> Vec<Intersection> {
-    program.statements.iter().filter_map(|statement| {
-        let Statement::Call(call) = statement else { return None };
-        let kind = IntersectionKind::from_call_name(&call.name)?;
-        let point_ref = match call.args.first()? { Argument::Identifier(name) => name, _ => return None };
-        let placed = call.args.len() == kind.arm_count() * 2 + 2;
-        if !placed && !matches!(call.args.len(), 1 | 2) { return None; }
-        let point = projection.points.iter().find(|point| point.name == *point_ref)?;
-        if !program.statements.iter().any(|statement| matches!(statement,
-            Statement::Call(call) if call.name == "map_point" && call.assigns.first() == Some(point_ref)))
-            || (!placed && intersection_arms(projection, point_ref).len() != kind.arm_count())
-            || (!placed && kind == IntersectionKind::RightTurn && !right_angle(projection, point_ref)) {
-            return None;
+    let mut points = HashMap::with_capacity(projection.points.len());
+    for point in &projection.points {
+        points.entry(point.name.as_str()).or_insert(point);
+    }
+    let map_points: HashSet<&str> = program
+        .statements
+        .iter()
+        .filter_map(|statement| match statement {
+            Statement::Call(call) if call.name == "map_point" => {
+                call.assigns.first().map(String::as_str)
+            }
+            _ => None,
+        })
+        .collect();
+    let roads: HashSet<&str> = program
+        .statements
+        .iter()
+        .filter_map(|statement| match statement {
+            Statement::Road(road) => Some(road.name.as_str()),
+            _ => None,
+        })
+        .collect();
+    let mut arms_by_point: HashMap<&str, Vec<(usize, bool)>> = HashMap::new();
+    for (index, segment) in projection.segments.iter().enumerate() {
+        if let Some(name) = segment.start_ref.as_deref() {
+            arms_by_point.entry(name).or_default().push((index, false));
         }
-        let road_name = match call.args.get(1) {
-            Some(Argument::Identifier(name)) => name.clone(),
-            None => projection.segments.get(intersection_arms(projection, point_ref)[0].0)?.road_name.clone(),
-            _ => return None,
-        };
-        if !program.statements.iter().any(|statement| matches!(statement,
-            Statement::Road(road) if road.name == road_name)) { return None; }
-        let ports = if placed {
-            call.args[2..].chunks_exact(2).map(|pair| {
-                let (Argument::Identifier(side), Argument::Identifier(name)) = (&pair[0], &pair[1]) else { return None };
-                let direction = port_direction_from_name(side)?;
-                let port = projection.points.iter().find(|point| point.name == *name)?;
-                Some(IntersectionPort {
-                    point_ref: name.clone(), position: port.position, direction,
-                })
-            }).collect::<Option<Vec<_>>>()?
-        } else { Vec::new() };
-        Some(Intersection { point_ref: point_ref.clone(), position: point.position, kind, road_name, ports })
-    }).collect()
+        if let Some(name) = segment.end_ref.as_deref() {
+            arms_by_point.entry(name).or_default().push((index, true));
+        }
+    }
+    program
+        .statements
+        .iter()
+        .filter_map(|statement| {
+            let Statement::Call(call) = statement else {
+                return None;
+            };
+            let kind = IntersectionKind::from_call_name(&call.name)?;
+            let point_ref = match call.args.first()? {
+                Argument::Identifier(name) => name,
+                _ => return None,
+            };
+            let placed = call.args.len() == kind.arm_count() * 2 + 2
+                && call.args[2..].chunks_exact(2).all(|pair| {
+                    matches!((&pair[0], &pair[1]),
+                        (Argument::Identifier(side), Argument::Identifier(name))
+                        if port_direction_from_name(side).is_some() && points.contains_key(name.as_str()))
+                });
+            if !placed && (call.args.len() < 2 || call.args.len() % 2 != 0) {
+                return None;
+            }
+            let point = points.get(point_ref.as_str())?;
+            let arms = arms_by_point
+                .get(point_ref.as_str())
+                .map(Vec::as_slice)
+                .unwrap_or(&[]);
+            if !map_points.contains(point_ref.as_str())
+                || (!placed && arms.len() != kind.arm_count())
+                || (!placed
+                    && kind == IntersectionKind::RightTurn
+                    && !right_angle_arms(projection, arms))
+            {
+                return None;
+            }
+            let road_name = match call.args.get(1) {
+                Some(Argument::Identifier(name)) => name.clone(),
+                None => projection.segments.get(arms.first()?.0)?.road_name.clone(),
+                _ => return None,
+            };
+            if !roads.contains(road_name.as_str()) {
+                return None;
+            }
+            let arm_roads = if placed {
+                Vec::new()
+            } else {
+                let mut mapped = Vec::new();
+                for pair in call.args[2..].chunks_exact(2) {
+                    let (Argument::Identifier(side), Argument::Identifier(name)) = (&pair[0], &pair[1]) else { return None };
+                    let direction = port_direction_from_name(side)?;
+                    if !roads.contains(name.as_str())
+                        || mapped.iter().any(|(existing, _): &(WorldPoint, String)| *existing == direction)
+                    {
+                        return None;
+                    }
+                    mapped.push((direction, name.clone()));
+                }
+                mapped
+            };
+            let ports = if placed {
+                call.args[2..]
+                    .chunks_exact(2)
+                    .map(|pair| {
+                        let (Argument::Identifier(side), Argument::Identifier(name)) =
+                            (&pair[0], &pair[1])
+                        else {
+                            return None;
+                        };
+                        let direction = port_direction_from_name(side)?;
+                        let port = points.get(name.as_str())?;
+                        Some(IntersectionPort {
+                            point_ref: name.clone(),
+                            position: port.position,
+                            direction,
+                        })
+                    })
+                    .collect::<Option<Vec<_>>>()?
+            } else {
+                Vec::new()
+            };
+            Some(Intersection {
+                point_ref: point_ref.clone(),
+                position: point.position,
+                kind,
+                road_name,
+                arm_roads,
+                ports,
+            })
+        })
+        .collect()
 }
 
 pub fn place_intersection(
@@ -657,7 +785,7 @@ impl MapPoint {
 fn number(argument: &Argument) -> Option<f32> {
     match argument {
         Argument::Number(text) => text.parse::<f32>().ok().filter(|value| value.is_finite()),
-        Argument::Identifier(_) => None,
+        Argument::Identifier(_) | Argument::String(_) => None,
     }
 }
 
@@ -683,20 +811,19 @@ fn line_controls(start: WorldPoint, end: WorldPoint) -> [WorldPoint; 2] {
 
 fn point_reference<'a>(
     argument: &Argument,
-    points: &'a [MapPoint],
+    points: &HashMap<&str, &'a MapPoint>,
 ) -> Option<(&'a MapPoint, String)> {
     let Argument::Identifier(name) = argument else {
         return None;
     };
     points
-        .iter()
-        .find(|point| point.name == *name)
-        .map(|point| (point, name.clone()))
+        .get(name.as_str())
+        .map(|point| (*point, name.clone()))
 }
 
 fn segment_points(
     call: &Call,
-    points: &[MapPoint],
+    points: &HashMap<&str, &MapPoint>,
 ) -> Option<(
     WorldPoint,
     WorldPoint,
@@ -854,6 +981,40 @@ pub fn project(program: &Program) -> Projection {
 }
 
 fn project_with_points(program: &Program, points: &[MapPoint]) -> Projection {
+    let mut point_by_name = HashMap::with_capacity(points.len());
+    for point in points {
+        point_by_name.entry(point.name.as_str()).or_insert(point);
+    }
+    let mut elevations = HashMap::new();
+    let mut grades = HashMap::new();
+    for statement in &program.statements {
+        let Statement::Call(call) = statement else {
+            continue;
+        };
+        match (call.name.as_str(), call.args.as_slice()) {
+            ("elevation", [Argument::Identifier(name), Argument::Number(value)]) => {
+                if let Some(height) = value
+                    .parse::<f32>()
+                    .ok()
+                    .filter(|height| height.is_finite())
+                {
+                    elevations.insert(name.as_str(), height);
+                }
+            }
+            (
+                "grade",
+                [Argument::Identifier(name), Argument::Number(start), Argument::Number(end)],
+            ) => {
+                if let (Some(start), Some(end)) = (
+                    start.parse::<f32>().ok().filter(|value| value.is_finite()),
+                    end.parse::<f32>().ok().filter(|value| value.is_finite()),
+                ) {
+                    grades.insert(name.as_str(), (start, end));
+                }
+            }
+            _ => {}
+        }
+    }
     let roads: HashSet<&str> = program
         .statements
         .iter()
@@ -878,11 +1039,12 @@ fn project_with_points(program: &Program, points: &[MapPoint]) -> Projection {
             continue;
         };
         if roads.contains(call.name.as_str()) {
-            if let Some((start, end, controls, start_ref, end_ref)) = segment_points(call, &points)
+            if let Some((start, end, controls, start_ref, end_ref)) =
+                segment_points(call, &point_by_name)
             {
                 let (start_z, end_z) = call.assigns.first().map_or((0.0, 0.0), |name| {
-                    opencity::grade_of(program, name).unwrap_or_else(|| {
-                        let z = opencity::elevation_of(program, name).unwrap_or(0.0);
+                    grades.get(name.as_str()).copied().unwrap_or_else(|| {
+                        let z = elevations.get(name.as_str()).copied().unwrap_or(0.0);
                         (z, z)
                     })
                 });
@@ -992,7 +1154,9 @@ fn project_block_road_calls(
     for (call_index, inner) in block.calls.iter().enumerate() {
         if roads.contains(inner.name.as_str()) {
             // Block roads use local numeric coordinates; global map points are not local.
-            if let Some((start, end, controls, start_ref, end_ref)) = segment_points(inner, &[]) {
+            if let Some((start, end, controls, start_ref, end_ref)) =
+                segment_points(inner, &HashMap::new())
+            {
                 let (local_start_z, local_end_z) =
                     inner.assigns.first().map_or((0.0, 0.0), |name| {
                         opencity::grade_in_calls(&local_calls, name).unwrap_or_else(|| {
@@ -1068,6 +1232,9 @@ pub fn element_world_width(kind: opencity::RoadElementKind) -> f32 {
         RoadElementKind::TrainTrack => 0.055,
         RoadElementKind::TramTrack => 0.048,
         RoadElementKind::SubwayTrack => 0.052,
+        RoadElementKind::Runway => 0.18,
+        RoadElementKind::Taxiway => 0.075,
+        RoadElementKind::Apron => 0.24,
     }
 }
 
@@ -1367,7 +1534,6 @@ pub fn create_two_segment_split(
     true
 }
 
-#[cfg(test)]
 pub fn set_split_mode(program: &mut Program, ramp: &str, mode: SplitMode) -> bool {
     for statement in &mut program.statements {
         let Statement::Call(call) = statement else {
@@ -1821,7 +1987,10 @@ pub fn attach_endpoint_to_port(
                 .ports
                 .iter()
                 .any(|port| port.point_ref == port_ref)
-                && intersection.road_name == segment.road_name
+                && intersection.ports.iter().any(|port| {
+                    port.point_ref == port_ref
+                        && intersection.road_name_for_direction(port.direction) == segment.road_name
+                })
         })
     else {
         return false;
@@ -2697,6 +2866,36 @@ pub fn remove_unused_point(program: &mut Program, name: &str) {
 mod tests {
     use super::*;
     use opencity::parse;
+
+    #[test]
+    fn mixed_intersection_maps_each_arm_to_its_road_profile() {
+        let program = parse("\
+            road arterial: sidewalk-carlane-carlane-sidewalk; end; \
+            road local: sidewalk-carlane-sidewalk; end; \
+            center = map_point(0, 0); west = map_point(-1, 0); east = map_point(1, 0); north = map_point(0, 1); \
+            arterial(west, -0.7, 0, -0.3, 0, center); \
+            arterial(center, 0.3, 0, 0.7, 0, east); \
+            local(center, 0, 0.3, 0, 0.7, north); \
+            intersection3(center, arterial, north, local);").unwrap();
+        let projection = project(&program);
+        assert_eq!(projection.unresolved, 0);
+        let junction = intersections(&program, &projection).pop().unwrap();
+        assert_eq!(
+            junction.road_name_for_direction(WorldPoint { x: 0.0, y: 1.0 }),
+            "local"
+        );
+        assert_eq!(
+            junction.road_name_for_direction(WorldPoint { x: 1.0, y: 0.0 }),
+            "arterial"
+        );
+        for (index, is_end) in intersection_arms(&projection, "center") {
+            let segment = &projection.segments[index];
+            assert_eq!(
+                junction.road_name_for_segment(segment, is_end),
+                segment.road_name
+            );
+        }
+    }
 
     #[test]
     fn standalone_intersection_has_edge_ports_and_roads_stop_at_them() {

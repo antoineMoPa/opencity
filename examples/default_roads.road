@@ -58,3 +58,12 @@ end;
 road interstate_four_lane:
     verge-carlane-carlane-carlane-carlane-middle-carlane-carlane-carlane-carlane-verge;
 end;
+road airport_runway:
+    verge-runway-verge;
+end;
+road airport_taxiway:
+    verge-taxiway-verge;
+end;
+road airport_apron:
+    apron;
+end;
