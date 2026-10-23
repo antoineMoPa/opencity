@@ -1,0 +1,6 @@
+[submodule "crates/egui_command_palette"]
+	path = crates/egui_command_palette
+	url = https://github.com/antoineMoPa/egui_command_palette.git
+[submodule "crates/egui_frames"]
+	path = crates/egui_frames
+	url = https://github.com/antoineMoPa/egui_frames.git
