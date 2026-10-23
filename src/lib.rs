@@ -18,6 +18,12 @@ mod lexer;
 mod parser;
 mod writer;
 
+#[cfg(all(feature = "editor", target_arch = "wasm32"))]
+extern crate self as opencity;
+#[cfg(all(feature = "editor", target_arch = "wasm32"))]
+#[path = "bin/editor.rs"]
+mod web_editor;
+
 pub use ast::{
     Argument, BlockDefinition, Call, Program, RoadDefinition, RoadElement, RoadElementKind,
     Statement,

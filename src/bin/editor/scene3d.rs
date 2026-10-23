@@ -74,9 +74,9 @@ fn capture_geometry(
     }
 }
 
-fn road_height(samples: &[WorldPoint; 65], heights: &[f32; 65], point: WorldPoint) -> f32 {
+fn road_height(samples: &[WorldPoint; 17], heights: &[f32; 17], point: WorldPoint) -> f32 {
     let mut best = (f32::INFINITY, 0.0);
-    for step in 0..64 {
+    for step in 0..16 {
         let a = samples[step];
         let b = samples[step + 1];
         let dx = b.x - a.x;
@@ -217,8 +217,8 @@ pub fn build_scene(
                 _ => None,
             });
         let is_selected = selected.contains(&segment.source);
-        let samples = std::array::from_fn(|step| segment.point_at(step as f32 / 64.0));
-        let heights = std::array::from_fn(|step| segment.height_at(step as f32 / 64.0));
+        let samples = std::array::from_fn(|step| segment.point_at(step as f32 / 16.0));
+        let heights = std::array::from_fn(|step| segment.height_at(step as f32 / 16.0));
         capture_geometry(
             &ctx,
             |painter| {
@@ -288,13 +288,22 @@ pub fn build_scene(
 #[repr(C)]
 #[derive(Clone, Copy)]
 struct GpuVertex {
-    position: [f32; 3],
+    world: [f32; 4],
     color: [f32; 4],
 }
 
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct CameraUniform {
+    view: [f32; 4],
+    target: [f32; 4],
+    viewport: [f32; 4],
+    elevation: [f32; 4],
+}
+
 fn bytes_of<T>(values: &[T]) -> &[u8] {
-    // GpuVertex contains only initialized f32 fields; the buffers are consumed
-    // immediately by wgpu and never interpreted as Rust objects again.
+    // GpuVertex and CameraUniform contain only initialized f32 fields.
+    // wgpu consumes these bytes without interpreting them as Rust objects.
     unsafe {
         std::slice::from_raw_parts(values.as_ptr().cast::<u8>(), std::mem::size_of_val(values))
     }
@@ -314,6 +323,10 @@ pub struct SceneCallback {
 
 struct RenderResources {
     scene_pipeline: wgpu::RenderPipeline,
+    camera_buffer: wgpu::Buffer,
+    camera_bind_group: wgpu::BindGroup,
+    scene_buffer: Option<(Arc<Scene>, wgpu::Buffer)>,
+    target: Option<RenderTarget>,
     composite_pipeline: wgpu::RenderPipeline,
     composite_layout: wgpu::BindGroupLayout,
     sampler: wgpu::Sampler,
@@ -326,78 +339,22 @@ struct FrameResources {
     depth: wgpu::TextureView,
     bind_group: wgpu::BindGroup,
 }
+struct RenderTarget {
+    width: u32,
+    height: u32,
+    color: wgpu::TextureView,
+    depth: wgpu::TextureView,
+    bind_group: wgpu::BindGroup,
+}
 
-const SHADER: &str = r#"
-struct VertexInput { @location(0) position: vec3<f32>, @location(1) color: vec4<f32> };
-struct VertexOutput { @builtin(position) position: vec4<f32>, @location(0) color: vec4<f32> };
-@vertex fn scene_vs(input: VertexInput) -> VertexOutput {
-    var output: VertexOutput;
-    output.position = vec4<f32>(input.position, 1.0);
-    output.color = input.color;
-    return output;
-}
-@fragment fn scene_fs(input: VertexOutput) -> @location(0) vec4<f32> { return input.color; }
-@group(0) @binding(0) var scene_texture: texture_2d<f32>;
-@group(0) @binding(1) var scene_sampler: sampler;
-struct CompositeOutput { @builtin(position) position: vec4<f32>, @location(0) uv: vec2<f32> };
-@vertex fn composite_vs(@builtin(vertex_index) vertex: u32) -> CompositeOutput {
-    var positions = array<vec2<f32>, 6>(
-        vec2<f32>(-1.0,-1.0), vec2<f32>(1.0,-1.0), vec2<f32>(1.0,1.0),
-        vec2<f32>(-1.0,-1.0), vec2<f32>(1.0,1.0), vec2<f32>(-1.0,1.0));
-    var output: CompositeOutput;
-    output.position = vec4<f32>(positions[vertex], 0.0, 1.0);
-    output.uv = vec2<f32>(positions[vertex].x * 0.5 + 0.5,
-        0.5 - positions[vertex].y * 0.5);
-    return output;
-}
-@fragment fn composite_fs(input: CompositeOutput) -> @location(0) vec4<f32> {
-    return textureSample(scene_texture, scene_sampler, input.uv);
-}
-@fragment fn composite_fs_linear(input: CompositeOutput) -> @location(0) vec4<f32> {
-    let gamma = textureSample(scene_texture, scene_sampler, input.uv);
-    let low = gamma.rgb / 12.92;
-    let high = pow((gamma.rgb + vec3<f32>(0.055)) / 1.055, vec3<f32>(2.4));
-    return vec4<f32>(select(low, high, gamma.rgb > vec3<f32>(0.04045)), gamma.a);
-}
-"#;
-
-impl SceneCallback {
-    fn projected(&self, point: WorldPoint, height: f32, depth_bias: f32) -> [f32; 3] {
-        let screen = match self.camera {
-            CameraView::Top => screen_of(self.rect, self.pan, self.zoom, point),
-            CameraView::Isometric => iso_screen(
-                self.rect,
-                self.pan,
-                self.zoom,
-                self.target,
-                self.angle,
-                point,
-                height,
-            ),
-        };
-        let x = 2.0 * (screen.x - self.rect.min.x) / self.rect.width() - 1.0;
-        let y = 1.0 - 2.0 * (screen.y - self.rect.min.y) / self.rect.height();
-        let distance = match self.camera {
-            CameraView::Top => -height * 8.0,
-            CameraView::Isometric => {
-                let dx = point.x - self.target.x;
-                let dy = point.y - self.target.y;
-                -dx * self.angle.sin() + dy * self.angle.cos() - height * ISO_ELEVATION.tan()
-            }
-        };
-        [
-            x,
-            y,
-            (0.5 + (distance + depth_bias) / 2000.0).clamp(0.0, 1.0),
-        ]
-    }
-}
+const SCENE_SHADER: &str = include_str!("shaders/scene.wgsl");
+const COMPOSITE_SHADER: &str = include_str!("shaders/composite.wgsl");
 
 impl egui_wgpu::CallbackTrait for SceneCallback {
     fn prepare(
         &self,
         device: &wgpu::Device,
-        _queue: &wgpu::Queue,
+        queue: &wgpu::Queue,
         screen: &egui_wgpu::ScreenDescriptor,
         encoder: &mut wgpu::CommandEncoder,
         resources: &mut egui_wgpu::CallbackResources,
@@ -414,71 +371,128 @@ impl egui_wgpu::CallbackTrait for SceneCallback {
         {
             resources.insert(RenderResources::new(device, self.target_format));
         }
-        let renderer = resources.get::<RenderResources>().unwrap();
-        let vertices: Vec<_> = self
-            .scene
-            .vertices
-            .iter()
-            .map(|vertex| {
-                let rgba = vertex.color.to_array();
-                GpuVertex {
-                    position: self.projected(vertex.point, vertex.height, vertex.depth_bias),
-                    color: rgba.map(|channel| channel as f32 / 255.0),
-                }
-            })
-            .collect();
-        let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("opencity scene vertices"),
-            contents: bytes_of(&vertices),
-            usage: wgpu::BufferUsages::VERTEX,
-        });
-        let size = wgpu::Extent3d {
-            width,
-            height,
-            depth_or_array_layers: 1,
-        };
-        let color_texture = device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("opencity scene color"),
-            size,
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::Rgba8Unorm,
-            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
-            view_formats: &[],
-        });
-        let depth_texture = device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("opencity scene depth"),
-            size,
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::Depth24Plus,
-            usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
-            view_formats: &[],
-        });
-        let color = color_texture.create_view(&Default::default());
-        let depth = depth_texture.create_view(&Default::default());
-        let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("opencity scene image"),
-            layout: &renderer.composite_layout,
-            entries: &[
-                wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: wgpu::BindingResource::TextureView(&color),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 1,
-                    resource: wgpu::BindingResource::Sampler(&renderer.sampler),
+        let renderer = resources.get_mut::<RenderResources>().unwrap();
+        if renderer
+            .scene_buffer
+            .as_ref()
+            .is_none_or(|(scene, _)| !Arc::ptr_eq(scene, &self.scene))
+        {
+            let vertices: Vec<_> = self
+                .scene
+                .vertices
+                .iter()
+                .map(|vertex| {
+                    let rgba = vertex.color.to_array();
+                    GpuVertex {
+                        world: [
+                            vertex.point.x,
+                            vertex.point.y,
+                            vertex.height,
+                            vertex.depth_bias,
+                        ],
+                        color: rgba.map(|channel| channel as f32 / 255.0),
+                    }
+                })
+                .collect();
+            let buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("opencity scene vertices"),
+                contents: bytes_of(&vertices),
+                usage: wgpu::BufferUsages::VERTEX,
+            });
+            renderer.scene_buffer = Some((Arc::clone(&self.scene), buffer));
+        }
+        let camera = CameraUniform {
+            view: [
+                self.pan.x,
+                self.pan.y,
+                self.zoom,
+                if self.camera == CameraView::Isometric {
+                    1.0
+                } else {
+                    0.0
                 },
             ],
-        });
+            target: [
+                self.target.x,
+                self.target.y,
+                self.angle.sin(),
+                self.angle.cos(),
+            ],
+            viewport: [
+                self.rect.width(),
+                self.rect.height(),
+                ISO_ELEVATION.sin(),
+                ISO_ELEVATION.cos(),
+            ],
+            elevation: [ISO_ELEVATION.tan(), 0.0, 0.0, 0.0],
+        };
+        queue.write_buffer(
+            &renderer.camera_buffer,
+            0,
+            bytes_of(std::slice::from_ref(&camera)),
+        );
+        if renderer
+            .target
+            .as_ref()
+            .is_none_or(|target| target.width != width || target.height != height)
+        {
+            let size = wgpu::Extent3d {
+                width,
+                height,
+                depth_or_array_layers: 1,
+            };
+            let color_texture = device.create_texture(&wgpu::TextureDescriptor {
+                label: Some("opencity scene color"),
+                size,
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: wgpu::TextureFormat::Rgba8Unorm,
+                usage: wgpu::TextureUsages::RENDER_ATTACHMENT
+                    | wgpu::TextureUsages::TEXTURE_BINDING,
+                view_formats: &[],
+            });
+            let depth_texture = device.create_texture(&wgpu::TextureDescriptor {
+                label: Some("opencity scene depth"),
+                size,
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: wgpu::TextureFormat::Depth24Plus,
+                usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+                view_formats: &[],
+            });
+            let color = color_texture.create_view(&Default::default());
+            let depth = depth_texture.create_view(&Default::default());
+            let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("opencity scene image"),
+                layout: &renderer.composite_layout,
+                entries: &[
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: wgpu::BindingResource::TextureView(&color),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: wgpu::BindingResource::Sampler(&renderer.sampler),
+                    },
+                ],
+            });
+            renderer.target = Some(RenderTarget {
+                width,
+                height,
+                color,
+                depth,
+                bind_group,
+            });
+        }
+        let target = renderer.target.as_ref().unwrap();
         {
             let rgba = self.background.to_array();
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("opencity depth-tested scene"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: &color,
+                    view: &target.color,
                     resolve_target: None,
                     depth_slice: None,
                     ops: wgpu::Operations {
@@ -492,7 +506,7 @@ impl egui_wgpu::CallbackTrait for SceneCallback {
                     },
                 })],
                 depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
-                    view: &depth,
+                    view: &target.depth,
                     depth_ops: Some(wgpu::Operations {
                         load: wgpu::LoadOp::Clear(1.0),
                         store: wgpu::StoreOp::Store,
@@ -504,12 +518,17 @@ impl egui_wgpu::CallbackTrait for SceneCallback {
                 multiview_mask: None,
             });
             pass.set_pipeline(&renderer.scene_pipeline);
-            pass.set_vertex_buffer(0, vertex_buffer.slice(..));
-            pass.draw(0..vertices.len() as u32, 0..1);
+            pass.set_bind_group(0, &renderer.camera_bind_group, &[]);
+            pass.set_vertex_buffer(0, renderer.scene_buffer.as_ref().unwrap().1.slice(..));
+            pass.draw(0..self.scene.vertices.len() as u32, 0..1);
         }
+        let vertex_buffer = renderer.scene_buffer.as_ref().unwrap().1.clone();
+        let color = target.color.clone();
+        let depth = target.depth.clone();
+        let bind_group = target.bind_group.clone();
         resources.insert(FrameResources {
             vertex_buffer,
-            vertices: vertices.len() as u32,
+            vertices: self.scene.vertices.len() as u32,
             color,
             depth,
             bind_group,
@@ -539,26 +558,57 @@ impl egui_wgpu::CallbackTrait for SceneCallback {
 
 impl RenderResources {
     fn new(device: &wgpu::Device, target_format: wgpu::TextureFormat) -> Self {
-        let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+        let scene_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("opencity scene shader"),
-            source: wgpu::ShaderSource::Wgsl(SHADER.into()),
+            source: wgpu::ShaderSource::Wgsl(SCENE_SHADER.into()),
+        });
+        let composite_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("opencity composite shader"),
+            source: wgpu::ShaderSource::Wgsl(COMPOSITE_SHADER.into()),
+        });
+        let camera_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("opencity camera layout"),
+            entries: &[wgpu::BindGroupLayoutEntry {
+                binding: 2,
+                visibility: wgpu::ShaderStages::VERTEX,
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Uniform,
+                    has_dynamic_offset: false,
+                    min_binding_size: None,
+                },
+                count: None,
+            }],
+        });
+        let camera_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("opencity camera"),
+            size: std::mem::size_of::<CameraUniform>() as u64,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let camera_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("opencity camera binding"),
+            layout: &camera_layout,
+            entries: &[wgpu::BindGroupEntry {
+                binding: 2,
+                resource: camera_buffer.as_entire_binding(),
+            }],
         });
         let scene_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("opencity scene layout"),
-            bind_group_layouts: &[],
+            bind_group_layouts: &[Some(&camera_layout)],
             immediate_size: 0,
         });
         let scene_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("opencity scene pipeline"),
             layout: Some(&scene_layout),
             vertex: wgpu::VertexState {
-                module: &shader,
+                module: &scene_shader,
                 entry_point: Some("scene_vs"),
                 compilation_options: Default::default(),
                 buffers: &[Some(wgpu::VertexBufferLayout {
                     array_stride: std::mem::size_of::<GpuVertex>() as u64,
                     step_mode: wgpu::VertexStepMode::Vertex,
-                    attributes: &wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32x4],
+                    attributes: &wgpu::vertex_attr_array![0 => Float32x4, 1 => Float32x4],
                 })],
             },
             primitive: wgpu::PrimitiveState {
@@ -574,7 +624,7 @@ impl RenderResources {
             }),
             multisample: Default::default(),
             fragment: Some(wgpu::FragmentState {
-                module: &shader,
+                module: &scene_shader,
                 entry_point: Some("scene_fs"),
                 compilation_options: Default::default(),
                 targets: &[Some(wgpu::ColorTargetState {
@@ -617,7 +667,7 @@ impl RenderResources {
             label: Some("opencity composite pipeline"),
             layout: Some(&composite_pipeline_layout),
             vertex: wgpu::VertexState {
-                module: &shader,
+                module: &composite_shader,
                 entry_point: Some("composite_vs"),
                 compilation_options: Default::default(),
                 buffers: &[],
@@ -629,7 +679,7 @@ impl RenderResources {
             depth_stencil: None,
             multisample: Default::default(),
             fragment: Some(wgpu::FragmentState {
-                module: &shader,
+                module: &composite_shader,
                 entry_point: Some(if target_format.is_srgb() {
                     "composite_fs_linear"
                 } else {
@@ -653,6 +703,10 @@ impl RenderResources {
         });
         Self {
             scene_pipeline,
+            camera_buffer,
+            camera_bind_group,
+            scene_buffer: None,
+            target: None,
             composite_pipeline,
             composite_layout,
             sampler,
@@ -706,6 +760,61 @@ mod gpu_tests {
         future::Future,
         task::{Context, Poll, Waker},
     };
+
+    #[test]
+    #[ignore = "manual GPU frame timing"]
+    fn profile_starter_camera_frames() {
+        let program = starter_program();
+        let projection = map::project(&program);
+        let start = std::time::Instant::now();
+        let scene = Arc::new(build_scene(
+            &program,
+            &projection,
+            editor_palette(egui::Theme::Dark),
+            &[],
+            None,
+        ));
+        let build = start.elapsed();
+        let instance = wgpu::Instance::default();
+        let adapter = block_on(instance.request_adapter(&wgpu::RequestAdapterOptions::default()))
+            .expect("GPU adapter required for manual profile");
+        let (device, queue) = block_on(adapter.request_device(&wgpu::DeviceDescriptor::default()))
+            .expect("GPU device required for manual profile");
+        let mut resources = egui_wgpu::CallbackResources::default();
+        let mut callback = SceneCallback {
+            scene: Arc::clone(&scene),
+            rect: egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1024.0, 768.0)),
+            pan: egui::Vec2::ZERO,
+            zoom: 75.0,
+            target: WorldPoint { x: 0.0, y: 0.0 },
+            angle: 0.0,
+            camera: CameraView::Isometric,
+            background: Color32::BLACK,
+            target_format: wgpu::TextureFormat::Bgra8Unorm,
+        };
+        let screen = egui_wgpu::ScreenDescriptor {
+            size_in_pixels: [1024, 768],
+            pixels_per_point: 1.0,
+        };
+        let start = std::time::Instant::now();
+        let mut encoder = device.create_command_encoder(&Default::default());
+        callback.prepare(&device, &queue, &screen, &mut encoder, &mut resources);
+        queue.submit([encoder.finish()]);
+        let cold = start.elapsed();
+        let start = std::time::Instant::now();
+        for frame in 0..100 {
+            callback.angle = frame as f32 * 0.01;
+            let mut encoder = device.create_command_encoder(&Default::default());
+            callback.prepare(&device, &queue, &screen, &mut encoder, &mut resources);
+            queue.submit([encoder.finish()]);
+        }
+        device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
+        eprintln!(
+            "starter vertices={} scene_build={build:?} cold_frame={cold:?} warm_frame={:?}",
+            scene.vertices.len(),
+            start.elapsed() / 100
+        );
+    }
 
     fn block_on<F: Future>(future: F) -> F::Output {
         let waker = Waker::noop();
@@ -863,6 +972,7 @@ mod gpu_tests {
         let pixels = readback.get_mapped_range(..).unwrap();
         let center = &pixels[(64 * 128 + 64) * 4..(64 * 128 + 64) * 4 + 4];
         let corner = &pixels[0..4];
+        assert_eq!(block_on(scope.pop()).map(|error| error.to_string()), None);
         assert!(
             center[2] > 180 && center[1] < 80 && center[0] < 80,
             "center BGRA should be red: {center:?}"
@@ -873,7 +983,6 @@ mod gpu_tests {
         );
         drop(pixels);
         readback.unmap();
-        assert!(block_on(scope.pop()).is_none());
     }
 
     #[test]

@@ -1,6 +1,8 @@
 use std::{collections::HashMap, path::PathBuf, sync::Arc};
 
 use eframe::egui::{self, Color32, RichText};
+use egui_command_palette::{Command as PaletteCommand, CommandPalette};
+use egui_frames::{DropSide, Frames, FramesEvent, FramesStyle, Layout, PaneId, PaneView, Tab};
 use opencity::{
     parse, parse_road_file, project_landscape_features, set_elevation, set_grade, Argument, Call,
     LandscapeKind, Program, RoadDefinition, RoadElement, RoadElementKind, Statement,
@@ -10,6 +12,7 @@ use opencity::{
 mod glb;
 #[path = "editor/map.rs"]
 mod map;
+#[cfg(not(target_arch = "wasm32"))]
 #[path = "editor/mcp.rs"]
 mod mcp;
 #[path = "editor/scene3d.rs"]
@@ -116,6 +119,23 @@ enum View {
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
+enum WorkspacePane {
+    Library,
+    Viewport,
+    Inspector,
+}
+
+impl WorkspacePane {
+    fn title(self) -> &'static str {
+        match self {
+            Self::Library => "Road library",
+            Self::Viewport => "Viewport",
+            Self::Inspector => "Inspector",
+        }
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
 enum MapTool {
     Select,
     Draw,
@@ -144,6 +164,13 @@ struct SceneCache {
     selected: Vec<SegmentSource>,
     selected_landscape: Option<String>,
     scene: Arc<scene3d::Scene>,
+}
+
+#[cfg(target_arch = "wasm32")]
+enum WebFileEvent {
+    Opened { name: String, source: String },
+    Saved { name: String, program: Program },
+    Message(String),
 }
 
 fn landscape_label(kind: LandscapeKind) -> &'static str {
@@ -265,6 +292,9 @@ fn iso_primary_drag(modifiers: egui::Modifiers, b_down: bool) -> IsoPrimaryDrag 
 }
 
 struct RoadEditor {
+    frames: Frames,
+    layout: Layout<WorkspacePane>,
+    command_palette: CommandPalette,
     program: Program,
     saved_program: Program,
     undo_stack: Vec<Program>,
@@ -317,11 +347,121 @@ struct RoadEditor {
     confirm_delete_road: bool,
     #[cfg(target_os = "macos")]
     native_menu: Option<NativeFileMenu>,
+    #[cfg(not(target_arch = "wasm32"))]
     mcp: Option<mcp::Bridge>,
+    #[cfg(target_arch = "wasm32")]
+    web_events: std::sync::mpsc::Receiver<WebFileEvent>,
+    #[cfg(target_arch = "wasm32")]
+    web_event_sender: std::sync::mpsc::Sender<WebFileEvent>,
+    #[cfg(target_arch = "wasm32")]
+    web_ctx: egui::Context,
     map_rect: Option<egui::Rect>,
 }
 
 impl RoadEditor {
+    fn open_pane(&mut self, pane: WorkspacePane) {
+        let id = self
+            .layout
+            .find_pane(|candidate| *candidate == pane)
+            .map(|(id, _)| id)
+            .unwrap_or_else(|| {
+                let side = match pane {
+                    WorkspacePane::Library => DropSide::Left,
+                    WorkspacePane::Viewport => DropSide::Right,
+                    WorkspacePane::Inspector => DropSide::Right,
+                };
+                self.layout.add_pane_against_edge(side, 0.25, pane)
+            });
+        self.layout.focus_pane(id);
+    }
+
+    fn palette_commands() -> Vec<PaletteCommand> {
+        [
+            ("new", "New city", "Create a new city", "⌘N"),
+            ("open", "Open…", "Open a road file", "⌘O"),
+            ("save", "Save", "Save the current city", "⌘S"),
+            ("save-as", "Save As…", "Save to another road file", "⇧⌘S"),
+            ("export-glb", "Export 3D scene…", "Export GLB", ""),
+            ("undo", "Undo", "Undo the last edit", "⌘Z"),
+            ("redo", "Redo", "Redo the last edit", "⇧⌘Z"),
+            ("copy", "Copy", "Copy selected road placements", "⌘C"),
+            ("paste", "Paste", "Paste road placements", "⌘V"),
+            ("new-type", "New road type", "Add a road cross section", ""),
+            (
+                "library",
+                "Open road library",
+                "Show the road types panel",
+                "",
+            ),
+            ("viewport", "Open viewport", "Show the city viewport", ""),
+            (
+                "inspector",
+                "Open inspector",
+                "Show the properties panel",
+                "",
+            ),
+            ("map", "Map view", "Edit the city map", ""),
+            ("section", "Cross section view", "Edit a road type", ""),
+            ("top", "Top camera", "Look down at the city", ""),
+            ("isometric", "Isometric camera", "Orbit around the city", ""),
+            ("select", "Select tool", "Select a road or feature", ""),
+            ("draw", "Draw road tool", "Place a road", ""),
+            ("draft", "Draft pen tool", "Draw a curved road", ""),
+            (
+                "theme",
+                "Toggle light and dark theme",
+                "Switch the workspace theme",
+                "⌘J",
+            ),
+        ]
+        .into_iter()
+        .map(|(id, title, description, shortcut)| PaletteCommand {
+            id: id.into(),
+            title: title.into(),
+            description: description.into(),
+            shortcut: shortcut.into(),
+        })
+        .collect()
+    }
+
+    fn execute_palette_command(&mut self, id: &str, ctx: &egui::Context) {
+        match id {
+            "new" => self.file_action(FileAction::New),
+            "open" => self.file_action(FileAction::Open),
+            "save" => self.file_action(FileAction::Save),
+            "save-as" => self.file_action(FileAction::SaveAs),
+            "export-glb" => self.export_glb(),
+            "undo" => {
+                self.restore_history(true);
+            }
+            "redo" => {
+                self.restore_history(false);
+            }
+            "copy"
+                if self.view == View::Map
+                    && (self.selected_segment.is_some() || !self.selected_segments.is_empty()) =>
+            {
+                self.copy_selection()
+            }
+            "paste" if self.view == View::Map && !self.clipboard.is_empty() => {
+                self.paste_selection()
+            }
+            "new-type" => self.add_road(),
+            "library" => self.open_pane(WorkspacePane::Library),
+            "viewport" => self.open_pane(WorkspacePane::Viewport),
+            "inspector" => self.open_pane(WorkspacePane::Inspector),
+            "map" => self.view = View::Map,
+            "section" => self.view = View::Section,
+            "top" => self.set_camera_view(CameraView::Top),
+            "isometric" => self.set_camera_view(CameraView::Isometric),
+            "select" => self.map_tool = MapTool::Select,
+            "draw" if self.road().is_some() => self.map_tool = MapTool::Draw,
+            "draft" if self.road().is_some() => self.map_tool = MapTool::Draft,
+            "theme" => toggle_theme(ctx),
+            _ => {}
+        }
+    }
+
     fn scene_geometry(&mut self, palette: EditorPalette) -> Arc<scene3d::Scene> {
         let mut selected = self.selected_segments.clone();
         if let Some(source) = self.selected_segment {
@@ -540,13 +680,21 @@ impl RoadEditor {
     }
 
     fn new(cc: &eframe::CreationContext<'_>, open_path: Option<PathBuf>) -> Self {
+        #[cfg(target_arch = "wasm32")]
+        let (web_event_sender, web_events) = std::sync::mpsc::channel();
         egui_extras::install_image_loaders(&cc.egui_ctx);
         cc.egui_ctx
             .set_visuals_of(egui::Theme::Dark, editor_visuals(egui::Theme::Dark));
         cc.egui_ctx
             .set_visuals_of(egui::Theme::Light, editor_visuals(egui::Theme::Light));
-        cc.egui_ctx.set_theme(egui::ThemePreference::System);
+        cc.egui_ctx.set_theme(egui::ThemePreference::Dark);
+        let mut layout = Layout::with_pane(WorkspacePane::Viewport);
+        layout.add_pane_against_edge(DropSide::Left, 0.23, WorkspacePane::Library);
+        layout.add_pane_against_edge(DropSide::Right, 0.25, WorkspacePane::Inspector);
         let mut app = Self {
+            frames: Frames::new().with_new_tab_button(false),
+            layout,
+            command_palette: CommandPalette::default(),
             program: starter_program(),
             saved_program: starter_program(),
             undo_stack: Vec::new(),
@@ -603,7 +751,14 @@ impl RoadEditor {
             confirm_delete_road: false,
             #[cfg(target_os = "macos")]
             native_menu: NativeFileMenu::install(),
+            #[cfg(not(target_arch = "wasm32"))]
             mcp: None,
+            #[cfg(target_arch = "wasm32")]
+            web_events,
+            #[cfg(target_arch = "wasm32")]
+            web_event_sender,
+            #[cfg(target_arch = "wasm32")]
+            web_ctx: cc.egui_ctx.clone(),
             map_rect: None,
         };
         if let Some(path) = open_path {
@@ -1153,53 +1308,58 @@ impl RoadEditor {
     fn open_path(&mut self, path: PathBuf) {
         match parse_road_file(&path) {
             Ok(program) => {
-                self.selected_road = program
-                    .statements
-                    .iter()
-                    .position(|statement| matches!(statement, Statement::Road(_)));
-                self.selected_element = None;
-                self.selected_segment = None;
-                self.selected_segments.clear();
-                self.box_start = None;
-                self.iso_drag_pan = false;
-                self.iso_drag_orbit = false;
-                self.selected_intersection = None;
-                self.selected_endpoint = None;
-                self.lane_end_choice = None;
-                self.segment_name_draft.clear();
-                self.map_start = None;
-                self.map_start_ref = None;
-                self.dragging_endpoint = None;
-                self.dragging_control = None;
-                self.dragging_intersection = None;
-                self.dragging_background = false;
-                self.road_name_draft = self
-                    .selected_road
-                    .and_then(|index| match &program.statements[index] {
-                        Statement::Road(road) => Some(road.name.clone()),
-                        _ => None,
-                    })
-                    .unwrap_or_default();
-                self.program = program;
-                self.saved_program = self.program.clone();
-                self.undo_stack.clear();
-                self.redo_stack.clear();
-                self.skip_history = true;
-                self.fit_scene_once = true;
-                self.camera_view = CameraView::Top;
-                self.top_camera = (egui::Vec2::ZERO, 75.0);
-                self.iso_camera = (egui::Vec2::ZERO, 55.0);
-                self.map_pan = egui::Vec2::ZERO;
-                self.map_zoom = 75.0;
-                self.path = Some(path.clone());
-                self.dirty = false;
-                self.confirm_delete_road = false;
+                self.load_program(program, Some(path.clone()));
                 self.status = format!("Opened {}", path.display());
             }
             Err(error) => self.status = format!("Could not open {}: {error}", path.display()),
         }
     }
 
+    fn load_program(&mut self, program: Program, path: Option<PathBuf>) {
+        self.selected_road = program
+            .statements
+            .iter()
+            .position(|statement| matches!(statement, Statement::Road(_)));
+        self.selected_element = None;
+        self.selected_segment = None;
+        self.selected_segments.clear();
+        self.box_start = None;
+        self.iso_drag_pan = false;
+        self.iso_drag_orbit = false;
+        self.selected_intersection = None;
+        self.selected_endpoint = None;
+        self.lane_end_choice = None;
+        self.segment_name_draft.clear();
+        self.map_start = None;
+        self.map_start_ref = None;
+        self.dragging_endpoint = None;
+        self.dragging_control = None;
+        self.dragging_intersection = None;
+        self.dragging_background = false;
+        self.road_name_draft = self
+            .selected_road
+            .and_then(|index| match &program.statements[index] {
+                Statement::Road(road) => Some(road.name.clone()),
+                _ => None,
+            })
+            .unwrap_or_default();
+        self.program = program;
+        self.saved_program = self.program.clone();
+        self.undo_stack.clear();
+        self.redo_stack.clear();
+        self.skip_history = true;
+        self.fit_scene_once = true;
+        self.camera_view = CameraView::Top;
+        self.top_camera = (egui::Vec2::ZERO, 75.0);
+        self.iso_camera = (egui::Vec2::ZERO, 55.0);
+        self.map_pan = egui::Vec2::ZERO;
+        self.map_zoom = 75.0;
+        self.path = path;
+        self.dirty = false;
+        self.confirm_delete_road = false;
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
     fn save_to(&mut self, path: PathBuf) {
         if let Err(error) = parse(&self.program.to_road_source()) {
             self.status = format!("Fix the document before saving: {error}");
@@ -1228,6 +1388,9 @@ impl RoadEditor {
             FileAction::New => self.new_document(),
             FileAction::Open => self.pick_open(),
             FileAction::Save => {
+                #[cfg(target_arch = "wasm32")]
+                self.pick_save();
+                #[cfg(not(target_arch = "wasm32"))]
                 if let Some(path) = self.path.clone() {
                     self.save_to(path);
                 } else {
@@ -1279,6 +1442,7 @@ impl RoadEditor {
         self.status = "New blank map".into();
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     fn pick_open(&mut self) {
         if let Some(path) = rfd::FileDialog::new()
             .add_filter("OpenCity roads", &["road"])
@@ -1288,6 +1452,7 @@ impl RoadEditor {
         }
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     fn pick_save(&mut self) {
         let mut dialog = rfd::FileDialog::new().add_filter("OpenCity roads", &["road"]);
         if let Some(path) = &self.path {
@@ -1305,6 +1470,7 @@ impl RoadEditor {
         }
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     fn export_glb(&mut self) {
         let bytes = glb::export(&self.program);
         if bytes.is_empty() {
@@ -1325,15 +1491,96 @@ impl RoadEditor {
         }
     }
 
+    #[cfg(target_arch = "wasm32")]
+    fn pick_open(&mut self) {
+        let sender = self.web_event_sender.clone();
+        let ctx = self.web_ctx.clone();
+        wasm_bindgen_futures::spawn_local(async move {
+            if let Some(file) = rfd::AsyncFileDialog::new()
+                .add_filter("OpenCity roads", &["road"])
+                .pick_file()
+                .await
+            {
+                let name = file.file_name();
+                let event = match String::from_utf8(file.read().await) {
+                    Ok(source) => WebFileEvent::Opened { name, source },
+                    Err(error) => WebFileEvent::Message(format!("Could not read {name}: {error}")),
+                };
+                let _ = sender.send(event);
+                ctx.request_repaint();
+            }
+        });
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    fn pick_save(&mut self) {
+        if let Err(error) = parse(&self.program.to_road_source()) {
+            self.status = format!("Fix the document before saving: {error}");
+            return;
+        }
+        let name = self
+            .path
+            .as_ref()
+            .and_then(|path| path.file_name())
+            .and_then(|name| name.to_str())
+            .unwrap_or("roads.road")
+            .to_owned();
+        self.save_web(
+            &name,
+            self.program.to_road_source().into_bytes(),
+            Some(self.program.clone()),
+        );
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    fn export_glb(&mut self) {
+        let bytes = glb::export(&self.program);
+        if bytes.is_empty() {
+            self.status = "Nothing to export: place a road or landscape feature first".into();
+            return;
+        }
+        self.save_web("opencity.glb", bytes, None);
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    fn save_web(&mut self, name: &str, bytes: Vec<u8>, program: Option<Program>) {
+        let sender = self.web_event_sender.clone();
+        let ctx = self.web_ctx.clone();
+        let name = name.to_owned();
+        wasm_bindgen_futures::spawn_local(async move {
+            let dialog = rfd::AsyncFileDialog::new().set_file_name(&name);
+            if let Some(file) = dialog.save_file().await {
+                let file_name = file.file_name();
+                let event = match file.write(&bytes).await {
+                    Ok(()) => match program {
+                        Some(program) => WebFileEvent::Saved {
+                            name: file_name,
+                            program,
+                        },
+                        None => WebFileEvent::Message(format!("Exported {file_name}")),
+                    },
+                    Err(error) => {
+                        WebFileEvent::Message(format!("Could not save {file_name}: {error}"))
+                    }
+                };
+                let _ = sender.send(event);
+                ctx.request_repaint();
+            }
+        });
+    }
+
     fn file_menu(&mut self, ui: &mut egui::Ui) {
         ui.menu_button("File", |ui| {
-            for (label, action) in [
-                ("New    Cmd+N", FileAction::New),
-                ("Open…    Cmd+O", FileAction::Open),
-                ("Save    Cmd+S", FileAction::Save),
-                ("Save As…    Shift+Cmd+S", FileAction::SaveAs),
+            for (label, shortcut, action) in [
+                ("New", "Cmd/Ctrl+N", FileAction::New),
+                ("Open…", "Cmd/Ctrl+O", FileAction::Open),
+                ("Save", "Cmd/Ctrl+S", FileAction::Save),
+                ("Save As…", "Cmd/Ctrl+Shift+S", FileAction::SaveAs),
             ] {
-                if ui.button(label).clicked() {
+                if ui
+                    .add(egui::Button::new(label).shortcut_text(shortcut))
+                    .clicked()
+                {
                     self.file_action(action);
                     ui.close();
                 }
@@ -1346,85 +1593,173 @@ impl RoadEditor {
         });
     }
 
+    fn menu_bar(&mut self, root: &mut egui::Ui) {
+        let palette = editor_palette(root.ctx().theme());
+        egui::Panel::top("menu-bar")
+            .frame(
+                egui::Frame::new()
+                    .fill(palette.toolbar)
+                    .inner_margin(egui::Margin::symmetric(8, 3)),
+            )
+            .show(root, |ui| {
+                egui::MenuBar::new().ui(ui, |ui| {
+                    ui.label(RichText::new("OPEN CITY").strong().color(palette.brand));
+                    ui.separator();
+                    self.file_menu(ui);
+                    ui.menu_button("Edit", |ui| {
+                        if ui
+                            .add_enabled(
+                                !self.undo_stack.is_empty(),
+                                egui::Button::new("Undo").shortcut_text("Cmd/Ctrl+Z"),
+                            )
+                            .clicked()
+                        {
+                            self.restore_history(true);
+                            ui.close();
+                        }
+                        if ui
+                            .add_enabled(
+                                !self.redo_stack.is_empty(),
+                                egui::Button::new("Redo").shortcut_text("Cmd/Ctrl+Shift+Z"),
+                            )
+                            .clicked()
+                        {
+                            self.restore_history(false);
+                            ui.close();
+                        }
+                        ui.separator();
+                        let can_copy = self.view == View::Map
+                            && (self.selected_segment.is_some()
+                                || !self.selected_segments.is_empty());
+                        if ui
+                            .add_enabled(
+                                can_copy,
+                                egui::Button::new("Copy").shortcut_text("Cmd/Ctrl+C"),
+                            )
+                            .clicked()
+                        {
+                            self.copy_selection();
+                            ui.close();
+                        }
+                        if ui
+                            .add_enabled(
+                                self.view == View::Map && !self.clipboard.is_empty(),
+                                egui::Button::new("Paste").shortcut_text("Cmd/Ctrl+V"),
+                            )
+                            .clicked()
+                        {
+                            self.paste_selection();
+                            ui.close();
+                        }
+                        ui.separator();
+                        if ui.button("New road type").clicked() {
+                            self.add_road();
+                            ui.close();
+                        }
+                    });
+                    ui.menu_button("View", |ui| {
+                        if ui.selectable_label(self.view == View::Map, "Map").clicked() {
+                            self.view = View::Map;
+                            self.map_start = None;
+                            self.map_start_ref = None;
+                            ui.close();
+                        }
+                        if ui
+                            .selectable_label(self.view == View::Section, "Cross section")
+                            .clicked()
+                        {
+                            self.view = View::Section;
+                            ui.close();
+                        }
+                        ui.separator();
+                        if ui
+                            .add_enabled(
+                                self.view == View::Map,
+                                egui::Button::selectable(
+                                    self.camera_view == CameraView::Top,
+                                    "Top camera",
+                                ),
+                            )
+                            .clicked()
+                        {
+                            self.set_camera_view(CameraView::Top);
+                            ui.close();
+                        }
+                        if ui
+                            .add_enabled(
+                                self.view == View::Map,
+                                egui::Button::selectable(
+                                    self.camera_view == CameraView::Isometric,
+                                    "Isometric camera",
+                                ),
+                            )
+                            .clicked()
+                        {
+                            self.set_camera_view(CameraView::Isometric);
+                            ui.close();
+                        }
+                        ui.separator();
+                        if ui
+                            .add_enabled(
+                                self.view == View::Section,
+                                egui::Button::selectable(self.show_source, "Show source"),
+                            )
+                            .clicked()
+                        {
+                            self.show_source = !self.show_source;
+                            ui.close();
+                        }
+                        if ui
+                            .add(
+                                egui::Button::new("Switch Light and Dark")
+                                    .shortcut_text("Cmd/Ctrl+J"),
+                            )
+                            .clicked()
+                        {
+                            toggle_theme(ui.ctx());
+                            ui.close();
+                        }
+                        if ui
+                            .add(
+                                egui::Button::new("Command Palette")
+                                    .shortcut_text("Cmd/Ctrl+Shift+P"),
+                            )
+                            .clicked()
+                        {
+                            self.command_palette.open();
+                            ui.close();
+                        }
+                    });
+                    ui.menu_button("Panels", |ui| {
+                        for pane in [
+                            WorkspacePane::Library,
+                            WorkspacePane::Viewport,
+                            WorkspacePane::Inspector,
+                        ] {
+                            let open = self
+                                .layout
+                                .find_pane(|candidate| *candidate == pane)
+                                .is_some();
+                            if ui.selectable_label(open, pane.title()).clicked() {
+                                self.open_pane(pane);
+                                ui.close();
+                            }
+                        }
+                    });
+                });
+            });
+    }
+
     fn top_bar(&mut self, root: &mut egui::Ui) {
         let palette = editor_palette(root.ctx().theme());
         egui::Panel::top("toolbar")
             .frame(
                 egui::Frame::new()
                     .fill(palette.toolbar)
-                    .inner_margin(egui::Margin::symmetric(14, 9)),
+                    .inner_margin(egui::Margin::symmetric(12, 8)),
             )
             .show(root, |ui| {
-                ui.horizontal(|ui| {
-                    ui.label(RichText::new("OPEN CITY").strong().color(palette.brand));
-                    ui.separator();
-                    self.file_menu(ui);
-                    ui.separator();
-                    if ui
-                        .add_enabled(!self.undo_stack.is_empty(), egui::Button::new("Undo"))
-                        .clicked()
-                    {
-                        self.restore_history(true);
-                    }
-                    if ui
-                        .add_enabled(!self.redo_stack.is_empty(), egui::Button::new("Redo"))
-                        .clicked()
-                    {
-                        self.restore_history(false);
-                    }
-                    if self.view == View::Map {
-                        if ui
-                            .add_enabled(
-                                self.selected_segment.is_some()
-                                    || !self.selected_segments.is_empty(),
-                                egui::Button::new("Copy"),
-                            )
-                            .clicked()
-                        {
-                            self.copy_selection();
-                        }
-                        if ui
-                            .add_enabled(!self.clipboard.is_empty(), egui::Button::new("Paste"))
-                            .clicked()
-                        {
-                            self.paste_selection();
-                        }
-                    }
-                    ui.separator();
-                    ui.menu_button("Theme", |ui| {
-                        let current = ui.options(|options| options.theme_preference);
-                        for (preference, label) in [
-                            (egui::ThemePreference::System, "System"),
-                            (egui::ThemePreference::Light, "Light"),
-                            (egui::ThemePreference::Dark, "Dark"),
-                        ] {
-                            if ui.selectable_label(current == preference, label).clicked() {
-                                ui.ctx().set_theme(preference);
-                                ui.ctx().request_repaint();
-                                ui.close();
-                            }
-                        }
-                    });
-                    ui.separator();
-                    if ui
-                        .selectable_value(&mut self.view, View::Map, "Map")
-                        .clicked()
-                    {
-                        self.map_start = None;
-                        self.map_start_ref = None;
-                    }
-                    ui.selectable_value(&mut self.view, View::Section, "Cross section");
-                    ui.separator();
-                    if ui
-                        .add(egui::Button::new((
-                            icon("plus", ui.visuals().text_color()),
-                            "New type",
-                        )))
-                        .clicked()
-                    {
-                        self.add_road();
-                    }
-                    ui.separator();
+                ui.horizontal_wrapped(|ui| {
                     if self.view == View::Map {
                         if ui
                             .selectable_label(self.camera_view == CameraView::Top, "Top")
@@ -1496,28 +1831,26 @@ impl RoadEditor {
                         {
                             self.add_element();
                         }
-                        ui.toggle_value(&mut self.show_source, "Source");
                     }
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        let name = self
-                            .path
-                            .as_ref()
-                            .and_then(|path| path.file_name())
-                            .map(|name| name.to_string_lossy().into_owned())
-                            .unwrap_or_else(|| "Untitled.road".into());
-                        ui.label(format!("{}{}", name, if self.dirty { " •" } else { "" }));
-                    });
+                    let name = self
+                        .path
+                        .as_ref()
+                        .and_then(|path| path.file_name())
+                        .map(|name| name.to_string_lossy().into_owned())
+                        .unwrap_or_else(|| "Untitled.road".into());
+                    ui.label(
+                        RichText::new(format!("{}{}", name, if self.dirty { " •" } else { "" }))
+                            .color(ui.visuals().weak_text_color()),
+                    );
                 });
             });
     }
 
     fn sidebar(&mut self, root: &mut egui::Ui) {
-        egui::Panel::left("roads")
-            .default_size(238.0)
-            .min_size(190.0)
+        egui::Frame::new()
+            .inner_margin(egui::Margin::symmetric(12, 8))
             .show(root, |ui| {
                 egui::ScrollArea::vertical().show(ui, |ui| {
-                    ui.add_space(12.0);
                     ui.label(
                         RichText::new("ROAD LIBRARY")
                             .small()
@@ -1555,7 +1888,7 @@ impl RoadEditor {
                                 .strong()
                                 .color(ui.visuals().weak_text_color()),
                         );
-                        ui.add_space(5.0);
+                        ui.add_space(4.0);
                         for (index, road) in roads {
                             let response = ui.selectable_label(
                                 self.selected_road == Some(index),
@@ -1600,7 +1933,7 @@ impl RoadEditor {
                                                 band.center(),
                                                 egui::Align2::CENTER_CENTER,
                                                 kind_short(element.kind),
-                                                egui::FontId::proportional(9.0),
+                                                egui::FontId::proportional(10.0),
                                                 palette.tile_text,
                                             );
                                         }
@@ -1763,7 +2096,7 @@ impl RoadEditor {
                             }
                         }
                         let projection = map::project(&self.program);
-                        ui.add_space(18.0);
+                        ui.add_space(16.0);
                         ui.separator();
                         if projection.unresolved > 0 {
                             ui.colored_label(
@@ -1798,7 +2131,7 @@ impl RoadEditor {
                             })
                             .count();
                         if other_count > 0 {
-                            ui.add_space(18.0);
+                            ui.add_space(16.0);
                             ui.separator();
                             ui.label(
                                 RichText::new("OTHER STATEMENTS")
@@ -1839,11 +2172,9 @@ impl RoadEditor {
     }
 
     fn inspector(&mut self, root: &mut egui::Ui) {
-        egui::Panel::right("inspector")
-            .default_size(250.0)
-            .min_size(220.0)
+        egui::Frame::new()
+            .inner_margin(egui::Margin::symmetric(12, 8))
             .show(root, |ui| {
-                ui.add_space(12.0);
                 ui.label(
                     RichText::new("INSPECTOR")
                         .small()
@@ -1894,7 +2225,7 @@ impl RoadEditor {
                     if before != element.kind {
                         dirty = true;
                     }
-                    ui.add_space(10.0);
+                    ui.add_space(8.0);
                     let mut has_catch = element.catch.is_some();
                     if ui.checkbox(&mut has_catch, "Capture parameter").changed() {
                         element.catch = has_catch.then_some(1);
@@ -1941,7 +2272,7 @@ impl RoadEditor {
                 if remove {
                     self.remove_element();
                 }
-                ui.add_space(18.0);
+                ui.add_space(16.0);
                 ui.separator();
                 if ui
                     .add(egui::Button::new((
@@ -2081,7 +2412,7 @@ impl RoadEditor {
                 }
             },
         );
-        ui.add_space(10.0);
+        ui.add_space(8.0);
         let block_instance = match self.selected_segment {
             Some(SegmentSource::BlockInstance { instance, .. }) => Some(instance),
             Some(SegmentSource::TopLevel(_)) => None,
@@ -2646,7 +2977,7 @@ impl RoadEditor {
     }
 
     fn isometric_canvas(&mut self, root: &mut egui::Ui) {
-        egui::CentralPanel::default().show(root, |ui| {
+        egui::Frame::NONE.show(root, |ui| {
             let (rect, response) = ui.allocate_exact_size(ui.available_size(), egui::Sense::click_and_drag());
             self.map_rect = Some(rect);
             let palette = editor_palette(ui.ctx().theme());
@@ -3215,7 +3546,7 @@ impl RoadEditor {
             self.isometric_canvas(root);
             return;
         }
-        egui::CentralPanel::default().show(root, |ui| {
+        egui::Frame::NONE.show(root, |ui| {
             let palette = editor_palette(ui.ctx().theme());
             let (rect, response) =
                 ui.allocate_exact_size(ui.available_size(), egui::Sense::click_and_drag());
@@ -4069,84 +4400,86 @@ impl RoadEditor {
     }
 
     fn section_canvas(&mut self, root: &mut egui::Ui) {
-        egui::CentralPanel::default().show(root, |ui| {
-            let palette = editor_palette(ui.ctx().theme());
-            ui.add_space(18.0);
-            let Some(road) = self.road() else {
-                ui.vertical_centered(|ui| {
-                    ui.add_space(90.0);
-                    ui.add(icon("box", ui.visuals().text_color()));
-                    ui.heading("No road selected");
-                });
-                return;
-            };
-            ui.heading(&road.name);
-            ui.add_space(25.0);
-            let elements = road.elements.clone();
-            let mut clicked = None;
-            egui::ScrollArea::horizontal().show(ui, |ui| {
-                ui.horizontal(|ui| {
-                    for (index, element) in elements.iter().enumerate() {
-                        let selected = self.selected_element == Some(index);
-                        let width = element_width(element.kind);
-                        let (rect, response) =
-                            ui.allocate_exact_size(egui::vec2(width, 260.0), egui::Sense::click());
-                        let fill = kind_color(element.kind, ui.ctx().theme());
-                        ui.painter()
-                            .rect_filled(rect.shrink2(egui::vec2(2.0, 8.0)), 5.0, fill);
-                        if selected {
-                            ui.painter().rect_stroke(
-                                rect.shrink(2.0),
-                                5.0,
-                                egui::Stroke::new(3.0, palette.map_selected),
-                                egui::StrokeKind::Outside,
+        egui::Frame::new()
+            .inner_margin(egui::Margin::symmetric(16, 12))
+            .show(root, |ui| {
+                let palette = editor_palette(ui.ctx().theme());
+                let Some(road) = self.road() else {
+                    ui.vertical_centered(|ui| {
+                        ui.add_space(90.0);
+                        ui.add(icon("box", ui.visuals().text_color()));
+                        ui.heading("No road selected");
+                    });
+                    return;
+                };
+                ui.heading(&road.name);
+                ui.add_space(16.0);
+                let elements = road.elements.clone();
+                let mut clicked = None;
+                egui::ScrollArea::horizontal().show(ui, |ui| {
+                    ui.horizontal(|ui| {
+                        for (index, element) in elements.iter().enumerate() {
+                            let selected = self.selected_element == Some(index);
+                            let width = element_width(element.kind);
+                            let (rect, response) = ui.allocate_exact_size(
+                                egui::vec2(width, 260.0),
+                                egui::Sense::click(),
                             );
-                        }
-                        let center = rect.center();
-                        ui.painter().text(
-                            egui::pos2(center.x, center.y - 12.0),
-                            egui::Align2::CENTER_CENTER,
-                            kind_short(element.kind),
-                            egui::FontId::proportional(13.0),
-                            palette.tile_text,
-                        );
-                        if let Some(catch) = element.catch {
+                            let fill = kind_color(element.kind, ui.ctx().theme());
+                            ui.painter()
+                                .rect_filled(rect.shrink2(egui::vec2(2.0, 8.0)), 5.0, fill);
+                            if selected {
+                                ui.painter().rect_stroke(
+                                    rect.shrink(2.0),
+                                    5.0,
+                                    egui::Stroke::new(3.0, palette.map_selected),
+                                    egui::StrokeKind::Outside,
+                                );
+                            }
+                            let center = rect.center();
                             ui.painter().text(
-                                egui::pos2(center.x, center.y + 15.0),
+                                egui::pos2(center.x, center.y - 12.0),
                                 egui::Align2::CENTER_CENTER,
-                                format!("${catch}"),
-                                egui::FontId::monospace(12.0),
+                                kind_short(element.kind),
+                                egui::FontId::proportional(13.0),
                                 palette.tile_text,
                             );
+                            if let Some(catch) = element.catch {
+                                ui.painter().text(
+                                    egui::pos2(center.x, center.y + 15.0),
+                                    egui::Align2::CENTER_CENTER,
+                                    format!("${catch}"),
+                                    egui::FontId::monospace(12.0),
+                                    palette.tile_text,
+                                );
+                            }
+                            if response.clicked() {
+                                clicked = Some(index);
+                            }
+                            response.on_hover_text(kind_label(element.kind));
                         }
-                        if response.clicked() {
-                            clicked = Some(index);
-                        }
-                        response.on_hover_text(kind_label(element.kind));
-                    }
-                });
-            });
-            if let Some(index) = clicked {
-                self.selected_element = Some(index);
-            }
-            ui.add_space(20.0);
-            if self.show_source {
-                ui.add_space(20.0);
-                ui.separator();
-                ui.label(RichText::new("SERIALIZED SOURCE").small().strong());
-                let mut source = self.program.to_road_source();
-                egui::ScrollArea::vertical()
-                    .max_height(250.0)
-                    .show(ui, |ui| {
-                        ui.add(
-                            egui::TextEdit::multiline(&mut source)
-                                .font(egui::TextStyle::Monospace)
-                                .desired_width(f32::INFINITY)
-                                .interactive(false),
-                        );
                     });
-            }
-        });
+                });
+                if let Some(index) = clicked {
+                    self.selected_element = Some(index);
+                }
+                ui.add_space(16.0);
+                if self.show_source {
+                    ui.separator();
+                    ui.label(RichText::new("SERIALIZED SOURCE").small().strong());
+                    let mut source = self.program.to_road_source();
+                    egui::ScrollArea::vertical()
+                        .max_height(250.0)
+                        .show(ui, |ui| {
+                            ui.add(
+                                egui::TextEdit::multiline(&mut source)
+                                    .font(egui::TextStyle::Monospace)
+                                    .desired_width(f32::INFINITY)
+                                    .interactive(false),
+                            );
+                        });
+                }
+            });
     }
 
     fn pending_dialog(&mut self, ctx: &egui::Context) {
@@ -4159,16 +4492,17 @@ impl RoadEditor {
             .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
             .show(ctx, |ui| {
                 ui.label("Discard changes to the current document?");
-                ui.horizontal(|ui| {
-                    if ui.button("Cancel").clicked() {
-                        self.pending = None;
-                    }
+                ui.add_space(8.0);
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     if ui.button("Discard changes").clicked() {
                         self.pending = None;
                         match action {
                             PendingAction::New => self.new_document(),
                             PendingAction::Open => self.pick_open(),
                         }
+                    }
+                    if ui.button("Cancel").clicked() {
+                        self.pending = None;
                     }
                 });
             });
@@ -4186,13 +4520,14 @@ impl RoadEditor {
                 ui.label(
                     "Delete this road definition? Calls that name it will remain in the document.",
                 );
-                ui.horizontal(|ui| {
-                    if ui.button("Cancel").clicked() {
-                        self.confirm_delete_road = false;
-                    }
+                ui.add_space(8.0);
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     if ui.button("Delete road").clicked() {
                         self.confirm_delete_road = false;
                         self.remove_road();
+                    }
+                    if ui.button("Cancel").clicked() {
+                        self.confirm_delete_road = false;
                     }
                 });
             });
@@ -6287,6 +6622,82 @@ fn paint_grid(
     }
 }
 
+fn toggle_theme(ctx: &egui::Context) {
+    let next = match ctx.theme() {
+        egui::Theme::Light => egui::Theme::Dark,
+        egui::Theme::Dark => egui::Theme::Light,
+    };
+    ctx.set_theme(next);
+    ctx.request_repaint();
+}
+
+fn theme_header_button(ui: &mut egui::Ui) -> egui::Response {
+    let (rect, response) = ui.allocate_exact_size(egui::vec2(24.0, 24.0), egui::Sense::click());
+    let response = response.on_hover_cursor(egui::CursorIcon::PointingHand);
+    let background = if response.hovered() || response.has_focus() {
+        ui.visuals().widgets.hovered.weak_bg_fill
+    } else {
+        ui.visuals().window_fill
+    };
+    if response.hovered() || response.has_focus() {
+        ui.painter().rect_filled(rect, 5.0, background);
+    }
+    let ink = if response.hovered() || response.has_focus() {
+        ui.visuals().text_color()
+    } else {
+        ui.visuals().weak_text_color()
+    };
+    let center = rect.center();
+    match ui.ctx().theme() {
+        egui::Theme::Light => {
+            ui.painter().circle_filled(center, 5.5, ink);
+            ui.painter()
+                .circle_filled(center + egui::vec2(3.025, -1.65), 4.675, background);
+        }
+        egui::Theme::Dark => {
+            ui.painter().circle_filled(center, 3.5, ink);
+            for step in 0..8 {
+                let angle = std::f32::consts::TAU * step as f32 / 8.0;
+                let direction = egui::vec2(angle.cos(), angle.sin());
+                ui.painter().line_segment(
+                    [center + direction * 5.0, center + direction * 7.0],
+                    egui::Stroke::new(1.0, ink),
+                );
+            }
+        }
+    }
+    response
+}
+
+impl PaneView<WorkspacePane> for RoadEditor {
+    fn tab(&mut self, _id: PaneId, pane: &WorkspacePane) -> Tab {
+        Tab::new(pane.title()).closable(*pane != WorkspacePane::Viewport)
+    }
+
+    fn tab_strip_end(&mut self, ui: &mut egui::Ui, _frame: egui_frames::FrameId, primary: bool) {
+        if primary {
+            let hint = match ui.ctx().theme() {
+                egui::Theme::Light => "Switch to dark theme (⌘J)",
+                egui::Theme::Dark => "Switch to light theme (⌘J)",
+            };
+            if theme_header_button(ui).on_hover_text(hint).clicked() {
+                toggle_theme(ui.ctx());
+            }
+        }
+    }
+
+    fn pane_ui(&mut self, ui: &mut egui::Ui, _id: PaneId, pane: &WorkspacePane) {
+        match pane {
+            WorkspacePane::Library => self.sidebar(ui),
+            WorkspacePane::Viewport => match self.view {
+                View::Map => self.map_canvas(ui),
+                View::Section => self.section_canvas(ui),
+            },
+            WorkspacePane::Inspector => self.inspector(ui),
+        }
+    }
+}
+
 impl eframe::App for RoadEditor {
     fn clear_color(&self, visuals: &egui::Visuals) -> [f32; 4] {
         visuals.panel_fill.to_normalized_gamma_f32()
@@ -6294,9 +6705,30 @@ impl eframe::App for RoadEditor {
 
     fn ui(&mut self, root: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let ctx = root.ctx().clone();
+        #[cfg(target_arch = "wasm32")]
+        while let Ok(event) = self.web_events.try_recv() {
+            match event {
+                WebFileEvent::Opened { name, source } => match parse(&source) {
+                    Ok(program) => {
+                        self.load_program(program, Some(PathBuf::from(&name)));
+                        self.status = format!("Opened {name}");
+                    }
+                    Err(error) => self.status = format!("Could not open {name}: {error}"),
+                },
+                WebFileEvent::Saved { name, program } => {
+                    self.path = Some(PathBuf::from(&name));
+                    self.saved_program = program;
+                    self.dirty = self.program != self.saved_program;
+                    self.status = format!("Saved {name}");
+                }
+                WebFileEvent::Message(message) => self.status = message,
+            }
+        }
+        #[cfg(not(target_arch = "wasm32"))]
         if self.mcp.is_some() {
             ctx.request_repaint_after(std::time::Duration::from_millis(50));
         }
+        #[cfg(not(target_arch = "wasm32"))]
         self.handle_mcp(&ctx);
         let before = self.program.clone();
         // Native menu events arrive outside egui's input stream.
@@ -6353,21 +6785,82 @@ impl eframe::App for RoadEditor {
                 self.paste_selection();
             }
         }
-        self.top_bar(root);
-        self.sidebar(root);
-        self.inspector(root);
-        if !self.status.is_empty() {
-            egui::Panel::bottom("status").show(root, |ui| {
-                ui.label(
-                    RichText::new(&self.status)
-                        .small()
-                        .color(ui.visuals().weak_text_color()),
-                );
-            });
+        let palette_shortcut = ctx.input_mut(|input| {
+            input.consume_key(
+                egui::Modifiers::COMMAND | egui::Modifiers::SHIFT,
+                egui::Key::P,
+            )
+        });
+        if palette_shortcut {
+            self.command_palette.open();
         }
-        match self.view {
-            View::Map => self.map_canvas(root),
-            View::Section => self.section_canvas(root),
+        let theme_shortcut =
+            ctx.input_mut(|input| input.consume_key(egui::Modifiers::COMMAND, egui::Key::J));
+        if theme_shortcut {
+            toggle_theme(&ctx);
+        }
+        self.menu_bar(root);
+        self.top_bar(root);
+        if !self.status.is_empty() {
+            egui::Panel::bottom("status")
+                .frame(egui::Frame::new().inner_margin(egui::Margin::symmetric(12, 4)))
+                .show(root, |ui| {
+                    ui.label(
+                        RichText::new(&self.status)
+                            .small()
+                            .color(ui.visuals().weak_text_color()),
+                    );
+                });
+        }
+        let mut style = FramesStyle::from_visuals(&ctx.style_of(ctx.theme()).visuals);
+        style.accent = editor_palette(ctx.theme()).brand;
+        style.active_border = style.accent;
+        *self.frames.style_mut() = style;
+        self.map_rect = None;
+        let mut frames = std::mem::take(&mut self.frames);
+        let mut layout = std::mem::take(&mut self.layout);
+        for event in frames.show(root, &mut layout, self) {
+            match event {
+                FramesEvent::PaneCloseRequested(id) => {
+                    if layout.pane(id) != Some(&WorkspacePane::Viewport) {
+                        layout.close_pane(id);
+                    }
+                }
+                FramesEvent::NewTabRequested(_) => {}
+                FramesEvent::TabDoubleClicked(_) => {}
+                FramesEvent::OtherTabsCloseRequested(keep) => {
+                    if let Some(frame) = layout.frame_of(keep) {
+                        let others: Vec<_> = layout
+                            .frame(frame)
+                            .into_iter()
+                            .flat_map(|frame| frame.panes())
+                            .copied()
+                            .filter(|id| {
+                                *id != keep && layout.pane(*id) != Some(&WorkspacePane::Viewport)
+                            })
+                            .collect();
+                        for id in others {
+                            layout.close_pane(id);
+                        }
+                    }
+                }
+            }
+        }
+        self.frames = frames;
+        self.layout = layout;
+        {
+            let visuals = &ctx.style_of(ctx.theme()).visuals;
+            let style = self.command_palette.style_mut();
+            style.panel = visuals.window_fill;
+            style.line = visuals.window_stroke().color;
+            style.selected = visuals.widgets.hovered.bg_fill;
+            style.accent = editor_palette(ctx.theme()).brand;
+            style.text = visuals.text_color();
+            style.muted = visuals.weak_text_color();
+        }
+        let commands = Self::palette_commands();
+        if let Some(id) = self.command_palette.show(&ctx, &commands) {
+            self.execute_palette_command(&id, &ctx);
         }
         self.pending_dialog(&ctx);
         self.delete_dialog(&ctx);
@@ -6557,6 +7050,7 @@ impl NativeFileMenu {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn main() -> eframe::Result {
     let mut args = std::env::args_os().skip(1);
     let first = args.next();
@@ -6585,7 +7079,45 @@ fn main() -> eframe::Result {
     )
 }
 
-#[cfg(test)]
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen::prelude::wasm_bindgen]
+pub struct WebHandle {
+    runner: eframe::WebRunner,
+}
+
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen::prelude::wasm_bindgen]
+impl WebHandle {
+    #[wasm_bindgen(constructor)]
+    pub fn new() -> Self {
+        Self {
+            runner: eframe::WebRunner::new(),
+        }
+    }
+
+    pub async fn start(
+        &self,
+        canvas: web_sys::HtmlCanvasElement,
+    ) -> Result<(), wasm_bindgen::JsValue> {
+        self.runner
+            .start(
+                canvas,
+                eframe::WebOptions::default(),
+                Box::new(|cc| Ok(Box::new(RoadEditor::new(cc, None)))),
+            )
+            .await
+    }
+
+    pub fn has_panicked(&self) -> bool {
+        self.runner.has_panicked()
+    }
+
+    pub fn panic_message(&self) -> Option<String> {
+        self.runner.panic_summary().map(|summary| summary.message())
+    }
+}
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
 mod tests {
     use super::*;
 
@@ -6737,7 +7269,13 @@ mod tests {
     }
 
     fn sample_editor() -> RoadEditor {
+        let mut layout = Layout::with_pane(WorkspacePane::Viewport);
+        layout.add_pane_against_edge(DropSide::Left, 0.23, WorkspacePane::Library);
+        layout.add_pane_against_edge(DropSide::Right, 0.25, WorkspacePane::Inspector);
         RoadEditor {
+            frames: Frames::new().with_new_tab_button(false),
+            layout,
+            command_palette: CommandPalette::default(),
             program: parse(include_str!("../../examples/city.road")).unwrap(),
             saved_program: parse(include_str!("../../examples/city.road")).unwrap(),
             undo_stack: Vec::new(),
@@ -6793,6 +7331,31 @@ mod tests {
             mcp: None,
             map_rect: None,
         }
+    }
+
+    #[test]
+    fn closed_workspace_panel_reopens_without_displacing_viewport() {
+        let mut editor = sample_editor();
+        let library = editor
+            .layout
+            .find_pane(|pane| *pane == WorkspacePane::Library)
+            .unwrap()
+            .0;
+        editor.layout.close_pane(library);
+        editor.open_pane(WorkspacePane::Library);
+        editor.open_pane(WorkspacePane::Library);
+        assert_eq!(
+            editor
+                .layout
+                .panes()
+                .filter(|(_, pane)| **pane == WorkspacePane::Library)
+                .count(),
+            1
+        );
+        assert!(editor
+            .layout
+            .find_pane(|pane| *pane == WorkspacePane::Viewport)
+            .is_some());
     }
 
     #[test]

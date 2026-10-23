@@ -588,6 +588,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "egui_command_palette"
+version = "0.1.0"
+dependencies = [
+ "egui",
+]
+
+[[package]]
 name = "egui_extras"
 version = "0.36.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -601,6 +608,13 @@ dependencies = [
  "mime_guess2",
  "profiling",
  "resvg",
+]
+
+[[package]]
+name = "egui_frames"
+version = "0.4.0"
+dependencies = [
+ "egui",
 ]
 
 [[package]]
@@ -1794,11 +1808,16 @@ version = "0.1.0"
 dependencies = [
  "base64",
  "eframe",
+ "egui_command_palette",
  "egui_extras",
+ "egui_frames",
  "muda",
  "png 0.17.16",
  "rfd",
  "serde_json",
+ "wasm-bindgen",
+ "wasm-bindgen-futures",
+ "web-sys",
 ]
 
 [[package]]
