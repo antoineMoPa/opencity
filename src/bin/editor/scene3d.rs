@@ -717,6 +717,9 @@ impl WebSceneBuild {
     // Returns a complete scene when the frame budget permits. A partially
     // built scene is never handed to the GPU; the prior scene stays visible.
     pub fn advance(&mut self, budget: std::time::Duration) -> bool {
+        #[cfg(target_arch = "wasm32")]
+        let started = web_time::Instant::now();
+        #[cfg(not(target_arch = "wasm32"))]
         let started = std::time::Instant::now();
         while self.landscape_index < self.landscape.len() {
             append_landscape_feature(
