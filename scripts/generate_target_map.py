@@ -112,8 +112,8 @@ definitions = """road local: carlane-middle-carlane; end;
 road collector: sidewalk-carlane-middle-carlane-sidewalk; end;
 road arterial: sidewalk-carlane-carlane-middle-carlane-carlane-sidewalk; end;
 road freeway: verge-carlane-carlane-middle-carlane-carlane-verge; end;
-road ramp: verge-carlane-verge; end;
-road ramp_mouth: carlane-verge; end;
+road ramp: verge-carlane-verge; direction forward; end;
+road ramp_mouth: carlane-verge; direction forward; end;
 road airport_runway: verge-runway-verge; end;
 road airport_taxiway: verge-taxiway-verge; end;
 road airport_apron: apron; end;
@@ -171,6 +171,42 @@ land_shapes = {
         (853, 938), (839, 910), (826, 882),
     ],
 }
+
+
+def beach_outline(outline, width=4.0):
+    """Offset a traced coastline by a small, uniform distance in image pixels."""
+    signed_area = sum(a[0] * b[1] - b[0] * a[1]
+                      for a, b in zip(outline, outline[1:] + outline[:1]))
+    side = 1 if signed_area > 0 else -1
+    beach = []
+    for index, point in enumerate(outline):
+        previous = outline[index - 1]
+        following = outline[(index + 1) % len(outline)]
+        incoming = (point[0] - previous[0], point[1] - previous[1])
+        outgoing = (following[0] - point[0], following[1] - point[1])
+        incoming_length = (incoming[0] ** 2 + incoming[1] ** 2) ** 0.5
+        outgoing_length = (outgoing[0] ** 2 + outgoing[1] ** 2) ** 0.5
+        if incoming_length == 0 or outgoing_length == 0:
+            raise ValueError("coastline has a repeated vertex")
+        first = (side * incoming[1] / incoming_length,
+                 -side * incoming[0] / incoming_length)
+        second = (side * outgoing[1] / outgoing_length,
+                  -side * outgoing[0] / outgoing_length)
+        bisector = (first[0] + second[0], first[1] + second[1])
+        denominator = bisector[0] * second[0] + bisector[1] * second[1]
+        if denominator < 0.4:
+            # Keep acute corners short enough to avoid coastline spikes.
+            displacement = (second[0] * width, second[1] * width)
+        else:
+            displacement = (bisector[0] * width / denominator,
+                            bisector[1] * width / denominator)
+        beach.append((point[0] + displacement[0],
+                      point[1] + displacement[1]))
+    return beach
+
+
+beach_shapes = {f"{name}_beach": beach_outline(outline)
+                for name, outline in land_shapes.items()}
 
 # Broad wooded regions, raised ground, and city building lots.
 # Vegetation polygons mark cover only; they do not generate individual trees.
@@ -259,22 +295,24 @@ for name, parent, lane, fraction, freeway, turn, from_freeway in [
 ]:
     ramp_mouth(name, parent, lane, fraction, freeway, turn, from_freeway)
 
-ramp_mouth("nw_loop_entry", placements["i10"][5], 1, 0.56,
-           (766, 349), (783, 351), True)
-ramp_mouth("nw_loop_merge", placements["i95"][2], 5, 0.53,
-           (817, 305), (817, 323), False)
-ramp_mouth("ne_loop_entry", placements["i95"][2], 1, 0.53,
-           (817, 305), (817, 323), True)
-ramp_mouth("ne_loop_merge", placements["i10"][6], 1, 0.37,
-           (870, 353), (850, 352), False)
-ramp_mouth("se_loop_entry", placements["i10"][6], 5, 0.37,
-           (870, 353), (850, 352), True)
-ramp_mouth("se_loop_merge", placements["i95"][3], 1, 0.60,
-           (817, 405), (817, 379), False)
-ramp_mouth("sw_loop_entry", placements["i95"][3], 5, 0.60,
-           (817, 405), (817, 379), True)
-ramp_mouth("sw_loop_merge", placements["i10"][5], 5, 0.56,
-           (766, 349), (783, 351), False)
+# Each mouth follows the travel direction of its freeway lane before the loop
+# bends away, or after it merges back. Opposing arms use different lane points.
+ramp_mouth("nw_loop_entry", placements["i10"][5], 1, 0.85,
+           (800, 351), (783, 351), True)
+ramp_mouth("nw_loop_merge", placements["i95"][2], 5, 0.85,
+           (817, 337), (817, 323), False)
+ramp_mouth("ne_loop_entry", placements["i95"][2], 1, 0.85,
+           (817, 337), (817, 323), True)
+ramp_mouth("ne_loop_merge", placements["i10"][6], 1, 0.10,
+           (831, 351), (850, 352), False)
+ramp_mouth("se_loop_entry", placements["i10"][6], 5, 0.10,
+           (831, 351), (850, 352), True)
+ramp_mouth("se_loop_merge", placements["i95"][3], 1, 0.15,
+           (817, 365), (817, 379), False)
+ramp_mouth("sw_loop_entry", placements["i95"][3], 5, 0.15,
+           (817, 365), (817, 379), True)
+ramp_mouth("sw_loop_merge", placements["i10"][5], 5, 0.85,
+           (800, 351), (783, 351), False)
 
 # The northwest and southeast terminals have large free-flow turning ramps.
 for label, path in [
@@ -292,9 +330,9 @@ for label, path in [
 
 for name, parent, lane, fraction, freeway, turn, from_freeway in [
     ("west_depart_10", placements["i10"][0], 5, 0.22, (190, 197), (190, 207), True),
-    ("west_merge_10", placements["i10"][2], 1, 0.25, (368, 248), (368, 228), False),
-    ("west_grid_merge_10", placements["i10"][2], 5, 0.78, (423, 287), (418, 303), False),
-    ("east_depart_10_n", placements["i10"][10], 1, 0.12, (1319, 457), (1320, 436), True),
+    ("west_merge_10", placements["i10"][2], 5, 0.25, (368, 248), (368, 228), False),
+    ("west_grid_merge_10", placements["i10"][2], 5, 0.95, (440, 298), (418, 303), False),
+    ("east_depart_10_n", placements["i10"][10], 5, 0.01, (1304, 451), (1320, 436), True),
     ("east_depart_10_s", placements["i10"][10], 5, 0.12, (1319, 457), (1319, 470), True),
 ]:
     ramp_mouth(name, parent, lane, fraction, freeway, turn, from_freeway)
@@ -311,10 +349,10 @@ for label, path in [
     road(label, "ramp", path)
 
 for name, parent, lane, fraction, freeway, turn in [
-    ("north_depart_95_w", placements["i95"][0], 5, 0.12, (816, 85), (807, 85)),
-    ("north_depart_95_e", placements["i95"][0], 1, 0.12, (816, 85), (826, 85)),
-    ("south_depart_95_w", placements["i95"][5], 5, 0.74, (817, 612), (807, 613)),
-    ("south_depart_95_e", placements["i95"][5], 1, 0.74, (817, 612), (827, 613)),
+    ("north_depart_95_w", placements["i95"][0], 1, 0.30, (816, 100), (807, 85)),
+    ("north_depart_95_e", placements["i95"][0], 5, 0.12, (816, 85), (826, 85)),
+    ("south_depart_95_w", placements["i95"][5], 5, 0.65, (817, 602), (807, 613)),
+    ("south_depart_95_e", placements["i95"][5], 5, 0.65, (817, 602), (827, 613)),
 ]:
     ramp_mouth(name, parent, lane, fraction, freeway, turn, True)
 
@@ -421,9 +459,9 @@ road("east_port_approach", "collector", [(1202, 660), (1199, 694),
 
 # Small southern island neighborhood and its loop approach.
 grid("island", "local", [930, 952, 975, 998], [874, 897, 921, 943])
-road("island_loop", "collector", [(930, 897), (895, 881), (883, 850),
-                                    (899, 829), (926, 837), (939, 868),
-                                    (932, 901), (952, 921)])
+road("island_loop", "collector", [(930, 874), (912, 856), (911, 835),
+                                    (925, 816), (955, 807), (985, 810),
+                                    (1006, 825), (1014, 846), (998, 874)])
 
 # Local connectors that provide the shape of the waterfront street ends.
 for label, path in [
@@ -616,6 +654,9 @@ with Path("examples/target_map.road").open("w") as stream:
     for (x, y), name in points.items():
         stream.write(f"{name} = map_point({coordinate((x, y))});\n")
     stream.write("\n")
+    for name, outline in beach_shapes.items():
+        coordinates = ", ".join(coordinate(point) for point in outline)
+        stream.write(f"{name} = beach({coordinates});\n")
     for name, outline in land_shapes.items():
         coordinates = ", ".join(coordinate(point) for point in outline)
         stream.write(f"{name} = land({coordinates});\n")

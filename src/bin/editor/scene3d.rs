@@ -30,23 +30,21 @@ pub struct Scene {
 
 impl Scene {
     fn gpu_vertices(&self) -> &[GpuVertex] {
-        self.gpu_vertices.get_or_init(|| {
-            self.vertices
-                .iter()
-                .map(|vertex| {
-                    let rgba = vertex.color.to_array();
-                    GpuVertex {
-                        world: [
-                            vertex.point.x,
-                            vertex.point.y,
-                            vertex.height,
-                            vertex.depth_bias,
-                        ],
-                        color: rgba.map(|channel| channel as f32 / 255.0),
-                    }
-                })
-                .collect()
-        })
+        self.gpu_vertices
+            .get_or_init(|| self.vertices.iter().map(gpu_vertex_from_world).collect())
+    }
+}
+
+fn gpu_vertex_from_world(vertex: &WorldVertex) -> GpuVertex {
+    let rgba = vertex.color.to_array();
+    GpuVertex {
+        world: [
+            vertex.point.x,
+            vertex.point.y,
+            vertex.height,
+            vertex.depth_bias,
+        ],
+        color: rgba.map(|channel| channel as f32 / 255.0),
     }
 }
 
@@ -115,7 +113,7 @@ fn add_building_walls(
         return;
     }
     let color = match palette.theme {
-        egui::Theme::Dark => Color32::from_rgb(79, 87, 96),
+        egui::Theme::Dark => Color32::from_rgb(130, 142, 143),
         egui::Theme::Light => Color32::from_rgb(141, 151, 159),
     };
     for index in 0..feature.points.len() {
@@ -260,7 +258,7 @@ fn add_terrain_walls(
     palette: EditorPalette,
 ) {
     let color = match palette.theme {
-        egui::Theme::Dark => Color32::from_rgb(68, 59, 44),
+        egui::Theme::Dark => Color32::from_rgb(91, 110, 61),
         egui::Theme::Light => Color32::from_rgb(147, 124, 87),
     };
     for wall in opencity::terrain_walls(feature, features) {
@@ -314,41 +312,76 @@ fn append_landscape(
     model_base: Option<&Path>,
 ) {
     for feature in features {
-        let mesh = feature
-            .model
-            .as_deref()
-            .and_then(|path| model_for(path, model_base));
-        capture_geometry(
-            ctx,
-            |painter| {
-                paint_landscape_feature(
-                    painter,
-                    GEOMETRY_RECT,
-                    egui::Vec2::ZERO,
-                    GEOMETRY_SCALE,
-                    feature,
-                    selected_landscape == feature.name.as_deref(),
-                    palette,
-                );
-            },
-            |_| {
-                feature.elevation
-                    + if mesh.is_some() {
-                        0.0
-                    } else {
-                        feature.height.unwrap_or(0.0)
-                    }
-                    - 0.02
-            },
+        append_landscape_feature(
             scene,
+            ctx,
+            feature,
+            features,
+            palette,
+            selected_landscape,
+            model_base,
         );
-        if let Some(mesh) = mesh {
-            add_building_model(scene, feature, &mesh);
-        } else {
-            add_building_walls(scene, feature, palette);
-        }
-        add_terrain_walls(scene, feature, features, palette);
     }
+}
+
+fn append_landscape_feature(
+    scene: &mut Scene,
+    ctx: &egui::Context,
+    feature: &opencity::LandscapeFeature,
+    features: &[opencity::LandscapeFeature],
+    palette: EditorPalette,
+    selected_landscape: Option<&str>,
+    model_base: Option<&Path>,
+) {
+    // Flat landscape features frequently overlap at the same elevation. A
+    // depth-only offset keeps their screen position fixed while giving the
+    // fill a stable order regardless of triangle interpolation or draw order.
+    // Roads use zero bias, so they remain in front of ground cover.
+    let depth_priority = match feature.kind {
+        LandscapeKind::Beach => 0.08,
+        LandscapeKind::Land => 0.06,
+        LandscapeKind::Lake | LandscapeKind::River => 0.04,
+        LandscapeKind::Vegetation => 0.02,
+        LandscapeKind::Terrain | LandscapeKind::Building => 0.0,
+    };
+    let mesh = feature
+        .model
+        .as_deref()
+        .and_then(|path| model_for(path, model_base));
+    let first_vertex = scene.vertices.len();
+    capture_geometry(
+        ctx,
+        |painter| {
+            paint_landscape_feature(
+                painter,
+                GEOMETRY_RECT,
+                egui::Vec2::ZERO,
+                GEOMETRY_SCALE,
+                feature,
+                selected_landscape == feature.name.as_deref(),
+                palette,
+            );
+        },
+        |_| {
+            feature.elevation
+                + if mesh.is_some() {
+                    0.0
+                } else {
+                    feature.height.unwrap_or(0.0)
+                }
+                - 0.02
+        },
+        scene,
+    );
+    for vertex in &mut scene.vertices[first_vertex..] {
+        vertex.depth_bias += depth_priority;
+    }
+    if let Some(mesh) = mesh {
+        add_building_model(scene, feature, &mesh);
+    } else {
+        add_building_walls(scene, feature, palette);
+    }
+    add_terrain_walls(scene, feature, features, palette);
 }
 
 fn grid_vertices(palette: EditorPalette) -> &'static [WorldVertex] {
@@ -375,6 +408,22 @@ fn grid_vertices(palette: EditorPalette) -> &'static [WorldVertex] {
         }
         grid.vertices
     })
+}
+
+#[cfg(target_arch = "wasm32")]
+pub fn loading_scene(palette: EditorPalette) -> Arc<Scene> {
+    static DARK: OnceLock<Arc<Scene>> = OnceLock::new();
+    static LIGHT: OnceLock<Arc<Scene>> = OnceLock::new();
+    let cache = match palette.theme {
+        egui::Theme::Dark => &DARK,
+        egui::Theme::Light => &LIGHT,
+    };
+    Arc::clone(cache.get_or_init(|| {
+        let mut scene = Scene::default();
+        scene.vertices.extend_from_slice(grid_vertices(palette));
+        scene.gpu_vertices();
+        Arc::new(scene)
+    }))
 }
 
 fn add_elevated_edges(
@@ -546,8 +595,13 @@ pub fn build_scene_with_model_base(
     let mut scene = Scene::default();
     let ctx = egui::Context::default();
     let profiles = paint_profiles(program, projection);
-    scene.vertices.extend_from_slice(grid_vertices(palette));
     let mut features = project_landscape_features(program).features;
+    if !features
+        .iter()
+        .any(|feature| matches!(feature.kind, LandscapeKind::Land | LandscapeKind::Beach))
+    {
+        scene.vertices.extend_from_slice(grid_vertices(palette));
+    }
     features.sort_by(|a, b| a.elevation.total_cmp(&b.elevation));
     append_landscape(
         &mut scene,
@@ -609,8 +663,12 @@ pub struct WebSceneBuild {
     profiles: Vec<PaintProfile>,
     road_order: Vec<usize>,
     intersections: Vec<map::Intersection>,
+    landscape: Vec<opencity::LandscapeFeature>,
+    landscape_index: usize,
     road_index: usize,
     intersection_index: usize,
+    gpu_build: Vec<GpuVertex>,
+    gpu_index: usize,
     scene: Scene,
     ctx: egui::Context,
 }
@@ -627,18 +685,15 @@ impl WebSceneBuild {
         let profiles = paint_profiles(&program, &projection);
         let road_order = road_paint_order(&program, &projection, &profiles);
         let intersections = map::intersections(&program, &projection);
+        let mut landscape = project_landscape_features(&program).features;
         let mut scene = Scene::default();
-        scene.vertices.extend_from_slice(grid_vertices(palette));
-        let mut features = project_landscape_features(&program).features;
-        features.sort_by(|a, b| a.elevation.total_cmp(&b.elevation));
-        append_landscape(
-            &mut scene,
-            &ctx,
-            &features,
-            palette,
-            selected_landscape.as_deref(),
-            None,
-        );
+        if !landscape
+            .iter()
+            .any(|feature| matches!(feature.kind, LandscapeKind::Land | LandscapeKind::Beach))
+        {
+            scene.vertices.extend_from_slice(grid_vertices(palette));
+        }
+        landscape.sort_by(|a, b| a.elevation.total_cmp(&b.elevation));
         Self {
             program,
             theme: palette.theme,
@@ -648,8 +703,12 @@ impl WebSceneBuild {
             profiles,
             road_order,
             intersections,
+            landscape,
+            landscape_index: 0,
             road_index: 0,
             intersection_index: 0,
+            gpu_build: Vec::new(),
+            gpu_index: 0,
             scene,
             ctx,
         }
@@ -659,6 +718,21 @@ impl WebSceneBuild {
     // built scene is never handed to the GPU; the prior scene stays visible.
     pub fn advance(&mut self, budget: std::time::Duration) -> bool {
         let started = std::time::Instant::now();
+        while self.landscape_index < self.landscape.len() {
+            append_landscape_feature(
+                &mut self.scene,
+                &self.ctx,
+                &self.landscape[self.landscape_index],
+                &self.landscape,
+                self.palette,
+                self.selected_landscape.as_deref(),
+                None,
+            );
+            self.landscape_index += 1;
+            if started.elapsed() >= budget {
+                return false;
+            }
+        }
         while self.road_index < self.road_order.len() {
             let index = self.road_order[self.road_index];
             append_road(
@@ -700,11 +774,26 @@ impl WebSceneBuild {
                 return false;
             }
         }
-        self.scene.gpu_vertices();
+        // Upload preparation is CPU work too. Convert in bounded batches so
+        // completing a large scene does not freeze a browser frame.
+        while self.gpu_index < self.scene.vertices.len() {
+            let end = (self.gpu_index + 8192).min(self.scene.vertices.len());
+            self.gpu_build.extend(
+                self.scene.vertices[self.gpu_index..end]
+                    .iter()
+                    .map(gpu_vertex_from_world),
+            );
+            self.gpu_index = end;
+            if started.elapsed() >= budget {
+                return false;
+            }
+        }
         true
     }
 
     pub fn finish(self) -> Scene {
+        assert_eq!(self.gpu_index, self.scene.vertices.len());
+        assert!(self.scene.gpu_vertices.set(self.gpu_build).is_ok());
         self.scene
     }
 }
@@ -1126,6 +1215,48 @@ impl RenderResources {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn coastal_scene_keeps_water_free_of_editor_grid() {
+        for theme in [egui::Theme::Dark, egui::Theme::Light] {
+            let palette = editor_palette(theme);
+            assert_eq!(palette.map_background, Color32::from_rgb(7, 112, 172));
+            let program = parse("land(0, 0, 2, 0, 2, 2, 0, 2);").unwrap();
+            let projection = map::project(&program);
+            let scene = build_scene(&program, &projection, palette, &[], None);
+            assert!(!scene
+                .vertices
+                .iter()
+                .any(|vertex| vertex.depth_bias == 100.0));
+        }
+    }
+
+    #[test]
+    fn overlapping_ground_surfaces_have_stable_depth_order() {
+        let program = parse(
+            "beach(0, 0, 3, 0, 3, 3, 0, 3); land(0, 0, 3, 0, 3, 3, 0, 3); vegetation(forest, 0, 0, 3, 0, 3, 3, 0, 3);",
+        )
+        .unwrap();
+        let palette = editor_palette(egui::Theme::Dark);
+        let scene = build_scene(&program, &map::project(&program), palette, &[], None);
+        let fill_bias = |color| {
+            scene
+                .vertices
+                .iter()
+                .find(|vertex| vertex.color == color)
+                .expect("landscape fill exists")
+                .depth_bias
+        };
+        let beach = fill_bias(Color32::from_rgb(244, 219, 159));
+        let land = fill_bias(Color32::from_rgb(105, 158, 75));
+        let vegetation = fill_bias(Color32::from_rgb(61, 128, 59));
+        assert!(beach > land && land > vegetation);
+        assert!(beach - land >= 0.01 && land - vegetation >= 0.01);
+        assert!(
+            vegetation > 0.0,
+            "roads at zero bias stay above ground cover"
+        );
+    }
 
     #[test]
     fn overlapping_terrain_outlines_expose_both_mountain_levels() {

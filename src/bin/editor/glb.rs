@@ -212,6 +212,7 @@ pub fn export(program: &Program) -> Vec<u8> {
     for feature in &features {
         let color = match feature.kind {
             LandscapeKind::Land => [77, 128, 79, 255],
+            LandscapeKind::Beach => [220, 196, 143, 255],
             LandscapeKind::Lake => [48, 116, 158, 255],
             LandscapeKind::River => [52, 130, 167, 255],
             LandscapeKind::Vegetation => [53, 134, 68, 255],
@@ -232,34 +233,43 @@ pub fn export(program: &Program) -> Vec<u8> {
                                 x: pair[0][0] + nx,
                                 y: pair[0][1] + ny,
                             },
-                            feature.elevation,
+                            feature.elevation - 0.02,
                         ),
                         (
                             WorldPoint {
                                 x: pair[0][0] - nx,
                                 y: pair[0][1] - ny,
                             },
-                            feature.elevation,
+                            feature.elevation - 0.02,
                         ),
                         (
                             WorldPoint {
                                 x: pair[1][0] - nx,
                                 y: pair[1][1] - ny,
                             },
-                            feature.elevation,
+                            feature.elevation - 0.02,
                         ),
                         (
                             WorldPoint {
                                 x: pair[1][0] + nx,
                                 y: pair[1][1] + ny,
                             },
-                            feature.elevation,
+                            feature.elevation - 0.02,
                         ),
                     ],
                     color,
                 );
             }
         } else {
+            // glTF has no per-vertex depth priority. Separate overlapping
+            // ground surfaces slightly so external viewers do not z-fight.
+            let ground_offset = match feature.kind {
+                LandscapeKind::Beach => -0.04,
+                LandscapeKind::Land => -0.03,
+                LandscapeKind::Lake | LandscapeKind::River => -0.02,
+                LandscapeKind::Vegetation => -0.01,
+                LandscapeKind::Terrain | LandscapeKind::Building => 0.0,
+            };
             let polygon: Vec<_> = feature
                 .points
                 .iter()
@@ -273,7 +283,7 @@ pub fn export(program: &Program) -> Vec<u8> {
                             x: point.x,
                             y: point.y,
                         },
-                        feature.elevation + feature.height.unwrap_or(0.0),
+                        feature.elevation + feature.height.unwrap_or(0.0) + ground_offset,
                         color,
                     );
                 }
@@ -399,6 +409,28 @@ pub fn export(program: &Program) -> Vec<u8> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn overlapping_ground_surfaces_export_at_separate_heights() {
+        let program = opencity::parse(
+            "beach(0, 0, 2, 0, 2, 2, 0, 2); land(0, 0, 2, 0, 2, 2, 0, 2); vegetation(forest, 0, 0, 2, 0, 2, 2, 0, 2);",
+        )
+        .unwrap();
+        let mesh = super::super::model::parse_glb(&export(&program)).unwrap();
+        let height_for = |red: u8| {
+            mesh.triangles
+                .iter()
+                .flatten()
+                .find(|vertex| (vertex.color[0] * 255.0).round() as u8 == red)
+                .expect("exported ground fill exists")
+                .position[1]
+        };
+        let beach = height_for(220);
+        let land = height_for(77);
+        let vegetation = height_for(53);
+        assert!(beach < land && land < vegetation && vegetation < 0.0);
+    }
+
     #[test]
     fn glb_contains_mesh_and_valid_chunks() {
         let program =

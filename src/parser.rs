@@ -2,8 +2,8 @@ use std::fs;
 use std::path::Path;
 
 use crate::ast::{
-    Argument, BlockDefinition, Call, Program, RoadDefinition, RoadElement, RoadElementKind,
-    Statement,
+    Argument, BlockDefinition, Call, Program, RoadDefinition, RoadDirection, RoadElement,
+    RoadElementKind, Statement,
 };
 use crate::error::{Error, SyntaxError};
 use crate::lexer::{tokenize, Token, TokenKind};
@@ -81,11 +81,28 @@ impl Parser {
             }
         }
         self.expect(TokenKind::Semicolon)?;
+        let direction = if self.at(TokenKind::Identifier) && self.current().text == "direction" {
+            self.bump();
+            let value = self.expect(TokenKind::Identifier)?;
+            let direction =
+                RoadDirection::from_keyword(&value.text).ok_or_else(|| SyntaxError {
+                    span: value.span,
+                    message: format!("unknown road direction '{}'", value.text),
+                })?;
+            self.expect(TokenKind::Semicolon)?;
+            direction
+        } else {
+            RoadDirection::Both
+        };
         self.expect(TokenKind::End)?;
         if self.at(TokenKind::Semicolon) {
             self.bump();
         }
-        Ok(RoadDefinition { name, elements })
+        Ok(RoadDefinition {
+            name,
+            elements,
+            direction,
+        })
     }
 
     fn block(&mut self) -> Result<BlockDefinition, SyntaxError> {

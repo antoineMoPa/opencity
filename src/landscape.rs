@@ -1,6 +1,6 @@
 //! Typed landscape geometry projected from `.road` calls.
 //!
-//! `land` and `lake` take at least three coordinate pairs; `river` takes at
+//! `land`, `beach`, and `lake` take at least three coordinate pairs; `river` takes at
 //! least two. Coordinates inside a block are local to its placement:
 //! `block_name(x, y)` translates them by `(x, y)`.
 
@@ -12,6 +12,7 @@ use crate::{Argument, BlockDefinition, Call, Program, Statement};
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum LandscapeKind {
     Land,
+    Beach,
     Lake,
     River,
     Vegetation,
@@ -24,6 +25,7 @@ impl LandscapeKind {
     pub fn from_call_name(name: &str) -> Option<Self> {
         match name {
             "land" => Some(Self::Land),
+            "beach" => Some(Self::Beach),
             "lake" => Some(Self::Lake),
             "river" => Some(Self::River),
             "vegetation" => Some(Self::Vegetation),
@@ -36,6 +38,7 @@ impl LandscapeKind {
     pub fn call_name(self) -> &'static str {
         match self {
             Self::Land => "land",
+            Self::Beach => "beach",
             Self::Lake => "lake",
             Self::River => "river",
             Self::Vegetation => "vegetation",
@@ -46,7 +49,12 @@ impl LandscapeKind {
 
     fn minimum_points(self) -> usize {
         match self {
-            Self::Land | Self::Lake | Self::Vegetation | Self::Terrain | Self::Building => 3,
+            Self::Land
+            | Self::Beach
+            | Self::Lake
+            | Self::Vegetation
+            | Self::Terrain
+            | Self::Building => 3,
             Self::River => 2,
         }
     }
@@ -284,10 +292,12 @@ fn feature(
         kind,
         name: call.assigns.first().cloned(),
         points,
-        elevation: if kind == LandscapeKind::Terrain {
-            elevation + height.unwrap_or(0.0)
-        } else {
-            elevation
+        elevation: match kind {
+            LandscapeKind::Terrain => elevation + height.unwrap_or(0.0),
+            // A beach lies just below adjacent land, so overlapping polygons
+            // leave a narrow shore without coplanar surfaces in 3D exports.
+            LandscapeKind::Beach => elevation - 0.005,
+            _ => elevation,
         },
         height: if kind == LandscapeKind::Building {
             height
@@ -451,5 +461,20 @@ mod tests {
     fn building_height_is_validated() {
         let program = parse("bad = building(0, 0, 0, 1, 0, 0, 1);").unwrap();
         assert_eq!(project_landscape_features(&program).errors.len(), 1);
+    }
+
+    #[test]
+    fn beach_is_a_closed_area_below_adjacent_land() {
+        let program = parse(
+            "shore = beach(-1, -1, 2, -1, 2, 2, -1, 2);\
+             island = land(0, 0, 1, 0, 1, 1, 0, 1);",
+        )
+        .unwrap();
+        assert_eq!(parse(&program.to_road_source()).unwrap(), program);
+        let projection = project_landscape_features(&program);
+        assert!(projection.errors.is_empty());
+        assert_eq!(projection.features[0].kind, LandscapeKind::Beach);
+        assert_eq!(projection.features[0].points.len(), 4);
+        assert!(projection.features[0].elevation < projection.features[1].elevation);
     }
 }

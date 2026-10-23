@@ -20,3 +20,4 @@ make serve
 ```
 
 See [docs.md](docs.md) for the language, editor controls, and API.
+For Python map scripts and live editor control, see the [Python interface](python/README.md).

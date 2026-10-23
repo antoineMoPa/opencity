@@ -37,8 +37,8 @@ extern crate self as opencity;
 mod web_editor;
 
 pub use ast::{
-    Argument, BlockDefinition, Call, Program, RoadDefinition, RoadElement, RoadElementKind,
-    Statement,
+    Argument, BlockDefinition, Call, Program, RoadDefinition, RoadDirection, RoadElement,
+    RoadElementKind, Statement,
 };
 pub use design_rules::{
     check_design_rules, check_design_rules_with_projection, DesignIssue, DesignRule,

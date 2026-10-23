@@ -258,6 +258,20 @@ fn point(args: &Value, x: &str, y: &str) -> Result<WorldPoint, String> {
     })
 }
 
+fn segment_state(segment: &map::Segment) -> Value {
+    json!({
+        "segment_index": match segment.source { SegmentSource::TopLevel(index) => Some(index), _ => None },
+        "name":segment.name,"road_type":segment.road_name,"elevation":segment.elevation,
+        "direction":segment.direction.keyword(),
+        "permits_forward":segment.permits_travel(true),
+        "permits_reverse":segment.permits_travel(false),
+        "start_z":segment.start_z,"end_z":segment.end_z,
+        "start_ref":segment.start_ref,"end_ref":segment.end_ref,
+        "start":[segment.start.x,segment.start.y],"control1":[segment.controls[0].x,segment.controls[0].y],
+        "control2":[segment.controls[1].x,segment.controls[1].y],"end":[segment.end.x,segment.end.y]
+    })
+}
+
 fn source(args: &Value, editor: &RoadEditor) -> Result<SegmentSource, String> {
     let index = args["segment_index"]
         .as_u64()
@@ -353,14 +367,7 @@ impl RoadEditor {
                     })).collect::<Vec<_>>()})
                     })
                     .collect();
-                let segments: Vec<_> = projection.segments.iter().map(|segment| {
-                    json!({"segment_index": match segment.source { SegmentSource::TopLevel(index) => Some(index), _ => None },
-                        "name":segment.name,"road_type":segment.road_name,"elevation":segment.elevation,
-                        "start_z":segment.start_z,"end_z":segment.end_z,
-                        "start_ref":segment.start_ref,"end_ref":segment.end_ref,
-                        "start":[segment.start.x,segment.start.y],"control1":[segment.controls[0].x,segment.controls[0].y],
-                        "control2":[segment.controls[1].x,segment.controls[1].y],"end":[segment.end.x,segment.end.y]})
-                }).collect();
+                let segments: Vec<_> = projection.segments.iter().map(segment_state).collect();
                 let landscape = opencity::project_landscape_features(&self.program);
                 let features: Vec<_> = landscape
                     .features
@@ -729,5 +736,17 @@ mod tests {
         let decoder = png::Decoder::new(std::io::Cursor::new(bytes));
         let reader = decoder.read_info().unwrap();
         assert_eq!((reader.info().width, reader.info().height), (2, 2));
+    }
+
+    #[test]
+    fn segment_state_reports_allowed_travel() {
+        let program =
+            opencity::parse("road one_way: carlane; direction forward; end; one_way(0, 0, 1, 0);")
+                .unwrap();
+        let projection = map::project(&program);
+        let state = segment_state(&projection.segments[0]);
+        assert_eq!(state["direction"], "forward");
+        assert_eq!(state["permits_forward"], true);
+        assert_eq!(state["permits_reverse"], false);
     }
 }

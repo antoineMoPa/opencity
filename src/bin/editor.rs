@@ -5,7 +5,8 @@ use egui_command_palette::{Command as PaletteCommand, CommandPalette};
 use egui_frames::{DropSide, Frames, FramesEvent, FramesStyle, Layout, PaneId, PaneView, Tab};
 use opencity::{
     map, parse, parse_road_file, project_landscape_features, set_elevation, set_grade, Argument,
-    Call, LandscapeKind, Program, RoadDefinition, RoadElement, RoadElementKind, Statement,
+    Call, LandscapeKind, Program, RoadDefinition, RoadDirection, RoadElement, RoadElementKind,
+    Statement,
 };
 
 #[path = "editor/glb.rs"]
@@ -17,6 +18,8 @@ mod mcp;
 mod model;
 #[path = "editor/scene3d.rs"]
 mod scene3d;
+#[path = "editor/svg.rs"]
+mod svg;
 use map::{SegmentSource, WorldPoint};
 
 const KINDS: [RoadElementKind; 16] = [
@@ -37,6 +40,10 @@ const KINDS: [RoadElementKind; 16] = [
     RoadElementKind::Taxiway,
     RoadElementKind::Apron,
 ];
+
+// Persistent viewport annotations are small at the overview zoom and grow with the map.
+const ANNOTATION_OVERVIEW_ZOOM: f32 = 75.0;
+const ANNOTATION_OVERVIEW_SCALE: f32 = 0.1;
 
 #[derive(Clone, Copy)]
 struct EditorPalette {
@@ -64,13 +71,13 @@ fn editor_palette(theme: egui::Theme) -> EditorPalette {
             toolbar: Color32::from_rgb(29, 35, 45),
             brand: Color32::from_rgb(105, 190, 220),
             warning: Color32::from_rgb(245, 150, 110),
-            map_background: Color32::from_rgb(10, 27, 34),
+            map_background: Color32::from_rgb(7, 112, 172),
             map_axis: Color32::from_rgb(28, 48, 55),
             map_major: Color32::from_rgb(18, 36, 43),
             map_minor: Color32::from_rgb(12, 30, 36),
             map_text: Color32::from_rgb(226, 237, 235),
             map_subtle: Color32::from_rgb(153, 177, 175),
-            map_outline: Color32::from_rgb(11, 18, 22),
+            map_outline: Color32::from_rgb(57, 68, 67),
             map_selected: Color32::from_rgb(124, 207, 245),
             map_preview: Color32::from_rgb(127, 216, 199),
             map_centerline: Color32::from_white_alpha(155),
@@ -81,7 +88,7 @@ fn editor_palette(theme: egui::Theme) -> EditorPalette {
             toolbar: Color32::from_rgb(235, 242, 245),
             brand: Color32::from_rgb(21, 104, 132),
             warning: Color32::from_rgb(153, 69, 26),
-            map_background: Color32::from_rgb(239, 246, 243),
+            map_background: Color32::from_rgb(7, 112, 172),
             map_axis: Color32::from_rgb(155, 184, 179),
             map_major: Color32::from_rgb(196, 216, 210),
             map_minor: Color32::from_rgb(222, 234, 228),
@@ -194,6 +201,7 @@ enum WebFileEvent {
 fn landscape_label(kind: LandscapeKind) -> &'static str {
     match kind {
         LandscapeKind::Land => "Land boundary",
+        LandscapeKind::Beach => "Beach area",
         LandscapeKind::Lake => "Lake",
         LandscapeKind::River => "River",
         LandscapeKind::Vegetation => "Vegetation area",
@@ -419,7 +427,8 @@ impl RoadEditor {
             ("open", "Open…", "Open a road file", "⌘O"),
             ("save", "Save", "Save the current city", "⌘S"),
             ("save-as", "Save As…", "Save to another road file", "⇧⌘S"),
-            ("export-glb", "Export 3D scene…", "Export GLB", ""),
+            ("export-glb", "Export GLB", "Export GLB", ""),
+            ("export-svg", "Export SVG", "Export SVG", ""),
             ("undo", "Undo", "Undo the last edit", "⌘Z"),
             ("redo", "Redo", "Redo the last edit", "⇧⌘Z"),
             ("copy", "Copy", "Copy selected road placements", "⌘C"),
@@ -469,6 +478,7 @@ impl RoadEditor {
             "save" => self.file_action(FileAction::Save),
             "save-as" => self.file_action(FileAction::SaveAs),
             "export-glb" => self.export_glb(),
+            "export-svg" => self.export_svg(),
             "undo" => {
                 self.restore_history(true);
             }
@@ -584,7 +594,7 @@ impl RoadEditor {
             return Arc::clone(&cache.scene);
         }
         #[cfg(target_arch = "wasm32")]
-        if let Some(cache) = &self.scene_cache {
+        {
             let needs_build = self.web_scene_build.as_ref().is_none_or(|build| {
                 build.program != self.program
                     || build.theme != palette.theme
@@ -597,7 +607,8 @@ impl RoadEditor {
                     palette,
                     self.selected_landscape.clone(),
                 ));
-            } else if self
+            }
+            if self
                 .web_scene_build
                 .as_mut()
                 .unwrap()
@@ -614,23 +625,30 @@ impl RoadEditor {
                 return scene;
             }
             ctx.request_repaint();
-            return Arc::clone(&cache.scene);
+            return self
+                .scene_cache
+                .as_ref()
+                .map(|cache| Arc::clone(&cache.scene))
+                .unwrap_or_else(|| scene3d::loading_scene(palette));
         }
-        let scene = Arc::new(scene3d::build_scene_with_model_base(
-            &self.program,
-            projection,
-            palette,
-            &[],
-            self.selected_landscape.as_deref(),
-            self.path.as_ref().and_then(|path| path.parent()),
-        ));
-        self.scene_cache = Some(SceneCache {
-            program: self.program.clone(),
-            theme: palette.theme,
-            selected_landscape: self.selected_landscape.clone(),
-            scene: Arc::clone(&scene),
-        });
-        scene
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            let scene = Arc::new(scene3d::build_scene_with_model_base(
+                &self.program,
+                projection,
+                palette,
+                &[],
+                self.selected_landscape.as_deref(),
+                self.path.as_ref().and_then(|path| path.parent()),
+            ));
+            self.scene_cache = Some(SceneCache {
+                program: self.program.clone(),
+                theme: palette.theme,
+                selected_landscape: self.selected_landscape.clone(),
+                scene: Arc::clone(&scene),
+            });
+            scene
+        }
     }
 
     fn design_issues(&mut self, projection: &map::Projection) -> Vec<DesignIssue> {
@@ -911,7 +929,7 @@ impl RoadEditor {
             new_kind: RoadElementKind::CarLane,
             view: View::Map,
             map_tool: MapTool::Select,
-            camera_view: CameraView::Top,
+            camera_view: CameraView::Isometric,
             render_format: cc
                 .wgpu_render_state
                 .as_ref()
@@ -941,7 +959,7 @@ impl RoadEditor {
             branch_t: 0.75,
             branch_mode: map::SplitMode::Dedicated,
             map_pan: egui::Vec2::ZERO,
-            map_zoom: 75.0,
+            map_zoom: 55.0,
             fit_scene_once: true,
             dragging_endpoint: None,
             dragging_control: None,
@@ -1317,6 +1335,7 @@ impl RoadEditor {
                         catch: None,
                     },
                 ],
+                direction: RoadDirection::Both,
             }));
         self.selected_road = Some(self.program.statements.len() - 1);
         self.selected_element = None;
@@ -1557,11 +1576,11 @@ impl RoadEditor {
         self.redo_stack.clear();
         self.skip_history = true;
         self.fit_scene_once = true;
-        self.camera_view = CameraView::Top;
+        self.camera_view = CameraView::Isometric;
         self.top_camera = (egui::Vec2::ZERO, 75.0);
         self.iso_camera = (egui::Vec2::ZERO, 55.0);
         self.map_pan = egui::Vec2::ZERO;
-        self.map_zoom = 75.0;
+        self.map_zoom = 55.0;
         self.path = path;
         self.scene_cache = None;
         #[cfg(not(target_arch = "wasm32"))]
@@ -1641,7 +1660,7 @@ impl RoadEditor {
         self.road_name_draft = "neighborhood_street".into();
         self.view = View::Map;
         self.map_tool = MapTool::Draw;
-        self.camera_view = CameraView::Top;
+        self.camera_view = CameraView::Isometric;
         self.top_camera = (egui::Vec2::ZERO, 100.0);
         self.iso_camera = (egui::Vec2::ZERO, 55.0);
         self.map_start = None;
@@ -1650,7 +1669,7 @@ impl RoadEditor {
         self.branch_t = 0.75;
         self.branch_mode = map::SplitMode::Dedicated;
         self.map_pan = egui::Vec2::ZERO;
-        self.map_zoom = 100.0;
+        self.map_zoom = 55.0;
         self.fit_scene_once = false;
         self.dragging_endpoint = None;
         self.dragging_control = None;
@@ -1706,6 +1725,27 @@ impl RoadEditor {
             match std::fs::write(&path, bytes) {
                 Ok(()) => self.status = format!("Exported {}", path.display()),
                 Err(error) => self.status = format!("GLB export failed: {error}"),
+            }
+        }
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn export_svg(&mut self) {
+        let document = svg::export(&self.program);
+        if document.is_empty() {
+            self.status = "Nothing to export: place a road or landscape feature first".into();
+            return;
+        }
+        let mut dialog = rfd::FileDialog::new()
+            .add_filter("Scalable Vector Graphics", &["svg"])
+            .set_file_name("opencity-map.svg");
+        if let Some(parent) = self.path.as_ref().and_then(|path| path.parent()) {
+            dialog = dialog.set_directory(parent);
+        }
+        if let Some(path) = dialog.save_file() {
+            match std::fs::write(&path, document) {
+                Ok(()) => self.status = format!("Exported {}", path.display()),
+                Err(error) => self.status = format!("SVG export failed: {error}"),
             }
         }
     }
@@ -1783,6 +1823,16 @@ impl RoadEditor {
     }
 
     #[cfg(target_arch = "wasm32")]
+    fn export_svg(&mut self) {
+        let document = svg::export(&self.program);
+        if document.is_empty() {
+            self.status = "Nothing to export: place a road or landscape feature first".into();
+            return;
+        }
+        self.save_web("opencity-map.svg", document.into_bytes(), None);
+    }
+
+    #[cfg(target_arch = "wasm32")]
     fn save_web(&mut self, name: &str, bytes: Vec<u8>, program: Option<Program>) {
         let sender = self.web_event_sender.clone();
         let ctx = self.web_ctx.clone();
@@ -1826,8 +1876,12 @@ impl RoadEditor {
                 }
             }
             ui.separator();
-            if ui.button("Export 3D scene as GLB…").clicked() {
+            if ui.button("Export GLB").clicked() {
                 self.export_glb();
+                ui.close();
+            }
+            if ui.button("Export SVG").clicked() {
+                self.export_svg();
                 ui.close();
             }
         });
@@ -2305,6 +2359,7 @@ impl RoadEditor {
                         );
                         for kind in [
                             LandscapeKind::Land,
+                            LandscapeKind::Beach,
                             LandscapeKind::Lake,
                             LandscapeKind::River,
                             LandscapeKind::Vegetation,
@@ -3727,6 +3782,8 @@ impl RoadEditor {
                     target_format: self.render_format,
                 })));
             self.paint_selection_overlay(&painter, rect, &projection, palette, CameraView::Isometric);
+            let annotation_scale = (self.map_zoom / ANNOTATION_OVERVIEW_ZOOM
+                * ANNOTATION_OVERVIEW_SCALE).min(1.0);
             for intersection in map::intersections(&self.program, &projection) {
                 if self.selected_intersection.as_deref() == Some(&intersection.point_ref) {
                     let point = iso_screen(rect, self.map_pan, self.map_zoom, self.orbit_target,
@@ -3740,8 +3797,8 @@ impl RoadEditor {
                     let connected = projection.segments.iter().any(|segment|
                         segment.start_ref.as_deref() == Some(&port.point_ref)
                         || segment.end_ref.as_deref() == Some(&port.point_ref));
-                    painter.circle_filled(point, 4.0, palette.map_background);
-                    painter.circle_stroke(point, 4.0, egui::Stroke::new(2.0,
+                    painter.circle_filled(point, 4.0 * annotation_scale, palette.map_background);
+                    painter.circle_stroke(point, 4.0 * annotation_scale, egui::Stroke::new(2.0 * annotation_scale,
                         if connected { palette.map_subtle } else { palette.map_preview }));
                 }
             }
@@ -3756,9 +3813,9 @@ impl RoadEditor {
                 if self.selected_segments.contains(&segment.source)
                     || self.selected_segment == Some(segment.source)
                     || start.distance(end) > 100.0 {
-                    painter.text(point + egui::vec2(0.0, -18.0), egui::Align2::CENTER_BOTTOM,
+                    painter.text(point + egui::vec2(0.0, -18.0 * annotation_scale), egui::Align2::CENTER_BOTTOM,
                         segment.name.as_deref().unwrap_or(&segment.road_name),
-                        egui::FontId::proportional(12.0), palette.map_text);
+                        egui::FontId::proportional(12.0 * annotation_scale), palette.map_text);
                 }
             }
             if let Some(segment) = projection.segments.iter()
@@ -4393,6 +4450,8 @@ impl RoadEditor {
                     target_format: self.render_format,
                 })));
             self.paint_selection_overlay(&painter, rect, &projection, palette, CameraView::Top);
+            let annotation_scale = (self.map_zoom / ANNOTATION_OVERVIEW_ZOOM
+                * ANNOTATION_OVERVIEW_SCALE).min(1.0);
             if let (Some(start), Some(pointer)) = (self.box_start, response.interact_pointer_pos()) {
                 painter.rect_stroke(egui::Rect::from_two_pos(start, pointer), 0.0,
                     egui::Stroke::new(1.5, palette.map_selected), egui::StrokeKind::Inside);
@@ -4425,13 +4484,15 @@ impl RoadEditor {
                 for port in &intersection.ports {
                     let point = screen_of(rect, self.map_pan, self.map_zoom, port.position);
                     let center = screen_of(rect, self.map_pan, self.map_zoom, intersection.position);
-                    let radius = (point.distance(center) * 0.35).clamp(2.5, 6.0);
+                    let radius = (point.distance(center) * 0.35).clamp(2.5, 6.0)
+                        * annotation_scale;
                     let connected = projection.segments.iter().any(|segment|
                         segment.start_ref.as_deref() == Some(&port.point_ref)
                             || segment.end_ref.as_deref() == Some(&port.point_ref));
                     painter.circle_filled(point, radius, palette.map_background);
                     painter.circle_stroke(point, radius,
-                        egui::Stroke::new(2.0, if connected { palette.map_subtle } else { palette.map_preview }));
+                        egui::Stroke::new(2.0 * annotation_scale,
+                            if connected { palette.map_subtle } else { palette.map_preview }));
                 }
             }
             for segment in &projection.segments {
@@ -4440,9 +4501,9 @@ impl RoadEditor {
                     .distance(screen_of(rect, self.map_pan, self.map_zoom, segment.end));
                 if self.selected_segments.contains(&segment.source)
                     || self.selected_segment == Some(segment.source) || length > 100.0 {
-                    painter.text(midpoint + egui::vec2(0.0, -22.0), egui::Align2::CENTER_BOTTOM,
+                    painter.text(midpoint + egui::vec2(0.0, -22.0 * annotation_scale), egui::Align2::CENTER_BOTTOM,
                         segment.name.as_deref().unwrap_or(&segment.road_name),
-                        egui::FontId::proportional(12.0), palette.map_text);
+                        egui::FontId::proportional(12.0 * annotation_scale), palette.map_text);
                 }
             }
             if let Some(segment) = projection.segments.iter()
@@ -5196,40 +5257,48 @@ fn paint_landscape_feature(
 
     let (fill, edge) = match (palette.theme, feature.kind) {
         (egui::Theme::Dark, LandscapeKind::Land) => (
-            Color32::from_rgb(44, 77, 52),
-            Color32::from_rgb(103, 162, 106),
+            Color32::from_rgb(105, 158, 75),
+            Color32::from_rgb(76, 130, 65),
         ),
         (egui::Theme::Light, LandscapeKind::Land) => (
             Color32::from_rgb(194, 224, 180),
             Color32::from_rgb(80, 139, 75),
         ),
+        (egui::Theme::Dark, LandscapeKind::Beach) => (
+            Color32::from_rgb(244, 219, 159),
+            Color32::from_rgb(221, 190, 119),
+        ),
+        (egui::Theme::Light, LandscapeKind::Beach) => (
+            Color32::from_rgb(232, 211, 159),
+            Color32::from_rgb(189, 160, 99),
+        ),
         (egui::Theme::Dark, LandscapeKind::Vegetation) => (
-            Color32::from_rgb(34, 91, 54),
-            Color32::from_rgb(72, 156, 87),
+            Color32::from_rgb(61, 128, 59),
+            Color32::from_rgb(47, 109, 55),
         ),
         (egui::Theme::Light, LandscapeKind::Vegetation) => (
             Color32::from_rgb(140, 191, 126),
             Color32::from_rgb(49, 119, 62),
         ),
         (egui::Theme::Dark, LandscapeKind::Terrain) => (
-            Color32::from_rgb(92, 81, 62),
-            Color32::from_rgb(173, 147, 99),
+            Color32::from_rgb(142, 160, 86),
+            Color32::from_rgb(113, 137, 70),
         ),
         (egui::Theme::Light, LandscapeKind::Terrain) => (
             Color32::from_rgb(206, 188, 152),
             Color32::from_rgb(138, 112, 70),
         ),
         (egui::Theme::Dark, LandscapeKind::Building) => (
-            Color32::from_rgb(114, 119, 126),
-            Color32::from_rgb(186, 195, 204),
+            Color32::from_rgb(192, 198, 194),
+            Color32::from_rgb(115, 128, 127),
         ),
         (egui::Theme::Light, LandscapeKind::Building) => (
             Color32::from_rgb(178, 184, 189),
             Color32::from_rgb(86, 97, 105),
         ),
         (egui::Theme::Dark, LandscapeKind::Lake | LandscapeKind::River) => (
-            Color32::from_rgb(26, 76, 112),
-            Color32::from_rgb(69, 165, 204),
+            Color32::from_rgb(15, 123, 187),
+            Color32::from_rgb(36, 163, 211),
         ),
         (egui::Theme::Light, LandscapeKind::Lake | LandscapeKind::River) => (
             Color32::from_rgb(124, 190, 220),
@@ -7518,15 +7587,15 @@ fn kind_short(kind: RoadElementKind) -> &'static str {
 fn kind_color(kind: RoadElementKind, theme: egui::Theme) -> Color32 {
     match theme {
         egui::Theme::Dark => match kind {
-            RoadElementKind::BuildingEdge => Color32::from_rgb(9, 25, 32),
-            RoadElementKind::Sidewalk => Color32::from_rgb(163, 119, 86),
+            RoadElementKind::BuildingEdge => Color32::from_rgb(75, 84, 82),
+            RoadElementKind::Sidewalk => Color32::from_rgb(207, 203, 186),
             RoadElementKind::BikeLane => Color32::from_rgb(58, 131, 105),
-            RoadElementKind::ParkingLane => Color32::from_rgb(87, 122, 149),
+            RoadElementKind::ParkingLane => Color32::from_rgb(163, 168, 165),
             RoadElementKind::BusLane => Color32::from_rgb(164, 76, 71),
-            RoadElementKind::CarLane => Color32::from_rgb(59, 95, 127),
+            RoadElementKind::CarLane => Color32::from_rgb(175, 180, 174),
             RoadElementKind::BusStop => Color32::from_rgb(162, 121, 53),
-            RoadElementKind::Middle => Color32::from_rgb(59, 95, 127),
-            RoadElementKind::Verge => Color32::from_rgb(71, 115, 77),
+            RoadElementKind::Middle => Color32::from_rgb(175, 180, 174),
+            RoadElementKind::Verge => Color32::from_rgb(115, 164, 83),
             RoadElementKind::Barrier => Color32::from_rgb(165, 170, 162),
             RoadElementKind::TrainTrack => Color32::from_rgb(102, 91, 77),
             RoadElementKind::TramTrack => Color32::from_rgb(93, 105, 112),
@@ -8417,12 +8486,20 @@ mod tests {
             .filter(|feature| feature.kind == LandscapeKind::Building)
             .count();
         assert!(buildings >= 400, "the boot map should fill the city grids");
-        assert_eq!(landscape.features.len(), buildings + 15);
+        assert_eq!(landscape.features.len(), buildings + 22);
         assert_eq!(
             landscape
                 .features
                 .iter()
                 .filter(|feature| feature.kind == LandscapeKind::Land)
+                .count(),
+            7
+        );
+        assert_eq!(
+            landscape
+                .features
+                .iter()
+                .filter(|feature| feature.kind == LandscapeKind::Beach)
                 .count(),
             7
         );
@@ -9515,8 +9592,25 @@ mod tests {
         assert!(map::project(&editor.program).segments.is_empty());
         assert_eq!(editor.program, default_program());
         assert!(matches!(editor.map_tool, MapTool::Draw));
+        assert!(matches!(editor.camera_view, CameraView::Isometric));
+        assert_eq!(editor.map_zoom, 55.0);
+        editor.set_camera_view(CameraView::Top);
+        assert!(matches!(editor.camera_view, CameraView::Top));
+        assert_eq!(editor.map_zoom, 100.0);
         assert!(editor.selected_endpoint.is_none());
         assert!(!editor.dirty);
+    }
+
+    #[test]
+    fn opening_a_map_uses_isometric_view() {
+        let mut editor = sample_editor();
+        let program = editor.program.clone();
+        editor.load_program(program, None);
+        assert!(matches!(editor.camera_view, CameraView::Isometric));
+        assert_eq!(editor.map_zoom, 55.0);
+        editor.set_camera_view(CameraView::Top);
+        assert!(matches!(editor.camera_view, CameraView::Top));
+        assert_eq!(editor.map_zoom, 75.0);
     }
 
     #[test]
@@ -9600,6 +9694,7 @@ mod tests {
             source: SegmentSource::TopLevel(1),
             name: Some("road_1".into()),
             road_name: "neighborhood_street".into(),
+            direction: RoadDirection::Both,
             start: world,
             end: WorldPoint { x: 4.0, y: -1.0 },
             controls: [

@@ -14,6 +14,66 @@ pub enum Statement {
 pub struct RoadDefinition {
     pub name: String,
     pub elements: Vec<RoadElement>,
+    /// Permitted travel relative to each placement's start and end points.
+    pub direction: RoadDirection,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum RoadDirection {
+    #[default]
+    Both,
+    Forward,
+    Reverse,
+}
+
+impl RoadDirection {
+    pub fn from_keyword(keyword: &str) -> Option<Self> {
+        match keyword {
+            "both" => Some(Self::Both),
+            "forward" => Some(Self::Forward),
+            "reverse" => Some(Self::Reverse),
+            _ => None,
+        }
+    }
+
+    pub fn keyword(self) -> &'static str {
+        match self {
+            Self::Both => "both",
+            Self::Forward => "forward",
+            Self::Reverse => "reverse",
+        }
+    }
+
+    pub fn permits(self, from_start: bool) -> bool {
+        match self {
+            Self::Both => true,
+            Self::Forward => from_start,
+            Self::Reverse => !from_start,
+        }
+    }
+}
+
+impl RoadDefinition {
+    /// Travel on a cross-section lane, relative to the placement's point order.
+    /// With a median, left-hand lanes run in reverse and right-hand lanes forward.
+    pub fn lane_direction(&self, element_index: usize) -> Option<RoadDirection> {
+        let element = self.elements.get(element_index)?;
+        if !element.kind.is_travel_lane() {
+            return None;
+        }
+        if self.direction != RoadDirection::Both {
+            return Some(self.direction);
+        }
+        match self
+            .elements
+            .iter()
+            .position(|element| element.kind == RoadElementKind::Middle)
+        {
+            Some(median) if element_index < median => Some(RoadDirection::Reverse),
+            Some(median) if element_index > median => Some(RoadDirection::Forward),
+            _ => Some(RoadDirection::Both),
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -44,6 +104,19 @@ pub enum RoadElementKind {
 }
 
 impl RoadElementKind {
+    pub fn is_travel_lane(self) -> bool {
+        matches!(
+            self,
+            Self::CarLane
+                | Self::BikeLane
+                | Self::BusLane
+                | Self::TrainTrack
+                | Self::TramTrack
+                | Self::SubwayTrack
+                | Self::Runway
+                | Self::Taxiway
+        )
+    }
     pub fn from_keyword(keyword: &str) -> Option<Self> {
         Some(match keyword {
             "busstop" => Self::BusStop,

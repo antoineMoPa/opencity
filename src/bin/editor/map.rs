@@ -3,7 +3,9 @@
 
 use std::collections::{HashMap, HashSet};
 
-use opencity::{Argument, Call, Program, RoadDefinition, RoadElement, RoadElementKind, Statement};
+use opencity::{
+    Argument, Call, Program, RoadDefinition, RoadDirection, RoadElement, RoadElementKind, Statement,
+};
 
 #[derive(Clone, Copy)]
 pub enum ElementEdit {
@@ -104,6 +106,7 @@ pub struct Segment {
     pub source: SegmentSource,
     pub name: Option<String>,
     pub road_name: String,
+    pub direction: RoadDirection,
     pub start: WorldPoint,
     pub end: WorldPoint,
     pub controls: [WorldPoint; 2],
@@ -115,6 +118,9 @@ pub struct Segment {
 }
 
 impl Segment {
+    pub fn permits_travel(&self, from_start: bool) -> bool {
+        self.direction.permits(from_start)
+    }
     pub fn height_at(&self, t: f32) -> f32 {
         self.start_z + (self.end_z - self.start_z) * t.clamp(0.0, 1.0)
     }
@@ -1015,11 +1021,11 @@ fn project_with_points(program: &Program, points: &[MapPoint]) -> Projection {
             _ => {}
         }
     }
-    let roads: HashSet<&str> = program
+    let roads: HashMap<&str, RoadDirection> = program
         .statements
         .iter()
         .filter_map(|statement| match statement {
-            Statement::Road(road) => Some(road.name.as_str()),
+            Statement::Road(road) => Some((road.name.as_str(), road.direction)),
             _ => None,
         })
         .collect();
@@ -1038,7 +1044,7 @@ fn project_with_points(program: &Program, points: &[MapPoint]) -> Projection {
         let Statement::Call(call) = statement else {
             continue;
         };
-        if roads.contains(call.name.as_str()) {
+        if let Some(&direction) = roads.get(call.name.as_str()) {
             if let Some((start, end, controls, start_ref, end_ref)) =
                 segment_points(call, &point_by_name)
             {
@@ -1052,6 +1058,7 @@ fn project_with_points(program: &Program, points: &[MapPoint]) -> Projection {
                     source: SegmentSource::TopLevel(index),
                     name: call.assigns.first().cloned(),
                     road_name: call.name.clone(),
+                    direction,
                     start,
                     end,
                     controls,
@@ -1105,7 +1112,7 @@ fn project_block_road_calls(
     placement: &Call,
     instance: usize,
     blocks: &[(usize, &opencity::BlockDefinition)],
-    roads: &HashSet<&str>,
+    roads: &HashMap<&str, RoadDirection>,
     parent_calls: &[&Call],
     parent_origin: WorldPoint,
     parent_elevation: f32,
@@ -1152,7 +1159,7 @@ fn project_block_road_calls(
     stack.push(block_index);
     let local_calls: Vec<_> = block.calls.iter().collect();
     for (call_index, inner) in block.calls.iter().enumerate() {
-        if roads.contains(inner.name.as_str()) {
+        if let Some(&direction) = roads.get(inner.name.as_str()) {
             // Block roads use local numeric coordinates; global map points are not local.
             if let Some((start, end, controls, start_ref, end_ref)) =
                 segment_points(inner, &HashMap::new())
@@ -1183,6 +1190,7 @@ fn project_block_road_calls(
                     },
                     name: inner.assigns.first().cloned(),
                     road_name: inner.name.clone(),
+                    direction,
                     start: start.translated(origin),
                     end: end.translated(origin),
                     controls: [
@@ -2072,6 +2080,7 @@ fn road_with_elements(
     program: &mut Program,
     base: &str,
     elements: Vec<RoadElement>,
+    direction: RoadDirection,
 ) -> RoadDefinition {
     let mut name = base.to_owned();
     let mut suffix = 2;
@@ -2084,11 +2093,15 @@ fn road_with_elements(
                 _ => None,
             })
         {
-            if existing.elements == elements {
+            if existing.elements == elements && existing.direction == direction {
                 return existing.clone();
             }
         } else if name_available(program, &name, None) {
-            let road = RoadDefinition { name, elements };
+            let road = RoadDefinition {
+                name,
+                elements,
+                direction,
+            };
             program.statements.push(Statement::Road(road.clone()));
             return road;
         }
@@ -2290,6 +2303,7 @@ pub fn append_exit(
         program,
         &format!("{}_exit_{}", parent_road.name, side.label()),
         carried.clone(),
+        RoadDirection::Forward,
     );
     let through_road = if mode == SplitMode::Dedicated && !remaining.is_empty() {
         let mut elements = remaining;
@@ -2310,6 +2324,7 @@ pub fn append_exit(
             program,
             &format!("{}_after_exit_{}", parent_road.name, side.label()),
             elements,
+            parent_road.direction,
         ))
     } else if mode == SplitMode::KeepLane {
         Some(parent_road.clone())

@@ -1,7 +1,7 @@
 use std::fs;
 use std::path::Path;
 
-use crate::ast::{Argument, Call, Program, Statement};
+use crate::ast::{Argument, Call, Program, RoadDirection, Statement};
 
 impl Program {
     /// Format the AST as a complete, parseable `.road` source file.
@@ -23,7 +23,11 @@ impl Program {
                             source.push_str(&format!("(${catch})"));
                         }
                     }
-                    source.push_str(";\nend;\n");
+                    source.push_str(";\n");
+                    if road.direction != RoadDirection::Both {
+                        source.push_str(&format!("    direction {};\n", road.direction.keyword()));
+                    }
+                    source.push_str("end;\n");
                 }
                 Statement::Block(block) => {
                     source.push_str(&format!("block {}:\n", block.name));
