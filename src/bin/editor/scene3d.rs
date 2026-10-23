@@ -342,6 +342,7 @@ fn append_landscape_feature(
         LandscapeKind::Land => 0.06,
         LandscapeKind::Lake | LandscapeKind::River => 0.04,
         LandscapeKind::Vegetation => 0.02,
+        LandscapeKind::Concrete => 0.01,
         LandscapeKind::Terrain | LandscapeKind::Building => 0.0,
     };
     let mesh = feature
@@ -1237,7 +1238,7 @@ mod tests {
     #[test]
     fn overlapping_ground_surfaces_have_stable_depth_order() {
         let program = parse(
-            "beach(0, 0, 3, 0, 3, 3, 0, 3); land(0, 0, 3, 0, 3, 3, 0, 3); vegetation(forest, 0, 0, 3, 0, 3, 3, 0, 3);",
+            "beach(0, 0, 3, 0, 3, 3, 0, 3); land(0, 0, 3, 0, 3, 3, 0, 3); vegetation(forest, 0, 0, 3, 0, 3, 3, 0, 3); concrete(0, 0, 3, 0, 3, 3, 0, 3);",
         )
         .unwrap();
         let palette = editor_palette(egui::Theme::Dark);
@@ -1253,12 +1254,10 @@ mod tests {
         let beach = fill_bias(Color32::from_rgb(244, 219, 159));
         let land = fill_bias(Color32::from_rgb(105, 158, 75));
         let vegetation = fill_bias(Color32::from_rgb(61, 128, 59));
-        assert!(beach > land && land > vegetation);
+        let concrete = fill_bias(Color32::from_rgb(125, 139, 145));
+        assert!(beach > land && land > vegetation && vegetation > concrete);
         assert!(beach - land >= 0.01 && land - vegetation >= 0.01);
-        assert!(
-            vegetation > 0.0,
-            "roads at zero bias stay above ground cover"
-        );
+        assert!(concrete > 0.0, "roads at zero bias stay above ground cover");
     }
 
     #[test]

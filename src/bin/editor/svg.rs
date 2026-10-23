@@ -27,6 +27,7 @@ fn area_style(kind: LandscapeKind) -> (&'static str, &'static str) {
     match kind {
         LandscapeKind::Land => ("#bdcbae", "#91a383"),
         LandscapeKind::Beach => ("#e7d8a4", "#cbbd8b"),
+        LandscapeKind::Concrete => ("#aeb8b9", "#829197"),
         LandscapeKind::Lake => ("#75b7c8", "#5b9aad"),
         LandscapeKind::River => ("none", "#75b7c8"),
         LandscapeKind::Vegetation => ("#83a77e", "#668963"),

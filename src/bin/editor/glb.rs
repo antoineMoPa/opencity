@@ -213,6 +213,7 @@ pub fn export(program: &Program) -> Vec<u8> {
         let color = match feature.kind {
             LandscapeKind::Land => [77, 128, 79, 255],
             LandscapeKind::Beach => [220, 196, 143, 255],
+            LandscapeKind::Concrete => [137, 150, 155, 255],
             LandscapeKind::Lake => [48, 116, 158, 255],
             LandscapeKind::River => [52, 130, 167, 255],
             LandscapeKind::Vegetation => [53, 134, 68, 255],
@@ -268,6 +269,7 @@ pub fn export(program: &Program) -> Vec<u8> {
                 LandscapeKind::Land => -0.03,
                 LandscapeKind::Lake | LandscapeKind::River => -0.02,
                 LandscapeKind::Vegetation => -0.01,
+                LandscapeKind::Concrete => -0.005,
                 LandscapeKind::Terrain | LandscapeKind::Building => 0.0,
             };
             let polygon: Vec<_> = feature

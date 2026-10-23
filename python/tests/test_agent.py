@@ -6,7 +6,7 @@ import unittest
 from unittest.mock import patch
 
 from opencity_agent import (
-    EditorError, LaneSplitMode, LandscapeKind, OpenCityEditor, Point, RoadDirection,
+    EditorError, IntersectionSide, LaneSplitMode, LandscapeKind, OpenCityEditor, Point, RoadDirection,
     RoadDocument, RoadElement,
 )
 
@@ -19,17 +19,32 @@ class DocumentTests(unittest.TestCase):
         doc.point("b", Point(2, 0))
         doc.road("path", "a", "b", name="first", control1=Point(0.5, 0), control2=Point(1.5, 0))
         doc.area(LandscapeKind.BEACH, [Point(0, 0), Point(2, 0), Point(0, 2)], name="shore")
+        doc.area(LandscapeKind.CONCRETE, [Point(0, 0), Point(2, 0), Point(0, 2)], name="quay")
         doc.vegetation("trees", "forest", [Point(0, 0), Point(1, 0), Point(0, 1)])
         doc.terrain("hill", 0.2, [Point(0, 0), Point(1, 0), Point(0, 1)])
         doc.building("hall", 0.5, [Point(0, 0), Point(1, 0), Point(0, 1)], model="assets/hall.glb")
         doc.grade("first", 0, 0.2)
         doc.lane_point("entry", "first", 1, 0.5)
         doc.lane_split("first", "first", LaneSplitMode.KEEP_LANE)
+        doc.intersection("a", "path", 3, overrides={IntersectionSide.EAST: "existing"})
         self.assertIn("road path: verge-carlane; direction forward; end;", doc.source)
         self.assertIn("first = path(a, 0.5, 0, 1.5, 0, b);", doc.source)
         self.assertIn('hall = building(0.5, "assets/hall.glb", 0, 0, 1, 0, 0, 1);', doc.source)
         self.assertIn("shore = beach(0, 0, 2, 0, 0, 2);", doc.source)
+        self.assertIn("quay = concrete(0, 0, 2, 0, 0, 2);", doc.source)
         self.assertIn("entry = lane_point(first, 1, 0.5);", doc.source)
+        self.assertIn("intersection3(a, path, east, existing);", doc.source)
+
+    def test_extends_document_statements_in_order(self):
+        roads = RoadDocument()
+        roads.road("local", "a", "b", name="link", control1=Point(1, 0), control2=Point(2, 0))
+        doc = RoadDocument()
+        doc.point("a", Point(0, 0))
+        doc.point("b", Point(3, 0))
+        doc.extend(roads)
+        self.assertLess(doc.source.index("b = map_point"), doc.source.index("link = local"))
+        with self.assertRaises(ValueError):
+            doc.extend(RoadDocument("road existing: carlane; end;"))
 
     def test_small_numbers_use_decimal_syntax(self):
         doc = RoadDocument()
@@ -46,6 +61,10 @@ class DocumentTests(unittest.TestCase):
             doc.road("path", "a", "b")
         with self.assertRaises(ValueError):
             doc.terrain("hill", float("nan"), [Point(0, 0), Point(1, 0), Point(0, 1)])
+        with self.assertRaises(ValueError):
+            doc.intersection("a", "local", 5)
+        with self.assertRaises(ValueError):
+            doc.intersection("a", "local", 3, overrides={"east": "local"})
 
 
 def serve_once(connection, result, requests):

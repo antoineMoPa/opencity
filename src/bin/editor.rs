@@ -202,6 +202,7 @@ fn landscape_label(kind: LandscapeKind) -> &'static str {
     match kind {
         LandscapeKind::Land => "Land boundary",
         LandscapeKind::Beach => "Beach area",
+        LandscapeKind::Concrete => "Concrete area",
         LandscapeKind::Lake => "Lake",
         LandscapeKind::River => "River",
         LandscapeKind::Vegetation => "Vegetation area",
@@ -2360,6 +2361,7 @@ impl RoadEditor {
                         for kind in [
                             LandscapeKind::Land,
                             LandscapeKind::Beach,
+                            LandscapeKind::Concrete,
                             LandscapeKind::Lake,
                             LandscapeKind::River,
                             LandscapeKind::Vegetation,
@@ -5271,6 +5273,14 @@ fn paint_landscape_feature(
         (egui::Theme::Light, LandscapeKind::Beach) => (
             Color32::from_rgb(232, 211, 159),
             Color32::from_rgb(189, 160, 99),
+        ),
+        (egui::Theme::Dark, LandscapeKind::Concrete) => (
+            Color32::from_rgb(125, 139, 145),
+            Color32::from_rgb(95, 110, 117),
+        ),
+        (egui::Theme::Light, LandscapeKind::Concrete) => (
+            Color32::from_rgb(184, 191, 190),
+            Color32::from_rgb(128, 142, 147),
         ),
         (egui::Theme::Dark, LandscapeKind::Vegetation) => (
             Color32::from_rgb(61, 128, 59),
@@ -8486,7 +8496,7 @@ mod tests {
             .filter(|feature| feature.kind == LandscapeKind::Building)
             .count();
         assert!(buildings >= 400, "the boot map should fill the city grids");
-        assert_eq!(landscape.features.len(), buildings + 22);
+        assert_eq!(landscape.features.len(), buildings + 56);
         assert_eq!(
             landscape
                 .features
@@ -8503,6 +8513,25 @@ mod tests {
                 .count(),
             7
         );
+        let concrete: std::collections::HashSet<_> = landscape
+            .features
+            .iter()
+            .filter(|feature| feature.kind == LandscapeKind::Concrete)
+            .filter_map(|feature| feature.name.as_deref())
+            .collect();
+        assert_eq!(concrete.len(), 34);
+        for name in [
+            "west_port_north_landing",
+            "west_port_south_quay",
+            "west_industrial_inner_1",
+            "airport_primary_shoulder",
+            "airport_terminal_hardstand",
+            "east_port_main_apron",
+            "east_port_long_pier",
+            "east_industrial_west_1",
+        ] {
+            assert!(concrete.contains(name), "missing concrete area {name}");
+        }
         let issues = design_rule_issues(
             &program,
             &projection,

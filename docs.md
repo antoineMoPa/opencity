@@ -42,9 +42,11 @@ The map uses illustrative fixed widths for cross section elements; physical lane
 
 ### Land, water, elevation, and reusable crossings
 
-`land`, `beach`, and `lake` use three or more `(x, y)` pairs to form closed boundaries. `river` uses two or more pairs to form an open path. Assign a name to a feature if you want to set its height. Map units are shared with roads.
+`land`, `beach`, `concrete`, and `lake` use three or more `(x, y)` pairs to form closed boundaries. `river` uses two or more pairs to form an open path. Assign a name to a feature if you want to set its height. Map units are shared with roads.
 
 `beach(x, y, ...)` defines a closed sandy area. It draws just below adjacent `land` so a larger beach outline can form a thin shore around a land polygon.
+
+`concrete(x, y, ...)` defines a paved area, such as a port quay or airport hardstand. It draws over land and under roads and buildings; separate outlines can leave open water between piers.
 
 `vegetation(type, x, y, ...)` defines a closed area; `forest` is a useful type. It currently draws an area without generating trees. `terrain(height, x, y, ...)` defines an elevated map patch. Overlapping outlines at increasing heights form a terraced mountain; the viewport and GLB export draw the exposed sides between levels. `building(height, x, y, ...)` defines a footprint extruded to that height. A building may include a quoted GLB path after its height, for example `building(0.4, "assets/hall.glb", 0, 0, 1, 0, 1, 1)`. The native editor reads that GLB relative to the `.road` file; the browser editor's building inspector has **Choose GLB…** to load a local asset. The viewport fits embedded triangle meshes within the footprint and specified height, using material base colors and vertex colors. Texture images and animation are not drawn yet. GLB export currently retains the model reference as metadata and exports the building extrusion.
 

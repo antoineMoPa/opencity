@@ -66,12 +66,18 @@ print(doc.source)
 ```
 
 `RoadDocument` also writes `vegetation`, `terrain`, `building` (optional GLB
-path), `elevation`, `grade`, `lane_point`, and `lane_split`. A straight road may
+path), `intersection`, `elevation`, `grade`, `lane_point`, and `lane_split`.
+`LandscapeKind.CONCRETE` creates paved port and airport polygons.
+`intersection` accepts `IntersectionSide` keys for road-type overrides. A straight road may
 use two coordinate `Point`s; named endpoints require explicit Bézier controls.
 To append to the running map, call `doc = editor.document()`, add statements,
 then `editor.replace_document(doc)`. The editor validates the complete source
 and applies it as one undoable change. `RoadDocument` preserves existing source
 text and appends statements; it does not parse or edit existing declarations.
+Use `extend(other)` to append statements from a newly built document after
+definitions and points. The target-map generator uses this to place roads in
+source order after its coastline and paved areas. Run it with
+`python3 scripts/generate_target_map.py` from the repository root.
 
 The API shape follows the current `.road` DSL, target map generator, and MCP
 bridge. No saved conversation transcript from the original default-map work was

@@ -1,6 +1,6 @@
 //! Typed landscape geometry projected from `.road` calls.
 //!
-//! `land`, `beach`, and `lake` take at least three coordinate pairs; `river` takes at
+//! `land`, `beach`, `concrete`, and `lake` take at least three coordinate pairs; `river` takes at
 //! least two. Coordinates inside a block are local to its placement:
 //! `block_name(x, y)` translates them by `(x, y)`.
 
@@ -13,6 +13,7 @@ use crate::{Argument, BlockDefinition, Call, Program, Statement};
 pub enum LandscapeKind {
     Land,
     Beach,
+    Concrete,
     Lake,
     River,
     Vegetation,
@@ -26,6 +27,7 @@ impl LandscapeKind {
         match name {
             "land" => Some(Self::Land),
             "beach" => Some(Self::Beach),
+            "concrete" => Some(Self::Concrete),
             "lake" => Some(Self::Lake),
             "river" => Some(Self::River),
             "vegetation" => Some(Self::Vegetation),
@@ -39,6 +41,7 @@ impl LandscapeKind {
         match self {
             Self::Land => "land",
             Self::Beach => "beach",
+            Self::Concrete => "concrete",
             Self::Lake => "lake",
             Self::River => "river",
             Self::Vegetation => "vegetation",
@@ -51,6 +54,7 @@ impl LandscapeKind {
         match self {
             Self::Land
             | Self::Beach
+            | Self::Concrete
             | Self::Lake
             | Self::Vegetation
             | Self::Terrain
@@ -476,5 +480,19 @@ mod tests {
         assert_eq!(projection.features[0].kind, LandscapeKind::Beach);
         assert_eq!(projection.features[0].points.len(), 4);
         assert!(projection.features[0].elevation < projection.features[1].elevation);
+    }
+
+    #[test]
+    fn concrete_area_projects_as_closed_pavement() {
+        let program = crate::parse("quay = concrete(0, 0, 2, 0, 2, 1, 0, 1);").unwrap();
+        let projection = project_landscape_features(&program);
+        assert!(projection.errors.is_empty());
+        assert_eq!(projection.features.len(), 1);
+        let feature = &projection.features[0];
+        assert_eq!(feature.kind, LandscapeKind::Concrete);
+        assert_eq!(feature.name.as_deref(), Some("quay"));
+        assert_eq!(feature.points.len(), 4);
+        assert_eq!(feature.elevation, 0.0);
+        assert_eq!(LandscapeKind::Concrete.call_name(), "concrete");
     }
 }

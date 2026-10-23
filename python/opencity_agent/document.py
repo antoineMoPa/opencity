@@ -12,7 +12,7 @@ from enum import Enum
 import json
 import math
 import re
-from typing import Iterable
+from typing import Iterable, Mapping
 
 
 _IDENTIFIER = re.compile(r"[A-Za-z_][A-Za-z_0-9]*\Z")
@@ -46,8 +46,16 @@ class RoadElement(str, Enum):
 class LandscapeKind(str, Enum):
     LAND = "land"
     BEACH = "beach"
+    CONCRETE = "concrete"
     LAKE = "lake"
     RIVER = "river"
+
+
+class IntersectionSide(str, Enum):
+    NORTH = "north"
+    EAST = "east"
+    SOUTH = "south"
+    WEST = "west"
 
 
 class LaneSplitMode(str, Enum):
@@ -91,6 +99,12 @@ class RoadDocument:
     def source(self) -> str:
         pieces = [self._source.rstrip(), *self._statements]
         return "\n".join(piece for piece in pieces if piece) + "\n"
+
+    def extend(self, other: RoadDocument) -> None:
+        """Append statements from another freshly built document in order."""
+        if not isinstance(other, RoadDocument) or other._source:
+            raise ValueError("other must be a RoadDocument without initial source")
+        self._statements.extend(other._statements)
 
     def define_road(
         self,
@@ -151,6 +165,22 @@ class RoadDocument:
         self._statements.append(
             f"lane_split({_identifier(parent_road)}, {_identifier(entry_road)}, {mode.value}{final});"
         )
+
+    def intersection(
+        self, point_ref: str, road_type: str, arm_count: int,
+        *, overrides: Mapping[IntersectionSide, str] | None = None,
+    ) -> None:
+        if isinstance(arm_count, bool) or arm_count not in (2, 3, 4):
+            raise ValueError("arm_count must be 2, 3, or 4")
+        args = [_identifier(point_ref), _identifier(road_type)]
+        if overrides is not None:
+            if len(overrides) > arm_count:
+                raise ValueError("more overrides than intersection arms")
+            for side, road in overrides.items():
+                if not isinstance(side, IntersectionSide):
+                    raise ValueError("override sides must be IntersectionSide values")
+                args.extend((side.value, _identifier(road)))
+        self._statements.append(f"intersection{arm_count}({', '.join(args)});")
 
     def area(self, kind: LandscapeKind, points: Iterable[Point], *, name: str | None = None) -> None:
         if not isinstance(kind, LandscapeKind):

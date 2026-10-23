@@ -6,8 +6,16 @@ adjusting the traced paths to refresh examples/target_map.road.
 """
 
 from pathlib import Path
+import sys
 
-out = []
+# Running this file directly keeps the local package importable without an
+# editable pip installation.
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "python"))
+from opencity_agent import (  # noqa: E402
+    IntersectionSide, LandscapeKind, Point, RoadDirection, RoadDocument, RoadElement,
+)
+
+road_statements = RoadDocument()
 points = {}
 connection_arms = {}
 placements = {}
@@ -16,15 +24,16 @@ road_traces = {}
 mouth_connections = set()
 city_grids = []
 serial = 0
+mouth_count = 0
 
 
 def world(point):
     return ((point[0] - 768) / 60, (512 - point[1]) / 60)
 
 
-def coordinate(point):
+def world_point(point):
     x, y = world(point)
-    return f"{x:.4f}, {y:.4f}"
+    return Point(round(x, 4), round(y, 4))
 
 
 def point_ref(point):
@@ -75,14 +84,15 @@ def road(name, kind, path, smooth=True):
         serial += 1
         placement = f"{name}_{serial:04d}"
         placements.setdefault(name, []).append(placement)
-        out.append(f"{placement} = {kind}({a}, {coordinate(first)}, "
-                   f"{coordinate(second)}, {b});")
+        road_statements.road(kind, a, b, name=placement,
+                             control1=world_point(first), control2=world_point(second))
 
 
 def ramp_mouth(name, parent, lane, fraction, freeway_point, loop_point, from_freeway):
+    global mouth_count
     mouth_connections.add(loop_point)
     lane_ref = f"{name}_lane"
-    out.append(f"{lane_ref} = lane_point({parent}, {lane}, {fraction:.4f});")
+    road_statements.lane_point(lane_ref, parent, lane, round(fraction, 4))
     start, end = (freeway_point, loop_point) if from_freeway else (loop_point, freeway_point)
     first = (start[0] * 2 / 3 + end[0] / 3,
              start[1] * 2 / 3 + end[1] / 3)
@@ -90,8 +100,9 @@ def ramp_mouth(name, parent, lane, fraction, freeway_point, loop_point, from_fre
               start[1] / 3 + end[1] * 2 / 3)
     start_ref = lane_ref if from_freeway else point_ref(loop_point)
     end_ref = point_ref(loop_point) if from_freeway else lane_ref
-    out.append(f"{name} = ramp_mouth({start_ref}, {coordinate(first)}, "
-               f"{coordinate(second)}, {end_ref});")
+    road_statements.road("ramp_mouth", start_ref, end_ref, name=name,
+                         control1=world_point(first), control2=world_point(second))
+    mouth_count += 1
 
 
 def grid(name, kind, xs, ys, mask=None):
@@ -108,16 +119,22 @@ def grid(name, kind, xs, ys, mask=None):
                      [(x, ys[row]), (x, ys[row + 1])], False)
 
 
-definitions = """road local: carlane-middle-carlane; end;
-road collector: sidewalk-carlane-middle-carlane-sidewalk; end;
-road arterial: sidewalk-carlane-carlane-middle-carlane-carlane-sidewalk; end;
-road freeway: verge-carlane-carlane-middle-carlane-carlane-verge; end;
-road ramp: verge-carlane-verge; direction forward; end;
-road ramp_mouth: carlane-verge; direction forward; end;
-road airport_runway: verge-runway-verge; end;
-road airport_taxiway: verge-taxiway-verge; end;
-road airport_apron: apron; end;
-"""
+road_definitions = {
+    "local": ([RoadElement.CAR_LANE, RoadElement.MIDDLE, RoadElement.CAR_LANE], RoadDirection.BOTH),
+    "collector": ([RoadElement.SIDEWALK, RoadElement.CAR_LANE, RoadElement.MIDDLE,
+                   RoadElement.CAR_LANE, RoadElement.SIDEWALK], RoadDirection.BOTH),
+    "arterial": ([RoadElement.SIDEWALK, RoadElement.CAR_LANE, RoadElement.CAR_LANE,
+                  RoadElement.MIDDLE, RoadElement.CAR_LANE, RoadElement.CAR_LANE,
+                  RoadElement.SIDEWALK], RoadDirection.BOTH),
+    "freeway": ([RoadElement.VERGE, RoadElement.CAR_LANE, RoadElement.CAR_LANE,
+                 RoadElement.MIDDLE, RoadElement.CAR_LANE, RoadElement.CAR_LANE,
+                 RoadElement.VERGE], RoadDirection.BOTH),
+    "ramp": ([RoadElement.VERGE, RoadElement.CAR_LANE, RoadElement.VERGE], RoadDirection.FORWARD),
+    "ramp_mouth": ([RoadElement.CAR_LANE, RoadElement.VERGE], RoadDirection.FORWARD),
+    "airport_runway": ([RoadElement.VERGE, RoadElement.RUNWAY, RoadElement.VERGE], RoadDirection.BOTH),
+    "airport_taxiway": ([RoadElement.VERGE, RoadElement.TAXIWAY, RoadElement.VERGE], RoadDirection.BOTH),
+    "airport_apron": ([RoadElement.APRON], RoadDirection.BOTH),
+}
 
 # Coastline vertices follow the reference at a coarser scale than the roads.
 # Separate polygons keep the outer islands independent of the mainland.
@@ -207,6 +224,85 @@ def beach_outline(outline, width=4.0):
 
 beach_shapes = {f"{name}_beach": beach_outline(outline)
                 for name, outline in land_shapes.items()}
+
+# Paved ground traced from the reference. Quays are independent shapes so
+# harbor water stays open between the finger piers. Coordinates are pixels.
+concrete_shapes = {
+    # West port: the north landing, industrial apron, quays, and finger piers.
+    "west_port_north_landing": [(77, 325), (196, 325), (196, 351),
+                                 (141, 351), (141, 344), (77, 344)],
+    "west_port_north_pier": [(109, 342), (116, 342), (116, 358), (109, 358)],
+    "west_port_inner_pier": [(137, 344), (150, 344), (150, 385), (137, 385)],
+    "west_port_middle_yard": [(149, 385), (199, 385), (199, 445),
+                               (153, 445), (153, 417), (149, 417)],
+    "west_port_west_quay": [(94, 411), (195, 411), (195, 442),
+                            (94, 442)],
+    "west_port_south_quay": [(196, 442), (229, 442), (229, 545),
+                             (154, 545), (154, 527), (195, 527)],
+    "west_port_south_pier_1": [(195, 457), (211, 457), (211, 465),
+                                (195, 465)],
+    "west_port_south_pier_2": [(193, 481), (209, 481), (209, 489),
+                                (193, 489)],
+    "west_port_south_pier_3": [(191, 505), (209, 505), (209, 513),
+                                (191, 513)],
+    # Industrial parcels bordering the west quay; streets remain visible.
+    "west_industrial_north_1": [(82, 295), (105, 295),
+                                  (105, 315), (82, 315)],
+    "west_industrial_north_2": [(113, 295), (163, 295),
+                                  (163, 315), (113, 315)],
+    "west_industrial_north_3": [(173, 295), (192, 295),
+                                  (192, 315), (173, 315)],
+    "west_industrial_inner_1": [(230, 326), (282, 326),
+                                  (282, 352), (230, 352)],
+    "west_industrial_inner_2": [(292, 326), (342, 326),
+                                  (342, 352), (292, 352)],
+    "west_industrial_inner_3": [(230, 362), (281, 362),
+                                  (281, 378), (230, 378)],
+    # Airport: runway shoulders and the connected terminal hardstands.
+    "airport_primary_shoulder": [(1174, 330), (1190, 346),
+                                  (1308, 227), (1293, 212)],
+    "airport_cross_shoulder": [(1199, 239), (1212, 225),
+                                (1275, 287), (1261, 301)],
+    "airport_north_taxi_apron": [(1255, 276), (1338, 276),
+                                 (1338, 300), (1263, 300)],
+    "airport_terminal_hardstand": [(1278, 301), (1339, 301),
+                                    (1339, 359), (1278, 359)],
+    "airport_terminal_forecourt": [(1280, 359), (1340, 359),
+                                    (1340, 375), (1280, 375)],
+    # East port: the waterfront apron follows the irregular basin edge.
+    "east_port_north_yard": [(1264, 541), (1317, 541),
+                              (1317, 584), (1264, 584)],
+    "east_port_main_apron": [(1243, 582), (1337, 582),
+                              (1337, 643), (1378, 643),
+                              (1378, 682), (1255, 682),
+                              (1255, 650), (1220, 650),
+                              (1220, 623), (1243, 623)],
+    "east_port_west_quay": [(1186, 606), (1217, 606),
+                             (1217, 724), (1186, 724)],
+    "east_port_north_pier": [(1280, 593), (1350, 593),
+                              (1350, 605), (1280, 605)],
+    "east_port_central_pier": [(1292, 621), (1353, 621),
+                                (1353, 633), (1292, 633)],
+    "east_port_long_pier": [(1262, 688), (1357, 688),
+                             (1357, 715), (1262, 715)],
+    "east_port_south_pier": [(1184, 702), (1223, 702),
+                              (1223, 719), (1184, 719)],
+    "east_port_east_pier": [(1340, 548), (1355, 548),
+                             (1390, 594), (1374, 606)],
+    # Industrial street blocks inland of the east quay.
+    "east_industrial_west_1": [(1062, 525), (1111, 525),
+                                (1111, 544), (1062, 544)],
+    "east_industrial_west_2": [(1119, 525), (1156, 525),
+                                (1156, 544), (1119, 544)],
+    "east_industrial_west_3": [(1062, 553), (1111, 553),
+                                (1111, 572), (1062, 572)],
+    "east_industrial_west_4": [(1119, 553), (1156, 553),
+                                (1156, 572), (1119, 572)],
+    "east_industrial_inner_1": [(1178, 553), (1227, 553),
+                                 (1227, 572), (1178, 572)],
+    "east_industrial_inner_2": [(1178, 581), (1227, 581),
+                                 (1227, 600), (1178, 600)],
+}
 
 # Broad wooded regions, raised ground, and city building lots.
 # Vegetation polygons mark cover only; they do not generate individual trees.
@@ -537,6 +633,12 @@ def footprint_clear(outline):
     xs = [point[0] for point in outline]
     ys = [point[1] for point in outline]
     left, top, right, bottom = min(xs), min(ys), max(xs), max(ys)
+    if any(any(point_in_polygon(corner, paved) for corner in outline)
+           or any(left <= x <= right and top <= y <= bottom
+                  for x, y in paved)
+           for name, paved in concrete_shapes.items()
+           if name.startswith(("west_port_", "east_port_", "airport_"))):
+        return False
     candidates = set()
     for tile_x in range(int(left // 64), int(right // 64) + 1):
         for tile_y in range(int(top // 64), int(bottom // 64) + 1):
@@ -649,71 +751,67 @@ for endpoint in mouth_connections:
                for kind, path in road_paths.values()):
         raise ValueError(f"lane mouth has no ramp at {endpoint}")
 
-with Path("examples/target_map.road").open("w") as stream:
-    stream.write(definitions + "\n")
-    for (x, y), name in points.items():
-        stream.write(f"{name} = map_point({coordinate((x, y))});\n")
-    stream.write("\n")
-    for name, outline in beach_shapes.items():
-        coordinates = ", ".join(coordinate(point) for point in outline)
-        stream.write(f"{name} = beach({coordinates});\n")
-    for name, outline in land_shapes.items():
-        coordinates = ", ".join(coordinate(point) for point in outline)
-        stream.write(f"{name} = land({coordinates});\n")
-    for name, outline in vegetation_shapes.items():
-        coordinates = ", ".join(coordinate(point) for point in outline)
-        stream.write(f"{name} = vegetation(forest, {coordinates});\n")
-    for name, (height, outline) in terrain_shapes.items():
-        coordinates = ", ".join(coordinate(point) for point in outline)
-        stream.write(f"{name} = terrain({height:.4f}, {coordinates});\n")
-    for name, (height, outline) in building_shapes.items():
-        coordinates = ", ".join(coordinate(point) for point in outline)
-        stream.write(f"{name} = building({height:.4f}, {coordinates});\n")
-    stream.write("\n")
-    stream.write("\n".join(out) + "\n")
-    stream.write("\n")
-    for reference, arms in connection_arms.items():
-        sides = {side for side, _ in arms}
-        if len(arms) not in (2, 3, 4) or len(sides) != len(arms):
-            continue
-        if len(arms) == 2 and sides in ({"north", "south"}, {"east", "west"}):
-            continue
-        kinds = {kind for _, kind in arms}
-        if len(arms) == 2 and kinds == {"arterial"}:
-            continue
-        if kinds == {"local"} or kinds == {"arterial"}:
-            stream.write(f"intersection{len(arms)}({reference}, {next(iter(kinds))});\n")
-        elif kinds == {"local", "arterial"}:
-            overrides = ", ".join(f"{side}, local" for side, kind in arms if kind == "local")
-            stream.write(f"intersection{len(arms)}({reference}, arterial, {overrides});\n")
-    stream.write("\n")
-    for index, placement in enumerate(placements["i95"]):
-        if index == 1:
-            stream.write(f"grade({placement}, 0, 0.24);\n")
-        elif index in (2, 3):
-            stream.write(f"elevation({placement}, 0.24);\n")
-        elif index == 4:
-            stream.write(f"grade({placement}, 0.24, 0);\n")
-    for index, placement in enumerate(placements["i10"]):
-        if index == 7:
-            stream.write(f"grade({placement}, 0, 0.18);\n")
-        elif index == 8:
-            stream.write(f"elevation({placement}, 0.18);\n")
-        elif index == 9:
-            stream.write(f"grade({placement}, 0.18, 0);\n")
-    flyovers = {
-        "i95_north_return": [(0, 0.16), (0.16, 0.16), (0.16, 0)],
-        "west_ramp_e": [(0, 0.18), (0.18, 0.18), (0.18, 0)],
-        "west_ramp_to_grid": [(0, 0.16), (0.16, 0.16), (0.16, 0)],
-        "east_ramp_n": [(0, 0.18), (0.18, 0.18), (0.18, 0.18)],
-        "east_ramp_s": [(0, 0.18), (0.18, 0.18), (0.18, 0)],
-        "east_ramp_loop": [(0.18, 0.18)] * 4 + [(0.18, 0)],
-    }
-    for name, grades in flyovers.items():
-        if len(placements[name]) != len(grades):
-            raise ValueError(f"{name} has {len(placements[name])} road pieces but {len(grades)} grades")
-        for placement, (start, end) in zip(placements[name], grades):
-            stream.write(f"grade({placement}, {start}, {end});\n")
+document = RoadDocument()
+for name, (elements, direction) in road_definitions.items():
+    document.define_road(name, elements, direction)
+for position, name in points.items():
+    document.point(name, world_point(position))
+for name, outline in beach_shapes.items():
+    document.area(LandscapeKind.BEACH, map(world_point, outline), name=name)
+for name, outline in land_shapes.items():
+    document.area(LandscapeKind.LAND, map(world_point, outline), name=name)
+for name, outline in concrete_shapes.items():
+    document.area(LandscapeKind.CONCRETE, map(world_point, outline), name=name)
+for name, outline in vegetation_shapes.items():
+    document.vegetation(name, "forest", map(world_point, outline))
+for name, (height, outline) in terrain_shapes.items():
+    document.terrain(name, round(height, 4), map(world_point, outline))
+for name, (height, outline) in building_shapes.items():
+    document.building(name, round(height, 4), map(world_point, outline))
+document.extend(road_statements)
 
-mouth_count = sum(" = ramp_mouth(" in line for line in out)
+for reference, arms in connection_arms.items():
+    sides = {side for side, _ in arms}
+    if len(arms) not in (2, 3, 4) or len(sides) != len(arms):
+        continue
+    if len(arms) == 2 and sides in ({"north", "south"}, {"east", "west"}):
+        continue
+    kinds = {kind for _, kind in arms}
+    if len(arms) == 2 and kinds == {"arterial"}:
+        continue
+    if kinds == {"local"} or kinds == {"arterial"}:
+        document.intersection(reference, next(iter(kinds)), len(arms))
+    elif kinds == {"local", "arterial"}:
+        overrides = {IntersectionSide(side): "local" for side, kind in arms if kind == "local"}
+        document.intersection(reference, "arterial", len(arms), overrides=overrides)
+
+for index, placement in enumerate(placements["i95"]):
+    if index == 1:
+        document.grade(placement, 0, 0.24)
+    elif index in (2, 3):
+        document.elevation(placement, 0.24)
+    elif index == 4:
+        document.grade(placement, 0.24, 0)
+for index, placement in enumerate(placements["i10"]):
+    if index == 7:
+        document.grade(placement, 0, 0.18)
+    elif index == 8:
+        document.elevation(placement, 0.18)
+    elif index == 9:
+        document.grade(placement, 0.18, 0)
+flyovers = {
+    "i95_north_return": [(0, 0.16), (0.16, 0.16), (0.16, 0)],
+    "west_ramp_e": [(0, 0.18), (0.18, 0.18), (0.18, 0)],
+    "west_ramp_to_grid": [(0, 0.16), (0.16, 0.16), (0.16, 0)],
+    "east_ramp_n": [(0, 0.18), (0.18, 0.18), (0.18, 0.18)],
+    "east_ramp_s": [(0, 0.18), (0.18, 0.18), (0.18, 0)],
+    "east_ramp_loop": [(0.18, 0.18)] * 4 + [(0.18, 0)],
+}
+for name, grades in flyovers.items():
+    if len(placements[name]) != len(grades):
+        raise ValueError(f"{name} has {len(placements[name])} road pieces but {len(grades)} grades")
+    for placement, (start, end) in zip(placements[name], grades):
+        document.grade(placement, start, end)
+
+Path("examples/target_map.road").write_text(document.source)
 print(f"wrote {serial + mouth_count} road segments and {len(points)} junction points")
