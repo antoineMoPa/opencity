@@ -4,12 +4,14 @@ version = "0.1.0"
 edition = "2021"
 description = "Parser and writer for the OpenCity road definition language"
 license = "Apache-2.0"
+default-run = "editor"
 
 [lib]
 path = "src/lib.rs"
 crate-type = ["rlib", "cdylib"]
 
 [features]
+default = ["editor"]
 editor = ["dep:eframe", "dep:egui_extras", "dep:egui_frames", "dep:egui_command_palette", "dep:rfd", "dep:muda", "dep:serde_json", "dep:base64", "dep:png"]
 
 [[bin]]

@@ -2098,6 +2098,7 @@ fn road_with_elements(
             }
         } else if name_available(program, &name, None) {
             let road = RoadDefinition {
+                role: opencity::RoadRole::Ordinary,
                 name,
                 elements,
                 direction,
@@ -3271,7 +3272,8 @@ mod tests {
         for (element_index, target_y, side) in
             [(3, -2.0, ExitSide::Right), (1, 2.0, ExitSide::Left)]
         {
-            let mut program = parse("road highway: verge-carlane-middle-carlane-verge; end; road ramp: verge-carlane-verge; end;").unwrap();
+            let mut program = parse("road highway: verge-carlane-middle-carlane-verge; end; road ramp: verge-carlane-verge;
+    role ramp; end;").unwrap();
             let highway = match &program.statements[0] {
                 Statement::Road(road) => road.clone(),
                 _ => unreachable!(),
@@ -3527,7 +3529,8 @@ mod tests {
 
     #[test]
     fn top_level_and_nested_road_grades_add_instance_heights() {
-        let program = parse("road ramp: carlane; end; direct = ramp(0, 0, 2, 0); grade(direct, 0, 0.25); block inner: local = ramp(0, 0, 2, 0); grade(local, 0, 0.25); end; block outer: nested = inner(0, 0, 0.5); end; outer(4, 0, 1);").unwrap();
+        let program = parse("road ramp: carlane;
+    role ramp; end; direct = ramp(0, 0, 2, 0); grade(direct, 0, 0.25); block inner: local = ramp(0, 0, 2, 0); grade(local, 0, 0.25); end; block outer: nested = inner(0, 0, 0.5); end; outer(4, 0, 1);").unwrap();
         let projection = project(&program);
         assert_eq!(projection.unresolved, 0);
         assert_eq!(
@@ -3769,7 +3772,8 @@ mod tests {
     #[test]
     fn lane_branch_follows_parent_shape_and_name() {
         let mut program = parse(
-            "road highway: verge-carlane-carlane-verge; end; road ramp: verge-carlane-verge; end;",
+            "road highway: verge-carlane-carlane-verge; end; road ramp: verge-carlane-verge;
+    role ramp; end;",
         )
         .unwrap();
         let parent_road = match &program.statements[0] {
@@ -3860,7 +3864,11 @@ mod tests {
 
     #[test]
     fn branch_uses_visible_element_side_and_parent_tangent() {
-        let mut program = parse("road highway: verge-carlane-middle-carlane-verge; end; road ramp: verge-carlane-verge; end;").unwrap();
+        let mut program = parse(
+            "road highway: verge-carlane-middle-carlane-verge; end; road ramp: verge-carlane-verge;
+    role ramp; end;",
+        )
+        .unwrap();
         let parent_road = match &program.statements[0] {
             Statement::Road(road) => road.clone(),
             _ => unreachable!(),
@@ -3913,7 +3921,8 @@ mod tests {
         use opencity::{RoadElement, RoadElementKind};
 
         let mut program = parse(
-            "road highway: verge-carlane-carlane-verge; end; road ramp: verge-carlane-verge; end;",
+            "road highway: verge-carlane-carlane-verge; end; road ramp: verge-carlane-verge;
+    role ramp; end;",
         )
         .unwrap();
         let parent_road = match &program.statements[0] {

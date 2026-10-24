@@ -8,4 +8,4 @@ build:
 	bash scripts/build-web.sh
 
 serve:
-	python3 -m http.server --bind 127.0.0.1 --directory web/dist $(PORT)
+	node scripts/serve-web.mjs $(PORT)

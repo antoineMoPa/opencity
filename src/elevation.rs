@@ -153,7 +153,11 @@ mod tests {
 
     #[test]
     fn grade_round_trips_and_replaces_latest_call() {
-        let mut program = parse("road ramp: carlane; end; exit = ramp(0, 0, 2, 0);").unwrap();
+        let mut program = parse(
+            "road ramp: carlane;
+    role ramp; end; exit = ramp(0, 0, 2, 0);",
+        )
+        .unwrap();
         assert!(set_grade(&mut program, "exit", 0.0, 0.25));
         assert_eq!(grade_of(&program, "exit"), Some((0.0, 0.25)));
         assert!(set_grade(&mut program, "exit", -0.5, 1.0));

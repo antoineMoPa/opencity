@@ -1,0 +1,7 @@
+gallery_ground = land(-12, -8, 22, -8, 22, 8, -12, 8);
+
+place(four_way, four_way_sample, -8, 5, 0);
+place(three_way, three_way_sample, -4, 5, 0);
+place(street_to_interstate_flat, flat_ramp_sample, -8, -4, 0);
+place(street_to_interstate_elevated, elevated_ramp_sample, -8, 0, 0);
+place(cloverleaf, cloverleaf_sample, 10, 0, 0);

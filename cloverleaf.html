@@ -1,0 +1,183 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Cloverleaf · Traffic study</title>
+<style>
+  *{box-sizing:border-box}body{margin:0;background:#dce4d6;color:#25362e;font:13px system-ui,sans-serif;overflow:hidden}
+  canvas{display:block;touch-action:none}header,footer{position:fixed;left:24px;right:24px;pointer-events:none}
+  header{top:24px;display:flex;justify-content:space-between;align-items:start}h1{font-size:22px;letter-spacing:-.8px;margin:4px 0}small{font-size:10px;letter-spacing:2px;text-transform:uppercase}
+  .panel{background:#f8faf1ed;border:1px solid #ffffffaa;border-radius:14px;padding:16px 20px;box-shadow:0 8px 32px #24342912;pointer-events:auto}
+  footer{bottom:24px;display:flex;align-items:end;justify-content:space-between;gap:16px}.controls{display:flex;gap:18px;align-items:center;flex-wrap:wrap}
+  button{background:#263f34;color:#fff;border:0;border-radius:7px;padding:9px 14px;cursor:pointer;font:inherit}button:focus-visible,input:focus-visible{outline:3px solid #b48c35;outline-offset:3px}
+  label{display:flex;align-items:center;gap:9px}input{width:100px;accent-color:#496f52}.hint{line-height:1.8}.status{font-variant-numeric:tabular-nums}#error{display:none;position:fixed;top:130px;left:24px;max-width:400px}
+  @media(max-width:620px){header,footer{left:12px;right:12px}header{top:12px}footer{bottom:12px}.hint{display:none}.panel{padding:12px}.controls{gap:10px}h1{font-size:19px}input{width:75px}}
+</style>
+<header><div class="panel"><small>Interchange / 01</small><h1>Cloverleaf</h1><span>Four loops. One continuous flow.</span></div><div class="panel status"><span id="count">0</span> vehicles</div></header>
+<div id="error" class="panel" role="alert"></div>
+<footer><div class="panel controls"><button id="pause" aria-pressed="false">Pause</button><label>Speed <input id="speed" type="range" min="0.25" max="3" step="0.25" value="1"><output id="rate">1×</output></label><label>Traffic <input id="density" type="range" min="20" max="180" step="10" value="100"></label><button id="view">Top view</button></div><div class="panel hint">Drag to orbit · Scroll to zoom<br>Illustrative traffic simulation</div></footer>
+<script type="module">
+try {
+  const THREE = await import('https://cdn.jsdelivr.net/npm/three@0.160.1/build/three.module.js');
+  const scene = new THREE.Scene();
+  scene.background = new THREE.Color('#dce4d6');
+  const renderer = new THREE.WebGLRenderer({antialias:true});
+  renderer.setPixelRatio(Math.min(devicePixelRatio,2));
+  renderer.shadowMap.enabled = true;
+  renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+  renderer.outputColorSpace = THREE.SRGBColorSpace;
+  document.body.prepend(renderer.domElement);
+  const camera = new THREE.PerspectiveCamera(42,1,1,1000);
+  scene.add(new THREE.HemisphereLight(0xffffff,0x819177,2.5));
+  const sun = new THREE.DirectionalLight(0xfff5dc,3);
+  sun.position.set(-80,150,70);sun.castShadow=true;
+  Object.assign(sun.shadow.camera,{left:-155,right:155,top:155,bottom:-155,near:1,far:400});
+  sun.shadow.mapSize.set(2048,2048);sun.shadow.normalBias=.15;scene.add(sun);
+  const material = color => new THREE.MeshStandardMaterial({color,roughness:.9});
+  const asphalt=material('#414b4c'), concrete=material('#b6bcae'), white=material('#e6e5d5'), yellow=material('#e4c56b');
+  function box(w,h,d,mat,x,y,z) {
+    const mesh=new THREE.Mesh(new THREE.BoxGeometry(w,h,d),mat);
+    mesh.position.set(x,y,z);mesh.castShadow=true;mesh.receiveShadow=true;scene.add(mesh);return mesh;
+  }
+  box(290,2,290,material('#a6ba8c'),0,-1.1,0);
+  const V=(x,y,z)=>new THREE.Vector3(x,y,z);
+  const turn=(p,q)=>{for(let i=0;i<q;i++)p=V(-p.z,p.y,p.x);return p;};
+  const height=x=>{const t=Math.max(0,Math.min(1,(90-Math.abs(x))/35));return .16+6*t*t*(3-2*t);};
+  function strip(points,width,mat,lift=0) {
+    const vertices=[],indices=[];
+    points.forEach((p,i)=>{
+      const a=points[Math.max(0,i-1)],b=points[Math.min(points.length-1,i+1)];
+      const dx=b.x-a.x,dz=b.z-a.z,k=width/2/Math.hypot(dx,dz);
+      vertices.push(p.x-dz*k,p.y+lift,p.z+dx*k,p.x+dz*k,p.y+lift,p.z-dx*k);
+      if(i<points.length-1){const n=i*2;indices.push(n,n+2,n+1,n+1,n+2,n+3);}
+    });
+    const geometry=new THREE.BufferGeometry();geometry.setAttribute('position',new THREE.Float32BufferAttribute(vertices,3));geometry.setIndex(indices);geometry.computeVertexNormals();
+    const mesh=new THREE.Mesh(geometry,mat);mesh.receiveShadow=true;scene.add(mesh);
+  }
+  const sample=(fn,n=160)=>Array.from({length:n+1},(_,i)=>fn(i/n));
+  // The east/west highway rises over the north/south highway.
+  for(const side of [-1,1]) {
+    for(const eastWest of [true,false]) {
+      const line=offset=>sample(t=>eastWest?V(t*280-140,height(t*280-140),side*7+offset):V(side*7+offset,.16,t*280-140));
+      strip(line(0),11,concrete,-.12);strip(line(0),10,asphalt);
+      strip(line(-side*4.7),.16,yellow,.025);strip(line(side*4.7),.14,white,.025);
+      const center=line(0);for(let i=0;i<160;i+=5)strip(center.slice(i,i+3),.13,white,.03);
+    }
+  }
+  for(const x of [-19,19])for(const z of [-7,7])box(2.2,5.8,6,concrete,x,2.9,z);
+  // Four 270-degree left-turn loops and four outer right-turn connectors.
+  const ramps=[];
+  for(let q=0;q<4;q++) {
+    const startY=q%2?.16:height(30),endY=q%2?height(30):.16;
+    const loop=sample(t=>{
+      const angle=-Math.PI/2+t*Math.PI*1.5,s=t*t*(3-2*t);
+      return turn(V(30+21*Math.cos(angle),startY+(endY-startY)*s,30+21*Math.sin(angle)),q);
+    });
+    const curve=new THREE.CubicBezierCurve3(V(-76,0,9),V(-76,0,70),V(-70,0,76),V(-9,0,76));
+    const outer=sample(t=>{
+      const p=curve.getPoint(t),s=t*t*(3-2*t);
+      p.y=q%2?.16+(height(76)-.16)*s:height(76)+(.16-height(76))*s;
+      return turn(p,q);
+    });
+    for(const points of [loop,outer]) {
+      strip(points,6,concrete,-.08);strip(points,5,asphalt,.015);
+      // Edge paint follows the same sampled geometry as the traffic.
+      for(const side of [-1,1]) {
+        const edge=points.map((p,i)=>{
+          const a=points[Math.max(0,i-1)],b=points[Math.min(points.length-1,i+1)],dx=b.x-a.x,dz=b.z-a.z,k=side*2.2/Math.hypot(dx,dz);
+          return V(p.x-dz*k,p.y+.04,p.z+dx*k);
+        });strip(edge,.12,white);
+      }
+      ramps.push({points,q,outer:points===outer});
+    }
+  }
+  // Routes extend to the edge of the scene; cars enter, turn/merge, then leave.
+  const routes=[];
+  function route(points,limit) {
+    const distances=[0];for(let i=1;i<points.length;i++)distances.push(distances[i-1]+points[i].distanceTo(points[i-1]));
+    const length=distances.at(-1);
+    const at=s=>{
+      s=Math.max(0,Math.min(length,s));let low=0,high=distances.length-1;
+      while(high-low>1){const mid=(low+high)>>1;if(distances[mid]<=s)low=mid;else high=mid;}
+      return points[low].clone().lerp(points[high],(s-distances[low])/(distances[high]-distances[low]));
+    };
+    routes.push({at,length,limit});
+  }
+  function highway(x,z,q) {const p=turn(V(x,0,z),q);p.y=q%2?.16:height(p.x);return p;}
+  for(let q=0;q<4;q++)for(const lane of [5,9])route(sample(t=>highway(-140+t*280,lane,q)),17);
+  for(const ramp of ramps) {
+    const {q,points,outer}=ramp,entryX=outer?-76:30,exitZ=outer?76:30,exitX=outer?-9:9;
+    const incoming=sample(t=>highway(-140+(entryX+140)*t,9,q),70);
+    const outgoing=sample(t=>{
+      const p=turn(V(exitX,0,exitZ+((outer?140:-140)-exitZ)*t),q);
+      p.y=q%2?height(p.x):.16;return p;
+    },70);
+    route([...incoming.slice(0,-1),...points,...outgoing.slice(1)],outer?12:10);
+  }
+  // Small trees outside the pavement, using a deterministic layout.
+  const trunk=material('#877963'),leaves=material('#6d925f');
+  for(let q=0;q<4;q++)for(let i=0;i<14;i++) {
+    const p=turn(V(82+(i%4)*13,0,82+Math.floor(i/4)*15),q);
+    box(.65,2,.65,trunk,p.x,1,p.z);
+    const tree=new THREE.Mesh(new THREE.ConeGeometry(2.6,6,7),leaves);tree.position.set(p.x,4.7,p.z);tree.castShadow=true;scene.add(tree);
+  }
+  const bodyGeometry=new THREE.BoxGeometry(1.65,.85,3.4),roofGeometry=new THREE.BoxGeometry(1.35,.65,1.7);
+  const glass=material('#344c55'),colors=['#f2e6c7','#bf644f','#e4b84c','#648eaa','#f5f5ed','#3f6860'].map(material);
+  const cars=[];
+  function addCar() {
+    const r=routes[Math.floor(Math.random()*routes.length)],s=Math.random()*r.length,p=r.at(s);
+    if(cars.some(c=>c.mesh.position.distanceTo(p)<8))return;
+    const mesh=new THREE.Group(),body=new THREE.Mesh(bodyGeometry,colors[Math.floor(Math.random()*colors.length)]),roof=new THREE.Mesh(roofGeometry,glass);
+    body.position.y=.6;roof.position.set(0,1.25,-.1);body.castShadow=true;roof.castShadow=true;mesh.add(body,roof);mesh.position.copy(p);scene.add(mesh);
+    cars.push({mesh,r,s,v:r.limit*.7,target:r.limit*(.8+Math.random()*.3)});
+  }
+  const count=document.querySelector('#count'),density=document.querySelector('#density'),speed=document.querySelector('#speed');
+  let paused=false,azimuth=.7,elevation=.88,distance=370,top=false;
+  document.querySelector('#pause').onclick=e=>{paused=!paused;e.target.textContent=paused?'Resume':'Pause';e.target.setAttribute('aria-pressed',String(paused));};
+  speed.oninput=()=>document.querySelector('#rate').value=speed.value+'×';
+  document.querySelector('#view').onclick=e=>{top=!top;elevation=top?1.56:.88;e.target.textContent=top?'Orbit view':'Top view';};
+  let pointer=null;
+  renderer.domElement.onpointerdown=e=>{pointer={x:e.clientX,y:e.clientY};renderer.domElement.setPointerCapture(e.pointerId);};
+  renderer.domElement.onpointermove=e=>{if(!pointer)return;azimuth-=(e.clientX-pointer.x)*.006;elevation=Math.max(.25,Math.min(1.56,elevation+(e.clientY-pointer.y)*.006));pointer={x:e.clientX,y:e.clientY};};
+  renderer.domElement.onpointerup=renderer.domElement.onpointercancel=()=>pointer=null;
+  renderer.domElement.addEventListener('wheel',e=>{e.preventDefault();distance=Math.max(100,Math.min(600,distance*Math.exp(e.deltaY*.001)));},{passive:false});
+  function resize(){renderer.setSize(innerWidth,innerHeight);camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix();}addEventListener('resize',resize);resize();
+  let previous=performance.now(),accumulator=0;
+  function step(dt) {
+    // Follow nearby vehicles, including those on another route at a merge.
+    for(const car of cars) {
+      const p=car.r.at(car.s),ahead=car.r.at(Math.min(car.s+2,car.r.length)),dx=ahead.x-p.x,dz=ahead.z-p.z,len=Math.hypot(dx,dz)||1;
+      let gap=30;
+      for(const other of cars) {
+        if(other===car||!other.mesh.visible)continue;
+        const ox=other.mesh.position.x-p.x,oz=other.mesh.position.z-p.z;
+        const along=(ox*dx+oz*dz)/len,across=Math.abs(ox*dz-oz*dx)/len;
+        if(along>0&&across<2.3&&Math.abs(other.mesh.position.y-p.y)<2)gap=Math.min(gap,along);
+      }
+      const desired=Math.min(car.target,Math.max(0,(gap-5)*1.15));
+      car.v=Math.max(0,car.v+Math.max(-12*dt,Math.min(3*dt,desired-car.v)));
+      car.s+=Math.min(car.v*dt,Math.max(0,gap-4.5));
+      if(car.s>=car.r.length){car.s=0;car.v=0;car.waiting=true;}
+      if(car.waiting) {
+        const start=car.r.at(0);
+        if(cars.some(c=>c!==car&&c.mesh.visible&&c.mesh.position.distanceTo(start)<9)){car.mesh.visible=false;car.s=0;continue;}
+        car.waiting=false;car.mesh.visible=true;
+      }
+      car.mesh.position.copy(car.r.at(car.s));
+      const next=car.r.at(Math.min(car.s+1,car.r.length));car.mesh.rotation.y=Math.atan2(next.x-car.mesh.position.x,next.z-car.mesh.position.z);
+    }
+  }
+  renderer.setAnimationLoop(now=>{
+    const dt=Math.min((now-previous)/1000,.05);previous=now;
+    for(let i=0;i<8&&cars.length<Number(density.value);i++)addCar();
+    while(cars.length>Number(density.value))scene.remove(cars.pop().mesh);
+    count.textContent=cars.length;
+    if(!paused){accumulator+=dt*Number(speed.value);while(accumulator>=1/60){step(1/60);accumulator-=1/60;}}
+    camera.position.set(Math.sin(azimuth)*Math.cos(elevation)*distance,Math.sin(elevation)*distance,Math.cos(azimuth)*Math.cos(elevation)*distance);camera.lookAt(0,0,0);
+    renderer.render(scene,camera);
+  });
+} catch(error) {
+  const notice=document.querySelector('#error');notice.style.display='block';notice.textContent='Unable to start the 3D view. Check WebGL support and your connection to the Three.js CDN. '+error.message;
+}
+</script>
+</html>

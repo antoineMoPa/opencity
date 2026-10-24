@@ -6,6 +6,7 @@ road north_south_interstate:
 end;
 road exit_ramp:
     verge-carlane-verge;
+    role ramp;
 end;
 
 block interstate_crossing:

@@ -2,11 +2,14 @@
 //! painters are tessellated in world space, then drawn with wgpu depth testing.
 use super::*;
 use eframe::{egui_wgpu, wgpu};
+use std::ops::Range;
 use std::sync::{Arc, Mutex, OnceLock};
 use std::{collections::HashMap, path::Path};
 use wgpu::util::DeviceExt;
 
 const GEOMETRY_SCALE: f32 = 100.0;
+const SCENE_SAMPLES: u32 = 4;
+const MULTISAMPLE_MAX_ZOOM: f32 = 240.0;
 const GEOMETRY_RECT: egui::Rect = egui::Rect::from_min_max(
     egui::pos2(-100_000.0, -100_000.0),
     egui::pos2(100_000.0, 100_000.0),
@@ -25,7 +28,17 @@ pub struct WorldVertex {
 #[derive(Default)]
 pub struct Scene {
     pub vertices: Vec<WorldVertex>,
+    road_span: Option<Range<u32>>,
+    road_ranges: Vec<RoadDrawRange>,
     gpu_vertices: std::sync::OnceLock<Vec<GpuVertex>>,
+}
+
+struct RoadDrawRange {
+    vertices: Range<u32>,
+    min: WorldPoint,
+    max: WorldPoint,
+    min_height: f32,
+    max_height: f32,
 }
 
 impl Scene {
@@ -54,6 +67,14 @@ fn capture_geometry(
     height: impl Fn(WorldPoint) -> f32,
     scene: &mut Scene,
 ) {
+    // The tessellated vertices are kept in world space and reused at every
+    // zoom. A one-pixel egui feather here becomes a 24-pixel blur at 2400x.
+    // Let the scene target resolve edge coverage in screen pixels instead.
+    ctx.tessellation_options_mut(|options| {
+        options.feathering = false;
+        options.round_line_segments_to_pixels = false;
+        options.round_rects_to_pixels = false;
+    });
     ctx.begin_pass(egui::RawInput {
         screen_rect: Some(GEOMETRY_RECT),
         ..Default::default()
@@ -411,7 +432,6 @@ fn grid_vertices(palette: EditorPalette) -> &'static [WorldVertex] {
     })
 }
 
-#[cfg(target_arch = "wasm32")]
 pub fn loading_scene(palette: EditorPalette) -> Arc<Scene> {
     static DARK: OnceLock<Arc<Scene>> = OnceLock::new();
     static LIGHT: OnceLock<Arc<Scene>> = OnceLock::new();
@@ -429,66 +449,147 @@ pub fn loading_scene(palette: EditorPalette) -> Arc<Scene> {
 
 fn add_elevated_edges(
     scene: &mut Scene,
-    segment: &map::Segment,
-    road: Option<&RoadDefinition>,
-    profile: &PaintProfile,
+    geometry: &opencity::road_geometry::RoadGeometry,
+    index: usize,
     color: Color32,
 ) {
-    if segment.start_z.max(segment.end_z) <= 0.05 {
-        return;
+    for wall in geometry.walls.iter().filter(|w| w.segment == index) {
+        let prior = WorldVertex {
+            point: wall.start.point,
+            height: wall.start.height + 0.005,
+            depth_bias: 0.0,
+            color,
+        };
+        let current = WorldVertex {
+            point: wall.end.point,
+            height: wall.end.height + 0.005,
+            depth_bias: 0.0,
+            color,
+        };
+        let prior_bottom = WorldVertex {
+            height: wall.start.height - 0.08,
+            ..prior
+        };
+        let current_bottom = WorldVertex {
+            height: wall.end.height - 0.08,
+            ..current
+        };
+        scene.vertices.extend_from_slice(&[
+            prior,
+            current,
+            current_bottom,
+            prior,
+            current_bottom,
+            prior_bottom,
+        ]);
     }
-    for side in [0, 1] {
-        let mut previous = None;
-        let steps = road_curve_samples(segment);
-        for step in 0..=steps {
-            let t = step as f32 / steps as f32;
-            let center = segment.point_at(t);
-            let tangent = segment.tangent_at(t);
-            let length = (tangent.x * tangent.x + tangent.y * tangent.y)
-                .sqrt()
-                .max(0.000001);
-            let (left, right) = road
-                .map(|road| section_edges(road, profile, t))
-                .unwrap_or((-0.08, 0.08));
-            let offset = if side == 0 { left } else { right };
-            let point = WorldPoint {
-                x: center.x - tangent.y / length * offset,
-                y: center.y + tangent.x / length * offset,
-            };
-            let height = segment.height_at(t);
-            if let Some((prior_point, prior_height)) = previous {
-                if height.max(prior_height) > 0.05 {
-                    let current = WorldVertex {
-                        point,
-                        height: height + 0.003,
-                        depth_bias: 0.0,
-                        color,
-                    };
-                    let prior = WorldVertex {
-                        point: prior_point,
-                        height: prior_height + 0.003,
-                        depth_bias: 0.0,
-                        color,
-                    };
-                    let current_bottom = WorldVertex {
-                        height: height - 0.08,
-                        ..current
-                    };
-                    let prior_bottom = WorldVertex {
-                        height: prior_height - 0.08,
-                        ..prior
-                    };
-                    scene.vertices.extend_from_slice(&[
-                        prior,
-                        current,
-                        current_bottom,
-                        prior,
-                        current_bottom,
-                        prior_bottom,
-                    ]);
-                }
+}
+
+/// Render ordinary road bands and their edge/center markings from the same
+/// sampled cross-sections as the sidewalls and geometry validator.
+fn add_resolved_road_surface(
+    scene: &mut Scene,
+    geometry: &opencity::road_geometry::RoadGeometry,
+    index: usize,
+    road: &RoadDefinition,
+    profile: &PaintProfile,
+    palette: EditorPalette,
+    selected: bool,
+) {
+    let rows = geometry.cross_sections(index);
+    let emit = |scene: &mut Scene,
+                corners: [opencity::road_geometry::Vertex; 4],
+                color: Color32,
+                bias: f32| {
+        for i in [0, 1, 2, 0, 2, 3] {
+            let vertex = corners[i];
+            scene.vertices.push(WorldVertex {
+                point: vertex.point,
+                height: vertex.height + 0.005,
+                depth_bias: bias,
+                color,
+            });
+        }
+    };
+    let between =
+        |a: opencity::road_geometry::Vertex, b: opencity::road_geometry::Vertex, t: f32| {
+            opencity::road_geometry::Vertex {
+                point: WorldPoint {
+                    x: a.point.x + (b.point.x - a.point.x) * t,
+                    y: a.point.y + (b.point.y - a.point.y) * t,
+                },
+                height: a.height + (b.height - a.height) * t,
             }
-            previous = Some((point, height));
+        };
+    for pair in rows.windows(2) {
+        for (band, element) in road.elements.iter().enumerate() {
+            emit(
+                scene,
+                [
+                    pair[0].boundaries[band],
+                    pair[1].boundaries[band],
+                    pair[1].boundaries[band + 1],
+                    pair[0].boundaries[band + 1],
+                ],
+                kind_color(element.kind, palette.theme),
+                0.0,
+            );
+        }
+        let left = [pair[0].boundaries[0], pair[1].boundaries[0]];
+        let right = [
+            *pair[0].boundaries.last().unwrap(),
+            *pair[1].boundaries.last().unwrap(),
+        ];
+        let width = (left[0].point.x - right[0].point.x)
+            .hypot(left[0].point.y - right[0].point.y)
+            .max(0.000001);
+        let marking = (0.004 / width).min(0.25);
+        // The center marking is a coplanar decal, with depth ordering only.
+        emit(
+            scene,
+            [
+                between(left[0], right[0], 0.5 - marking),
+                between(left[1], right[1], 0.5 - marking),
+                between(left[1], right[1], 0.5 + marking),
+                between(left[0], right[0], 0.5 + marking),
+            ],
+            palette.map_centerline,
+            -0.003,
+        );
+        for side in [0, 1] {
+            let edge = if side == 0 { left } else { right };
+            let midpoint = between(edge[0], edge[1], 0.5).point;
+            let hidden = [profile.start_parent.as_ref(), profile.end_parent.as_ref()]
+                .into_iter()
+                .flatten()
+                .any(|parent| {
+                    screen_point_in_road(
+                        screen_of(GEOMETRY_RECT, egui::Vec2::ZERO, GEOMETRY_SCALE, midpoint),
+                        parent,
+                        GEOMETRY_RECT,
+                        egui::Vec2::ZERO,
+                        GEOMETRY_SCALE,
+                    )
+                });
+            if hidden {
+                continue;
+            }
+            let inset = if side == 0 { marking } else { 1.0 - marking };
+            emit(
+                scene,
+                [
+                    edge[0],
+                    edge[1],
+                    between(left[1], right[1], inset),
+                    between(left[0], right[0], inset),
+                ],
+                if selected {
+                    palette.map_selected
+                } else {
+                    palette.map_outline
+                },
+                -0.003,
+            );
         }
     }
 }
@@ -499,10 +600,12 @@ fn append_road(
     program: &Program,
     projection: &map::Projection,
     profiles: &[PaintProfile],
+    geometry: &opencity::road_geometry::RoadGeometry,
     index: usize,
     palette: EditorPalette,
     selected: &[SegmentSource],
 ) {
+    let first_vertex = scene.vertices.len() as u32;
     let segment = &projection.segments[index];
     let road = program
         .statements
@@ -514,55 +617,116 @@ fn append_road(
     let is_selected = selected.contains(&segment.source);
     let samples = std::array::from_fn(|step| segment.point_at(step as f32 / 16.0));
     let heights = std::array::from_fn(|step| segment.height_at(step as f32 / 16.0));
-    capture_geometry(
-        ctx,
-        |painter| {
-            if let Some(road) = road.filter(|_| {
-                profiles[index].start_alignment.is_some()
-                    || profiles[index].merge_alignment.is_some()
-                    || !profiles[index].start_taper.is_empty()
-                    || !profiles[index].end_taper.is_empty()
-            }) {
-                paint_profiled_road(
-                    painter,
-                    GEOMETRY_RECT,
-                    egui::Vec2::ZERO,
-                    GEOMETRY_SCALE,
-                    segment,
-                    road,
-                    is_selected,
-                    palette,
-                    &profiles[index],
-                );
-            } else {
-                paint_road_segment(
-                    painter,
-                    GEOMETRY_RECT,
-                    egui::Vec2::ZERO,
-                    GEOMETRY_SCALE,
-                    segment,
-                    road,
-                    is_selected,
-                    palette,
-                );
-            }
-        },
-        |point| {
-            if segment.start_z == segment.end_z {
-                segment.start_z + 0.005
-            } else {
-                road_height(&samples, &heights, point) + 0.005
-            }
-        },
-        scene,
-    );
+    let shared_surface = road.filter(|road| {
+        !road.elements.iter().any(|element| {
+            matches!(
+                element.kind,
+                RoadElementKind::TrainTrack
+                    | RoadElementKind::TramTrack
+                    | RoadElementKind::SubwayTrack
+                    | RoadElementKind::Runway
+                    | RoadElementKind::Taxiway
+                    | RoadElementKind::Apron
+            )
+        })
+    });
+    if let Some(road) = shared_surface {
+        add_resolved_road_surface(
+            scene,
+            geometry,
+            index,
+            road,
+            &profiles[index],
+            palette,
+            is_selected,
+        );
+    } else {
+        capture_geometry(
+            ctx,
+            |painter| {
+                if let Some(road) = road.filter(|_| {
+                    profiles[index].start_alignment.is_some()
+                        || profiles[index].merge_alignment.is_some()
+                        || !profiles[index].start_taper.is_empty()
+                        || !profiles[index].end_taper.is_empty()
+                }) {
+                    paint_profiled_road(
+                        painter,
+                        GEOMETRY_RECT,
+                        egui::Vec2::ZERO,
+                        GEOMETRY_SCALE,
+                        segment,
+                        road,
+                        is_selected,
+                        palette,
+                        &profiles[index],
+                    );
+                } else {
+                    paint_road_segment(
+                        painter,
+                        GEOMETRY_RECT,
+                        egui::Vec2::ZERO,
+                        GEOMETRY_SCALE,
+                        segment,
+                        road,
+                        is_selected,
+                        palette,
+                    );
+                }
+            },
+            |point| {
+                if segment.start_z == segment.end_z {
+                    segment.start_z + 0.005
+                } else {
+                    road_height(&samples, &heights, point) + 0.005
+                }
+            },
+            scene,
+        );
+    }
+    // A declared merge replaces the receiving edge's pavement locally. Keep
+    // that overlay ahead of the parent's band/outline layers in every camera.
+    if road.is_some_and(|road| road.role == opencity::RoadRole::Merge) {
+        for vertex in &mut scene.vertices[first_vertex as usize..] {
+            vertex.depth_bias -= 0.02;
+        }
+    }
     add_elevated_edges(
         scene,
-        segment,
-        road,
-        &profiles[index],
+        geometry,
+        index,
         palette.map_outline.gamma_multiply(0.75),
     );
+    let end_vertex = scene.vertices.len() as u32;
+    if first_vertex < end_vertex {
+        let mut min = WorldPoint {
+            x: f32::INFINITY,
+            y: f32::INFINITY,
+        };
+        let mut max = WorldPoint {
+            x: f32::NEG_INFINITY,
+            y: f32::NEG_INFINITY,
+        };
+        let mut min_height = f32::INFINITY;
+        let mut max_height = f32::NEG_INFINITY;
+        for vertex in &scene.vertices[first_vertex as usize..end_vertex as usize] {
+            min.x = min.x.min(vertex.point.x);
+            min.y = min.y.min(vertex.point.y);
+            max.x = max.x.max(vertex.point.x);
+            max.y = max.y.max(vertex.point.y);
+            min_height = min_height.min(vertex.height);
+            max_height = max_height.max(vertex.height);
+        }
+        scene.road_ranges.push(RoadDrawRange {
+            vertices: first_vertex..end_vertex,
+            min,
+            max,
+            min_height,
+            max_height,
+        });
+        let span = scene.road_span.get_or_insert(first_vertex..end_vertex);
+        span.end = end_vertex;
+    }
 }
 
 #[cfg(test)]
@@ -596,6 +760,7 @@ pub fn build_scene_with_model_base(
     let mut scene = Scene::default();
     let ctx = egui::Context::default();
     let profiles = paint_profiles(program, projection);
+    let geometry = opencity::road_geometry::RoadGeometry::compile(program, projection);
     let mut features = project_landscape_features(program).features;
     if !features
         .iter()
@@ -616,7 +781,7 @@ pub fn build_scene_with_model_base(
     let (before_roads, landscape_time) = (scene.vertices.len(), started.elapsed());
     for index in road_paint_order(program, projection, &profiles) {
         append_road(
-            &mut scene, &ctx, program, projection, &profiles, index, palette, selected,
+            &mut scene, &ctx, program, projection, &profiles, &geometry, index, palette, selected,
         );
     }
     #[cfg(test)]
@@ -662,6 +827,7 @@ pub struct WebSceneBuild {
     projection: map::Projection,
     palette: EditorPalette,
     profiles: Vec<PaintProfile>,
+    geometry: opencity::road_geometry::RoadGeometry,
     road_order: Vec<usize>,
     intersections: Vec<map::Intersection>,
     landscape: Vec<opencity::LandscapeFeature>,
@@ -684,6 +850,7 @@ impl WebSceneBuild {
     ) -> Self {
         let ctx = egui::Context::default();
         let profiles = paint_profiles(&program, &projection);
+        let geometry = opencity::road_geometry::RoadGeometry::compile(&program, &projection);
         let road_order = road_paint_order(&program, &projection, &profiles);
         let intersections = map::intersections(&program, &projection);
         let mut landscape = project_landscape_features(&program).features;
@@ -702,6 +869,7 @@ impl WebSceneBuild {
             projection,
             palette,
             profiles,
+            geometry,
             road_order,
             intersections,
             landscape,
@@ -745,6 +913,7 @@ impl WebSceneBuild {
                 &self.program,
                 &self.projection,
                 &self.profiles,
+                &self.geometry,
                 index,
                 self.palette,
                 &[],
@@ -833,6 +1002,8 @@ pub struct SceneCallback {
     pub zoom: f32,
     pub target: WorldPoint,
     pub angle: f32,
+    pub elevation: f32,
+    pub eye_height: f32,
     pub camera: CameraView,
     pub background: Color32,
     pub target_format: wgpu::TextureFormat,
@@ -840,6 +1011,7 @@ pub struct SceneCallback {
 
 struct RenderResources {
     scene_pipeline: wgpu::RenderPipeline,
+    close_zoom_pipeline: wgpu::RenderPipeline,
     camera_buffer: wgpu::Buffer,
     camera_bind_group: wgpu::BindGroup,
     scene_buffer: Option<(Arc<Scene>, wgpu::Buffer)>,
@@ -853,19 +1025,58 @@ struct FrameResources {
     vertex_buffer: wgpu::Buffer,
     vertices: u32,
     color: wgpu::TextureView,
+    multisampled_color: Option<wgpu::TextureView>,
     depth: wgpu::TextureView,
     bind_group: wgpu::BindGroup,
 }
 struct RenderTarget {
     width: u32,
     height: u32,
+    samples: u32,
     color: wgpu::TextureView,
+    multisampled_color: Option<wgpu::TextureView>,
     depth: wgpu::TextureView,
     bind_group: wgpu::BindGroup,
 }
 
 const SCENE_SHADER: &str = include_str!("shaders/scene.wgsl");
 const COMPOSITE_SHADER: &str = include_str!("shaders/composite.wgsl");
+
+impl SceneCallback {
+    fn road_is_visible(&self, road: &RoadDrawRange) -> bool {
+        if self.camera == CameraView::Vehicular {
+            return true;
+        }
+        let mut min = egui::pos2(f32::INFINITY, f32::INFINITY);
+        let mut max = egui::pos2(f32::NEG_INFINITY, f32::NEG_INFINITY);
+        for x in [road.min.x, road.max.x] {
+            for y in [road.min.y, road.max.y] {
+                for height in [road.min_height, road.max_height] {
+                    let point = WorldPoint { x, y };
+                    let screen = if self.camera == CameraView::Top {
+                        screen_of(self.rect, self.pan, self.zoom, point)
+                    } else {
+                        iso_screen(
+                            self.rect,
+                            self.pan,
+                            self.zoom,
+                            self.target,
+                            self.angle,
+                            self.elevation,
+                            point,
+                            height,
+                        )
+                    };
+                    min.x = min.x.min(screen.x);
+                    min.y = min.y.min(screen.y);
+                    max.x = max.x.max(screen.x);
+                    max.y = max.y.max(screen.y);
+                }
+            }
+        }
+        egui::Rect::from_min_max(min, max).intersects(self.rect.expand(2.0))
+    }
+}
 
 impl egui_wgpu::CallbackTrait for SceneCallback {
     fn prepare(
@@ -882,6 +1093,11 @@ impl egui_wgpu::CallbackTrait for SceneCallback {
         let height = (self.rect.height() * screen.pixels_per_point)
             .round()
             .max(1.0) as u32;
+        let samples = if self.camera == CameraView::Vehicular || self.zoom <= MULTISAMPLE_MAX_ZOOM {
+            SCENE_SAMPLES
+        } else {
+            1
+        };
         if resources
             .get::<RenderResources>()
             .is_none_or(|r| r.target_format != self.target_format)
@@ -907,10 +1123,10 @@ impl egui_wgpu::CallbackTrait for SceneCallback {
                 self.pan.x,
                 self.pan.y,
                 self.zoom,
-                if self.camera == CameraView::Isometric {
-                    1.0
-                } else {
-                    0.0
+                match self.camera {
+                    CameraView::Top => 0.0,
+                    CameraView::Isometric => 1.0,
+                    CameraView::Vehicular => 2.0,
                 },
             ],
             target: [
@@ -922,21 +1138,19 @@ impl egui_wgpu::CallbackTrait for SceneCallback {
             viewport: [
                 self.rect.width(),
                 self.rect.height(),
-                ISO_ELEVATION.sin(),
-                ISO_ELEVATION.cos(),
+                self.elevation.sin(),
+                self.elevation.cos(),
             ],
-            elevation: [ISO_ELEVATION.tan(), 0.0, 0.0, 0.0],
+            elevation: [self.elevation.tan(), self.eye_height, 0.0, 0.0],
         };
         queue.write_buffer(
             &renderer.camera_buffer,
             0,
             bytes_of(std::slice::from_ref(&camera)),
         );
-        if renderer
-            .target
-            .as_ref()
-            .is_none_or(|target| target.width != width || target.height != height)
-        {
+        if renderer.target.as_ref().is_none_or(|target| {
+            target.width != width || target.height != height || target.samples != samples
+        }) {
             let size = wgpu::Extent3d {
                 width,
                 height,
@@ -953,13 +1167,27 @@ impl egui_wgpu::CallbackTrait for SceneCallback {
                     | wgpu::TextureUsages::TEXTURE_BINDING,
                 view_formats: &[],
             });
+            let multisampled_color = (samples > 1).then(|| {
+                device
+                    .create_texture(&wgpu::TextureDescriptor {
+                        label: Some("opencity multisampled scene color"),
+                        size,
+                        mip_level_count: 1,
+                        sample_count: samples,
+                        dimension: wgpu::TextureDimension::D2,
+                        format: wgpu::TextureFormat::Rgba8Unorm,
+                        usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+                        view_formats: &[],
+                    })
+                    .create_view(&Default::default())
+            });
             let depth_texture = device.create_texture(&wgpu::TextureDescriptor {
                 label: Some("opencity scene depth"),
                 size,
                 mip_level_count: 1,
-                sample_count: 1,
+                sample_count: samples,
                 dimension: wgpu::TextureDimension::D2,
-                format: wgpu::TextureFormat::Depth24Plus,
+                format: wgpu::TextureFormat::Depth32Float,
                 usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
                 view_formats: &[],
             });
@@ -982,7 +1210,9 @@ impl egui_wgpu::CallbackTrait for SceneCallback {
             renderer.target = Some(RenderTarget {
                 width,
                 height,
+                samples,
                 color,
+                multisampled_color,
                 depth,
                 bind_group,
             });
@@ -993,8 +1223,8 @@ impl egui_wgpu::CallbackTrait for SceneCallback {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("opencity depth-tested scene"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: &target.color,
-                    resolve_target: None,
+                    view: target.multisampled_color.as_ref().unwrap_or(&target.color),
+                    resolve_target: target.multisampled_color.as_ref().map(|_| &target.color),
                     depth_slice: None,
                     ops: wgpu::Operations {
                         load: wgpu::LoadOp::Clear(wgpu::Color {
@@ -1009,7 +1239,7 @@ impl egui_wgpu::CallbackTrait for SceneCallback {
                 depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
                     view: &target.depth,
                     depth_ops: Some(wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(1.0),
+                        load: wgpu::LoadOp::Clear(0.0),
                         store: wgpu::StoreOp::Store,
                     }),
                     stencil_ops: None,
@@ -1018,19 +1248,54 @@ impl egui_wgpu::CallbackTrait for SceneCallback {
                 occlusion_query_set: None,
                 multiview_mask: None,
             });
-            pass.set_pipeline(&renderer.scene_pipeline);
+            pass.set_pipeline(if samples == 1 {
+                &renderer.close_zoom_pipeline
+            } else {
+                &renderer.scene_pipeline
+            });
             pass.set_bind_group(0, &renderer.camera_bind_group, &[]);
             pass.set_vertex_buffer(0, renderer.scene_buffer.as_ref().unwrap().1.slice(..));
-            pass.draw(0..self.scene.vertices.len() as u32, 0..1);
+            if let Some(span) = &self.scene.road_span {
+                if span.start > 0 {
+                    pass.draw(0..span.start, 0..1);
+                }
+                if samples == SCENE_SAMPLES {
+                    pass.draw(span.clone(), 0..1);
+                } else {
+                    let mut visible: Option<Range<u32>> = None;
+                    for road in &self.scene.road_ranges {
+                        if self.road_is_visible(road) {
+                            if let Some(range) = &mut visible {
+                                if range.end == road.vertices.start {
+                                    range.end = road.vertices.end;
+                                    continue;
+                                }
+                                pass.draw(range.clone(), 0..1);
+                            }
+                            visible = Some(road.vertices.clone());
+                        }
+                    }
+                    if let Some(range) = visible {
+                        pass.draw(range, 0..1);
+                    }
+                }
+                if span.end < self.scene.vertices.len() as u32 {
+                    pass.draw(span.end..self.scene.vertices.len() as u32, 0..1);
+                }
+            } else {
+                pass.draw(0..self.scene.vertices.len() as u32, 0..1);
+            }
         }
         let vertex_buffer = renderer.scene_buffer.as_ref().unwrap().1.clone();
         let color = target.color.clone();
+        let multisampled_color = target.multisampled_color.clone();
         let depth = target.depth.clone();
         let bind_group = target.bind_group.clone();
         resources.insert(FrameResources {
             vertex_buffer,
             vertices: self.scene.vertices.len() as u32,
             color,
+            multisampled_color,
             depth,
             bind_group,
         });
@@ -1048,6 +1313,7 @@ impl egui_wgpu::CallbackTrait for SceneCallback {
         let _keep_alive = (
             &frame.vertex_buffer,
             &frame.color,
+            &frame.multisampled_color,
             &frame.depth,
             frame.vertices,
         );
@@ -1099,44 +1365,51 @@ impl RenderResources {
             bind_group_layouts: &[Some(&camera_layout)],
             immediate_size: 0,
         });
-        let scene_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("opencity scene pipeline"),
-            layout: Some(&scene_layout),
-            vertex: wgpu::VertexState {
-                module: &scene_shader,
-                entry_point: Some("scene_vs"),
-                compilation_options: Default::default(),
-                buffers: &[Some(wgpu::VertexBufferLayout {
-                    array_stride: std::mem::size_of::<GpuVertex>() as u64,
-                    step_mode: wgpu::VertexStepMode::Vertex,
-                    attributes: &wgpu::vertex_attr_array![0 => Float32x4, 1 => Float32x4],
-                })],
-            },
-            primitive: wgpu::PrimitiveState {
-                cull_mode: None,
-                ..Default::default()
-            },
-            depth_stencil: Some(wgpu::DepthStencilState {
-                format: wgpu::TextureFormat::Depth24Plus,
-                depth_write_enabled: Some(true),
-                depth_compare: Some(wgpu::CompareFunction::LessEqual),
-                stencil: Default::default(),
-                bias: Default::default(),
-            }),
-            multisample: Default::default(),
-            fragment: Some(wgpu::FragmentState {
-                module: &scene_shader,
-                entry_point: Some("scene_fs"),
-                compilation_options: Default::default(),
-                targets: &[Some(wgpu::ColorTargetState {
-                    format: wgpu::TextureFormat::Rgba8Unorm,
-                    blend: Some(wgpu::BlendState::ALPHA_BLENDING),
-                    write_mask: wgpu::ColorWrites::ALL,
-                })],
-            }),
-            multiview_mask: None,
-            cache: None,
-        });
+        let make_scene_pipeline = |samples| {
+            device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                label: Some("opencity scene pipeline"),
+                layout: Some(&scene_layout),
+                vertex: wgpu::VertexState {
+                    module: &scene_shader,
+                    entry_point: Some("scene_vs"),
+                    compilation_options: Default::default(),
+                    buffers: &[Some(wgpu::VertexBufferLayout {
+                        array_stride: std::mem::size_of::<GpuVertex>() as u64,
+                        step_mode: wgpu::VertexStepMode::Vertex,
+                        attributes: &wgpu::vertex_attr_array![0 => Float32x4, 1 => Float32x4],
+                    })],
+                },
+                primitive: wgpu::PrimitiveState {
+                    cull_mode: None,
+                    ..Default::default()
+                },
+                depth_stencil: Some(wgpu::DepthStencilState {
+                    format: wgpu::TextureFormat::Depth32Float,
+                    depth_write_enabled: Some(true),
+                    depth_compare: Some(wgpu::CompareFunction::GreaterEqual),
+                    stencil: Default::default(),
+                    bias: Default::default(),
+                }),
+                multisample: wgpu::MultisampleState {
+                    count: samples,
+                    ..Default::default()
+                },
+                fragment: Some(wgpu::FragmentState {
+                    module: &scene_shader,
+                    entry_point: Some("scene_fs"),
+                    compilation_options: Default::default(),
+                    targets: &[Some(wgpu::ColorTargetState {
+                        format: wgpu::TextureFormat::Rgba8Unorm,
+                        blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                        write_mask: wgpu::ColorWrites::ALL,
+                    })],
+                }),
+                multiview_mask: None,
+                cache: None,
+            })
+        };
+        let scene_pipeline = make_scene_pipeline(SCENE_SAMPLES);
+        let close_zoom_pipeline = make_scene_pipeline(1);
         let composite_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("opencity composite image layout"),
             entries: &[
@@ -1198,12 +1471,15 @@ impl RenderResources {
         });
         let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
             label: Some("opencity scene sampler"),
-            mag_filter: wgpu::FilterMode::Linear,
-            min_filter: wgpu::FilterMode::Linear,
+            // The resolved scene already matches the viewport's pixel size.
+            // Linear sampling would soften it a second time during compositing.
+            mag_filter: wgpu::FilterMode::Nearest,
+            min_filter: wgpu::FilterMode::Nearest,
             ..Default::default()
         });
         Self {
             scene_pipeline,
+            close_zoom_pipeline,
             camera_buffer,
             camera_bind_group,
             scene_buffer: None,
@@ -1219,6 +1495,132 @@ impl RenderResources {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn captured_map_edges_have_no_world_space_feather() {
+        let mut scene = Scene::default();
+        capture_geometry(
+            &egui::Context::default(),
+            |painter| {
+                painter.rect_filled(
+                    egui::Rect::from_min_max(egui::pos2(-50.0, -50.0), egui::pos2(50.0, 50.0)),
+                    0.0,
+                    Color32::WHITE,
+                );
+            },
+            |_| 0.0,
+            &mut scene,
+        );
+        assert!(!scene.vertices.is_empty());
+        assert!(scene.vertices.iter().all(|vertex| vertex.color.a() == 255));
+    }
+
+    #[test]
+    fn close_zoom_culls_roads_outside_the_camera() {
+        let program = starter_program();
+        let projection = map::project(&program);
+        let scene = Arc::new(build_scene(
+            &program,
+            &projection,
+            editor_palette(egui::Theme::Dark),
+            &[],
+            None,
+        ));
+        let first = &scene.road_ranges[0];
+        let center = WorldPoint {
+            x: (first.min.x + first.max.x) * 0.5,
+            y: (first.min.y + first.max.y) * 0.5,
+        };
+        let mut callback = SceneCallback {
+            scene: Arc::clone(&scene),
+            rect: egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(512.0, 512.0)),
+            pan: egui::vec2(-center.x * 1000.0, center.y * 1000.0),
+            zoom: 1000.0,
+            target: WorldPoint { x: 0.0, y: 0.0 },
+            angle: 0.0,
+            elevation: ISO_ELEVATION,
+            eye_height: 0.0,
+            camera: CameraView::Top,
+            background: Color32::BLACK,
+            target_format: wgpu::TextureFormat::Bgra8Unorm,
+        };
+        let visible = scene
+            .road_ranges
+            .iter()
+            .filter(|road| callback.road_is_visible(road))
+            .count();
+        assert!(visible > 0);
+        assert!(visible < scene.road_ranges.len());
+        let span = scene.road_span.as_ref().unwrap();
+        assert_eq!(
+            scene.road_ranges.first().unwrap().vertices.start,
+            span.start
+        );
+        assert_eq!(scene.road_ranges.last().unwrap().vertices.end, span.end);
+        callback.camera = CameraView::Isometric;
+        callback.target = center;
+        callback.pan = egui::Vec2::ZERO;
+        callback.angle = 0.5;
+        let visible_isometric = scene
+            .road_ranges
+            .iter()
+            .filter(|road| callback.road_is_visible(road))
+            .count();
+        assert!(visible_isometric > 0);
+        assert!(visible_isometric < scene.road_ranges.len());
+    }
+
+    #[test]
+    fn connector_wall_tops_are_actual_pavement_vertices() {
+        let program = parse(include_str!("../../../road_library/cloverleaf.road")).unwrap();
+        let projection = map::project(&program);
+        let geometry = opencity::road_geometry::RoadGeometry::compile(&program, &projection);
+        let profiles = paint_profiles(&program, &projection);
+        let index = projection
+            .segments
+            .iter()
+            .position(|s| s.name.as_deref() == Some("ne_connector_down"))
+            .unwrap();
+        let road = road_for_segment(&program, &projection.segments[index]).unwrap();
+        let mut surface = Scene::default();
+        add_resolved_road_surface(
+            &mut surface,
+            &geometry,
+            index,
+            road,
+            &profiles[index],
+            editor_palette(egui::Theme::Dark),
+            false,
+        );
+        let mut walls = Scene::default();
+        add_elevated_edges(&mut walls, &geometry, index, Color32::WHITE);
+        assert!(!walls.vertices.is_empty());
+        for face in walls.vertices.chunks_exact(6) {
+            for top in [&face[0], &face[1]] {
+                assert!(surface.vertices.iter().any(|v|v.point==top.point && v.height==top.height),"wall top must meet the emitted pavement without height interpolation or offsets");
+            }
+        }
+    }
+
+    #[test]
+    fn elevated_library_walls_use_shared_geometry() {
+        let program = parse(include_str!(
+            "../../../road_library/street_to_interstate_elevated.road"
+        ))
+        .unwrap();
+        let projection = map::project(&program);
+        let geometry = opencity::road_geometry::RoadGeometry::compile(&program, &projection);
+        let mut scene = Scene::default();
+        for index in 0..projection.segments.len() {
+            add_elevated_edges(&mut scene, &geometry, index, Color32::WHITE);
+        }
+        assert_eq!(scene.vertices.len(), geometry.walls.len() * 6);
+        assert!(
+            geometry.obstructions().is_empty(),
+            "{:?}",
+            geometry.obstructions()
+        );
+    }
 
     #[test]
     fn coastal_scene_keeps_water_free_of_editor_grid() {
@@ -1321,6 +1723,16 @@ mod tests {
         let incremental = incremental.finish();
         assert_eq!(incremental.vertices, full.vertices);
         assert_eq!(incremental.gpu_vertices().len(), full.gpu_vertices().len());
+        assert_eq!(incremental.road_span, full.road_span);
+        assert_eq!(incremental.road_ranges.len(), full.road_ranges.len());
+        for (built, expected) in incremental.road_ranges.iter().zip(&full.road_ranges) {
+            assert_eq!(built.vertices, expected.vertices);
+            assert_eq!((built.min, built.max), (expected.min, expected.max));
+            assert_eq!(
+                (built.min_height, built.max_height),
+                (expected.min_height, expected.max_height)
+            );
+        }
     }
 
     #[test]
@@ -1450,7 +1862,7 @@ mod tests {
         let palette = editor_palette(egui::Theme::Dark);
         let scene = build_scene(&program, &projection, palette, &[], None);
         assert!(
-            scene.vertices.len() > 100_000,
+            scene.vertices.len() > 80_000,
             "{} scene vertices",
             scene.vertices.len()
         );
@@ -1524,6 +1936,8 @@ mod gpu_tests {
             zoom: 75.0,
             target: WorldPoint { x: 0.0, y: 0.0 },
             angle: 0.0,
+            elevation: ISO_ELEVATION,
+            eye_height: 0.0,
             camera: CameraView::Isometric,
             background: Color32::BLACK,
             target_format: wgpu::TextureFormat::Bgra8Unorm,
@@ -1576,58 +1990,24 @@ mod gpu_tests {
         }
     }
 
-    #[test]
-    fn wgpu_scene_pipelines_validate_when_an_adapter_is_available() {
+    fn render_test_callback(callback: SceneCallback) -> Option<Vec<u8>> {
         let instance = wgpu::Instance::default();
         let Ok(adapter) =
             block_on(instance.request_adapter(&wgpu::RequestAdapterOptions::default()))
         else {
             eprintln!("Skipping GPU readback: no wgpu adapter is available");
-            return;
+            return None;
         };
         let Ok((device, queue)) =
             block_on(adapter.request_device(&wgpu::DeviceDescriptor::default()))
         else {
             eprintln!("Skipping GPU readback: no wgpu device is available");
-            return;
+            return None;
         };
         let scope = device.push_error_scope(wgpu::ErrorFilter::Validation);
         let _resources = RenderResources::new(&device, wgpu::TextureFormat::Bgra8Unorm);
         let _srgb_resources = RenderResources::new(&device, wgpu::TextureFormat::Bgra8UnormSrgb);
         let mut resources = egui_wgpu::CallbackResources::default();
-        let callback = SceneCallback {
-            scene: Arc::new(Scene {
-                vertices: vec![
-                    WorldVertex {
-                        point: WorldPoint { x: -1.0, y: -1.0 },
-                        height: 0.0,
-                        depth_bias: 0.0,
-                        color: Color32::RED,
-                    },
-                    WorldVertex {
-                        point: WorldPoint { x: 1.0, y: -1.0 },
-                        height: 0.0,
-                        depth_bias: 0.0,
-                        color: Color32::RED,
-                    },
-                    WorldVertex {
-                        point: WorldPoint { x: 0.0, y: 1.0 },
-                        height: 0.0,
-                        depth_bias: 0.0,
-                        color: Color32::RED,
-                    },
-                ],
-                ..Default::default()
-            }),
-            rect: egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(128.0, 128.0)),
-            pan: egui::Vec2::ZERO,
-            zoom: 40.0,
-            target: WorldPoint { x: 0.0, y: 0.0 },
-            angle: 0.0,
-            camera: CameraView::Top,
-            background: Color32::BLACK,
-            target_format: wgpu::TextureFormat::Bgra8Unorm,
-        };
         let mut encoder = device.create_command_encoder(&Default::default());
         callback.prepare(
             &device,
@@ -1719,19 +2099,184 @@ mod gpu_tests {
         device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
         receiver.recv().unwrap().unwrap();
         let pixels = readback.get_mapped_range(..).unwrap();
-        let center = &pixels[(64 * 128 + 64) * 4..(64 * 128 + 64) * 4 + 4];
-        let corner = &pixels[0..4];
         assert_eq!(block_on(scope.pop()).map(|error| error.to_string()), None);
-        assert!(
-            center[2] > 180 && center[1] < 80 && center[0] < 80,
-            "center BGRA should be red: {center:?}"
-        );
-        assert!(
-            corner[0] < 10 && corner[1] < 10 && corner[2] < 10,
-            "corner BGRA should be black: {corner:?}"
-        );
+        let result = pixels.to_vec();
         drop(pixels);
         readback.unmap();
+        Some(result)
+    }
+
+    #[test]
+    fn wgpu_scene_pipelines_validate_when_an_adapter_is_available() {
+        let callback = SceneCallback {
+            scene: Arc::new(Scene {
+                vertices: vec![
+                    WorldVertex {
+                        point: WorldPoint { x: -1.0, y: -1.0 },
+                        height: 0.0,
+                        depth_bias: 0.0,
+                        color: Color32::RED,
+                    },
+                    WorldVertex {
+                        point: WorldPoint { x: 1.0, y: -1.0 },
+                        height: 0.0,
+                        depth_bias: 0.0,
+                        color: Color32::RED,
+                    },
+                    WorldVertex {
+                        point: WorldPoint { x: 0.0, y: 1.0 },
+                        height: 0.0,
+                        depth_bias: 0.0,
+                        color: Color32::RED,
+                    },
+                ],
+                ..Default::default()
+            }),
+            rect: egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(128.0, 128.0)),
+            pan: egui::Vec2::ZERO,
+            zoom: 40.0,
+            target: WorldPoint { x: 0.0, y: 0.0 },
+            angle: 0.0,
+            elevation: ISO_ELEVATION,
+            eye_height: 0.0,
+            camera: CameraView::Top,
+            background: Color32::BLACK,
+            target_format: wgpu::TextureFormat::Bgra8Unorm,
+        };
+        let Some(pixels) = render_test_callback(callback) else {
+            return;
+        };
+        let center = &pixels[(64 * 128 + 64) * 4..(64 * 128 + 64) * 4 + 4];
+        assert!(center[2] > 180 && center[1] < 80 && center[0] < 80);
+        assert!(pixels[0] < 10 && pixels[1] < 10 && pixels[2] < 10);
+    }
+
+    #[test]
+    fn vehicular_layers_are_stable_without_hiding_nearer_geometry() {
+        for distance in [2.0, 200.0, 1000.0] {
+            for occluded in [false, true] {
+                let mut vertices = Vec::new();
+                // Draw the preferred coplanar layer first: depth, not draw order,
+                // must keep it in front. A genuinely nearer surface still wins.
+                for (color, bias, forward) in [
+                    (Color32::GREEN, -0.003, distance),
+                    (
+                        Color32::RED,
+                        0.0,
+                        if occluded { distance * 0.5 } else { distance },
+                    ),
+                ] {
+                    for (x, height) in [
+                        (-distance, -distance),
+                        (distance, -distance),
+                        (0.0, distance),
+                    ] {
+                        vertices.push(WorldVertex {
+                            point: WorldPoint { x, y: forward },
+                            height,
+                            depth_bias: bias,
+                            color,
+                        });
+                    }
+                }
+                let callback = SceneCallback {
+                    scene: Arc::new(Scene {
+                        vertices,
+                        ..Default::default()
+                    }),
+                    rect: egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(128.0, 128.0)),
+                    pan: egui::Vec2::ZERO,
+                    zoom: 1.0,
+                    target: WorldPoint { x: 0.0, y: 0.0 },
+                    angle: std::f32::consts::FRAC_PI_2,
+                    elevation: ISO_ELEVATION,
+                    eye_height: 0.0,
+                    camera: CameraView::Vehicular,
+                    background: Color32::BLACK,
+                    target_format: wgpu::TextureFormat::Bgra8Unorm,
+                };
+                let Some(pixels) = render_test_callback(callback) else {
+                    return;
+                };
+                for y in 48..80 {
+                    for x in 48..80 {
+                        let pixel = &pixels[(y * 128 + x) * 4..][..4];
+                        assert!(
+                            if occluded {
+                                pixel[2] > 180 && pixel[1] < 80
+                            } else {
+                                pixel[1] > 180 && pixel[2] < 80
+                            },
+                            "distance={distance}, occluded={occluded}, pixel={pixel:?}"
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn merge_pavement_renders_over_parent_verge_in_top_and_isometric_views() {
+        for source in [
+            include_str!("../../../road_library/street_to_interstate_flat.road"),
+            include_str!("../../../road_library/street_to_interstate_elevated.road"),
+        ] {
+            let program = parse(source).unwrap();
+            let projection = map::project(&program);
+            let mouth = projection
+                .segments
+                .iter()
+                .find(|s| s.name.as_deref() == Some("merge_mouth"))
+                .unwrap();
+            let t = (0..1000)
+                .map(|i| i as f32 / 1000.0)
+                .find(|&t| (mouth.point_at(t).y - 0.085).abs() < 0.0005)
+                .unwrap();
+            let point = mouth.point_at(t);
+            let palette = editor_palette(egui::Theme::Dark);
+            let scene = Arc::new(build_scene(&program, &projection, palette, &[], None));
+            for camera in [CameraView::Top, CameraView::Isometric] {
+                let rect = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(128.0, 128.0));
+                let zoom = 1000.0;
+                let pan = if camera == CameraView::Top {
+                    egui::vec2(-point.x * zoom, point.y * zoom)
+                } else {
+                    rect.center()
+                        - iso_screen(
+                            rect,
+                            egui::Vec2::ZERO,
+                            zoom,
+                            point,
+                            0.74,
+                            ISO_ELEVATION,
+                            point,
+                            mouth.height_at(t) + 0.005,
+                        )
+                };
+                let callback = SceneCallback {
+                    scene: Arc::clone(&scene),
+                    rect,
+                    pan,
+                    zoom,
+                    target: point,
+                    angle: 0.74,
+                    elevation: ISO_ELEVATION,
+                    eye_height: 0.0,
+                    camera,
+                    background: palette.map_background,
+                    target_format: wgpu::TextureFormat::Bgra8Unorm,
+                };
+                let Some(pixels) = render_test_callback(callback) else {
+                    return;
+                };
+                for y in 62..66 {
+                    for x in 62..66 {
+                        let pixel = &pixels[(y * 128 + x) * 4..][..4];
+                        assert!(pixel[0]>120 && (pixel[0] as i32-pixel[1] as i32).abs()<12 && (pixel[1] as i32-pixel[2] as i32).abs()<12,"merge must show gray pavement, not green verge/dark outline: {pixel:?}");
+                    }
+                }
+            }
+        }
     }
 
     #[test]
@@ -1745,7 +2290,10 @@ mod gpu_tests {
         let (device, queue) =
             block_on(adapter.request_device(&wgpu::DeviceDescriptor::default())).unwrap();
         let qa_target = std::env::var_os("OPENCITY_QA_TARGET").is_some();
-        let program = if qa_target {
+        let qa_library = std::env::var_os("OPENCITY_QA_LIBRARY").is_some();
+        let program = if qa_library {
+            parse(include_str!("../../../road_library/qa_gallery.road")).unwrap()
+        } else if qa_target {
             boot_program()
         } else {
             starter_program()
@@ -1814,6 +2362,40 @@ mod gpu_tests {
                 ));
             }
         }
+        if qa_library {
+            views = vec![
+                (
+                    "iso-connector-sidewalls",
+                    CameraView::Isometric,
+                    WorldPoint { x: 10.55, y: 2.45 },
+                    1200.0,
+                ),
+                (
+                    "iso-elevated-merge",
+                    CameraView::Isometric,
+                    WorldPoint { x: -7.0, y: 0.0 },
+                    1400.0,
+                ),
+                (
+                    "top-elevated-merge",
+                    CameraView::Top,
+                    WorldPoint { x: -7.0, y: 0.0 },
+                    1400.0,
+                ),
+                (
+                    "vehicle-cloverleaf",
+                    CameraView::Vehicular,
+                    WorldPoint { x: 5.7, y: -0.06 },
+                    1.0,
+                ),
+                (
+                    "vehicle-elevated-merge",
+                    CameraView::Vehicular,
+                    WorldPoint { x: -8.0, y: 0.4 },
+                    1.0,
+                ),
+            ];
+        }
         for (name, camera, target, zoom) in views {
             let rect = egui::Rect::from_min_size(
                 egui::Pos2::ZERO,
@@ -1821,6 +2403,8 @@ mod gpu_tests {
             );
             let pan = if camera == CameraView::Top {
                 egui::vec2(-target.x * zoom, target.y * zoom)
+            } else if qa_library && camera == CameraView::Isometric {
+                egui::vec2(0.0, 300.0)
             } else {
                 egui::Vec2::ZERO
             };
@@ -1830,7 +2414,17 @@ mod gpu_tests {
                 pan,
                 zoom,
                 target,
-                angle: 0.74,
+                angle: if camera == CameraView::Vehicular {
+                    0.0
+                } else {
+                    0.74
+                },
+                elevation: ISO_ELEVATION,
+                eye_height: if camera == CameraView::Vehicular {
+                    0.45
+                } else {
+                    0.0
+                },
                 camera,
                 background: palette.map_background,
                 target_format: wgpu::TextureFormat::Bgra8Unorm,
@@ -1934,7 +2528,13 @@ mod gpu_tests {
             }
             drop(mapped);
             readback.unmap();
-            let prefix = if qa_target { "target" } else { "starter" };
+            let prefix = if qa_library {
+                "library"
+            } else if qa_target {
+                "target"
+            } else {
+                "starter"
+            };
             let path = format!("/private/tmp/opencity-{prefix}-{name}-qa.png");
             let file = std::fs::File::create(&path).unwrap();
             let mut encoder = png::Encoder::new(file, WIDTH, HEIGHT);

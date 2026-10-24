@@ -3,7 +3,7 @@ use std::path::Path;
 
 use crate::ast::{
     Argument, BlockDefinition, Call, Program, RoadDefinition, RoadDirection, RoadElement,
-    RoadElementKind, Statement,
+    RoadElementKind, RoadRole, Statement,
 };
 use crate::error::{Error, SyntaxError};
 use crate::lexer::{tokenize, Token, TokenKind};
@@ -81,19 +81,38 @@ impl Parser {
             }
         }
         self.expect(TokenKind::Semicolon)?;
-        let direction = if self.at(TokenKind::Identifier) && self.current().text == "direction" {
-            self.bump();
+        let mut direction = RoadDirection::Both;
+        let mut role = RoadRole::Ordinary;
+        let mut seen_direction = false;
+        let mut seen_role = false;
+        while self.at(TokenKind::Identifier) {
+            let property = self.expect(TokenKind::Identifier)?;
             let value = self.expect(TokenKind::Identifier)?;
-            let direction =
-                RoadDirection::from_keyword(&value.text).ok_or_else(|| SyntaxError {
-                    span: value.span,
-                    message: format!("unknown road direction '{}'", value.text),
-                })?;
+            match property.text.as_str() {
+                "direction" if !seen_direction => {
+                    direction =
+                        RoadDirection::from_keyword(&value.text).ok_or_else(|| SyntaxError {
+                            span: value.span,
+                            message: format!("unknown road direction '{}'", value.text),
+                        })?;
+                    seen_direction = true;
+                }
+                "role" if !seen_role => {
+                    role = RoadRole::from_keyword(&value.text).ok_or_else(|| SyntaxError {
+                        span: value.span,
+                        message: format!("unknown road role '{}'", value.text),
+                    })?;
+                    seen_role = true;
+                }
+                _ => {
+                    return Err(SyntaxError {
+                        span: property.span,
+                        message: format!("unknown or duplicate road property '{}'", property.text),
+                    })
+                }
+            }
             self.expect(TokenKind::Semicolon)?;
-            direction
-        } else {
-            RoadDirection::Both
-        };
+        }
         self.expect(TokenKind::End)?;
         if self.at(TokenKind::Semicolon) {
             self.bump();
@@ -102,6 +121,7 @@ impl Parser {
             name,
             elements,
             direction,
+            role,
         })
     }
 
@@ -183,6 +203,10 @@ impl Parser {
 
 /// Parse a complete OpenCity source file.
 pub fn parse(source: &str) -> Result<Program, SyntaxError> {
+    crate::patterns::expand(parse_raw(source)?)
+}
+
+pub(crate) fn parse_raw(source: &str) -> Result<Program, SyntaxError> {
     Parser {
         tokens: tokenize(source)?,
         position: 0,

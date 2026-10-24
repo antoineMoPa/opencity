@@ -1,0 +1,32 @@
+road library_street:
+    sidewalk-carlane-middle-carlane-sidewalk;
+end;
+road eastbound_interstate:
+    verge-carlane-carlane-carlane-verge;
+    direction forward;
+end;
+road on_ramp:
+    verge-carlane-verge;
+    direction forward;
+    role ramp;
+end;
+road ramp_mouth:
+    carlane;
+    direction forward;
+    role merge;
+end;
+
+street_w = map_point(-3, 1.2);
+street_e = map_point(3, 1.2);
+highway_w = map_point(-3, 0);
+highway_e = map_point(3, 0);
+ramp_curve = map_point(0.55, 0.18);
+street_mouth_seam = map_point(-1.11640625, 1.01109375);
+merge = lane_point(highway, 3, 0.75);
+entry = lane_point(street, 3, 0.25);
+
+street = library_street(street_w, -1, 1.2, 1, 1.2, street_e);
+highway = eastbound_interstate(highway_w, -1, 0, 1, 0, highway_e);
+entry_mouth = ramp_mouth(entry, -1.375, 1.165, -1.25, 1.1034375, street_mouth_seam);
+approach = on_ramp(street_mouth_seam, -0.715625, 0.7340625, -0.2375, 0.18, ramp_curve);
+merge_mouth = ramp_mouth(ramp_curve, 0.85, 0.18, 1.2, -0.045, merge);

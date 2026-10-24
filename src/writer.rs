@@ -27,6 +27,9 @@ impl Program {
                     if road.direction != RoadDirection::Both {
                         source.push_str(&format!("    direction {};\n", road.direction.keyword()));
                     }
+                    if road.role != crate::RoadRole::Ordinary {
+                        source.push_str(&format!("    role {};\n", road.role.keyword()));
+                    }
                     source.push_str("end;\n");
                 }
                 Statement::Block(block) => {

@@ -56,10 +56,12 @@ end;
 
 road exit_ramp:
     verge-carlane-verge;
+    role ramp;
 end;
 
 road ramp_mouth:
     carlane-verge;
+    role merge;
 end;
 
 road interstate_three_lane:

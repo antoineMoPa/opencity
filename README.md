@@ -14,10 +14,11 @@ street(0, 0, 10, 0);
 Clone with submodules: `git clone --recurse-submodules https://github.com/antoineMoPa/opencity.git`.
 
 ```sh
-cargo run --features editor --bin editor   # native
+cargo run   # native editor
 make build
-make serve
+make serve  # web editor
 ```
 
 See [docs.md](docs.md) for the language, editor controls, and API.
-For Python map scripts and live editor control, see the [Python interface](python/README.md).
+The editor exposes its live [MCP and Unix socket API](docs/editor-api.md), including a wire protocol usable by external Python clients.
+Reusable junction, ramp, and cloverleaf assets live in the [road pattern library](road_library/README.md); the [agent road-building guide](docs/road-building-guide-for-agents.md) explains how to trace a reference map without impossible joins.

@@ -16,6 +16,33 @@ pub struct RoadDefinition {
     pub elements: Vec<RoadElement>,
     /// Permitted travel relative to each placement's start and end points.
     pub direction: RoadDirection,
+    pub role: RoadRole,
+}
+
+/// Semantic role; independent of user-visible names and placement prefixes.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum RoadRole {
+    #[default]
+    Ordinary,
+    Ramp,
+    Merge,
+}
+impl RoadRole {
+    pub fn from_keyword(value: &str) -> Option<Self> {
+        match value {
+            "ordinary" => Some(Self::Ordinary),
+            "ramp" => Some(Self::Ramp),
+            "merge" => Some(Self::Merge),
+            _ => None,
+        }
+    }
+    pub fn keyword(self) -> &'static str {
+        match self {
+            Self::Ordinary => "ordinary",
+            Self::Ramp => "ramp",
+            Self::Merge => "merge",
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]

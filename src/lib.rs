@@ -26,6 +26,9 @@ mod error;
 mod landscape;
 mod lexer;
 mod parser;
+mod patterns;
+pub mod road_geometry;
+pub mod road_profiles;
 mod writer;
 
 #[path = "bin/editor/map.rs"]
@@ -38,10 +41,11 @@ mod web_editor;
 
 pub use ast::{
     Argument, BlockDefinition, Call, Program, RoadDefinition, RoadDirection, RoadElement,
-    RoadElementKind, Statement,
+    RoadElementKind, RoadRole, Statement,
 };
 pub use design_rules::{
-    check_design_rules, check_design_rules_with_projection, DesignIssue, DesignRule,
+    check_design_rules, check_design_rules_with_projection, check_vehicle_lane_continuity,
+    check_vehicle_lane_intrusions, DesignIssue, DesignRule,
 };
 pub use elevation::{
     block_height, elevation_in_calls, elevation_of, grade_in_calls, grade_of, set_elevation,

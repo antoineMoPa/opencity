@@ -15,7 +15,9 @@ use base64::Engine;
 use eframe::egui;
 use serde_json::{json, Value};
 
-use super::{map, RoadEditor, SegmentSource, View, WorldPoint};
+use super::{
+    map, CameraView, RoadEditor, SegmentSource, View, WorldPoint, MAX_MAP_ZOOM, MIN_MAP_ZOOM,
+};
 use opencity::Statement;
 
 struct Request {
@@ -395,11 +397,18 @@ impl RoadEditor {
             "set_viewport" => {
                 let center = point(args, "center_x", "center_y")?;
                 let zoom = number(args, "zoom")?;
-                if !(18.0..=420.0).contains(&zoom) {
-                    return Err("zoom must be between 18 and 420".into());
+                if !(MIN_MAP_ZOOM..=MAX_MAP_ZOOM).contains(&zoom) {
+                    return Err(format!(
+                        "zoom must be between {MIN_MAP_ZOOM} and {MAX_MAP_ZOOM}"
+                    ));
                 }
                 self.map_zoom = zoom;
-                self.map_pan = egui::vec2(-center.x * zoom, center.y * zoom);
+                if self.camera_view == CameraView::Isometric {
+                    self.orbit_target = center;
+                    self.map_pan = egui::Vec2::ZERO;
+                } else {
+                    self.map_pan = egui::vec2(-center.x * zoom, center.y * zoom);
+                }
                 self.fit_scene_once = false;
                 self.view = View::Map;
                 Ok(json!({"center_x":center.x,"center_y":center.y,"zoom":zoom}))
@@ -643,9 +652,24 @@ impl RoadEditor {
     }
 
     fn viewport_center(&self) -> WorldPoint {
-        WorldPoint {
-            x: -self.map_pan.x / self.map_zoom,
-            y: self.map_pan.y / self.map_zoom,
+        if self.camera_view == CameraView::Isometric {
+            if let Some(rect) = self.map_rect {
+                return super::iso_ground_point(
+                    rect,
+                    self.map_pan,
+                    self.map_zoom,
+                    self.orbit_target,
+                    self.orbit_angle,
+                    self.orbit_elevation,
+                    rect.center(),
+                );
+            }
+            self.orbit_target
+        } else {
+            WorldPoint {
+                x: -self.map_pan.x / self.map_zoom,
+                y: self.map_pan.y / self.map_zoom,
+            }
         }
     }
 }

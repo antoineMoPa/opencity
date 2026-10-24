@@ -79,7 +79,8 @@ fn parses_negative_map_coordinates_without_confusing_road_separators() {
 #[test]
 fn road_direction_round_trips_and_exposes_lane_travel() {
     let source = "road boulevard: sidewalk-carlane-middle-carlane-sidewalk; direction both; end; \
-                  road ramp: verge-carlane-verge; direction forward; end; \
+                  road ramp: verge-carlane-verge; direction forward;
+    role ramp; end; \
                   road return: carlane; direction reverse; end;";
     let program = parse(source).unwrap();
     let roads: Vec<_> = program

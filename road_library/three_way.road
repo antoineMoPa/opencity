@@ -1,0 +1,16 @@
+road library_street:
+    sidewalk-parkinglane-carlane-middle-carlane-parkinglane-sidewalk;
+end;
+
+tee_center = map_point(0, 0);
+tee_n = map_point(0, 0.1215);
+tee_e = map_point(0.1215, 0);
+tee_w = map_point(-0.1215, 0);
+port_north = map_point(0, 1.2);
+port_east = map_point(1.2, 0);
+port_west = map_point(-1.2, 0);
+
+intersection3(tee_center, library_street, north, tee_n, east, tee_e, west, tee_w);
+north_street = library_street(tee_n, 0, 0.481, 0, 0.841, port_north);
+east_street = library_street(tee_e, 0.481, 0, 0.841, 0, port_east);
+west_street = library_street(port_west, -0.841, 0, -0.481, 0, tee_w);

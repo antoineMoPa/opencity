@@ -1,0 +1,293 @@
+road exit_ramp:
+    verge-carlane-verge;
+    direction forward;
+    role ramp;
+end;
+
+road interstate_three_lane:
+    verge-carlane-carlane-carlane-middle-carlane-carlane-carlane-verge;
+end;
+
+road interstate_core:
+    carlane-carlane-carlane-middle-carlane-carlane-carlane;
+end;
+
+road ramp_mouth:
+    carlane;
+    direction forward;
+    role merge;
+end;
+
+ew_w9 = map_point(-9.0000, 0.0000);
+
+ew_w52 = map_point(-5.2000, 0.0000);
+
+ew_w4 = map_point(-4.0000, 0.0000);
+ew_w33 = map_point(-3.3000, 0.0000);
+ew_w26 = map_point(-2.6000, 0.0000);
+ew_w19 = map_point(-1.9000, 0.0000);
+
+ew_w12 = map_point(-1.2000, 0.0000);
+ew_w06 = map_point(-0.6000, 0.0000);
+
+ew_center = map_point(0.0000, 0.0000);
+ns_center = map_point(0.0000, 0.0000);
+
+ew_e12 = map_point(1.2000, 0.0000);
+ew_e06 = map_point(0.6000, 0.0000);
+ew_e19 = map_point(1.9000, 0.0000);
+ew_e26 = map_point(2.6000, 0.0000);
+ew_e33 = map_point(3.3000, 0.0000);
+
+ew_e4 = map_point(4.0000, 0.0000);
+ew_e45 = map_point(4.5000, 0.0000);
+
+ew_e9 = map_point(9.0000, 0.0000);
+
+ns_s6 = map_point(0.0000, -6.0000);
+
+ns_s4 = map_point(0.0000, -4.0000);
+ns_s33 = map_point(0.0000, -3.3000);
+ns_s26 = map_point(0.0000, -2.6000);
+ns_s19 = map_point(0.0000, -1.9000);
+
+ns_s12 = map_point(0.0000, -1.2000);
+ns_s06 = map_point(0.0000, -0.6000);
+
+ns_n12 = map_point(0.0000, 1.2000);
+ns_n06 = map_point(0.0000, 0.6000);
+ns_n19 = map_point(0.0000, 1.9000);
+ns_n26 = map_point(0.0000, 2.6000);
+ns_n33 = map_point(0.0000, 3.3000);
+
+ns_n4 = map_point(0.0000, 4.0000);
+
+ns_n6 = map_point(0.0000, 6.0000);
+
+nw_outer = map_point(-2.3500, 1.1500);
+
+nw_crown = map_point(-1.1500, 2.3500);
+
+sw_outer = map_point(-2.3500, -1.1500);
+
+sw_crown = map_point(-1.1500, -2.3500);
+
+ne_outer = map_point(2.3500, 1.1500);
+
+ne_crown = map_point(1.1500, 2.3500);
+
+se_outer = map_point(2.3500, -1.1500);
+
+se_crown = map_point(1.1500, -2.3500);
+
+nw_loop_a_nw_loop_a_seam = map_point(-1.6164, 0.2043);
+
+nw_loop_c_nw_loop_c_merge_seam = map_point(-0.2043, 1.6164);
+
+nw_connector_nw_connector_seam = map_point(-0.3360, 2.8290);
+
+nw_connector_nw_connector_merge_seam = map_point(-2.8290, 0.3360);
+nw_connector_mid = map_point(-1.3125, 1.3125);
+
+sw_loop_a_sw_loop_a_seam = map_point(-0.2043, -1.6164);
+
+sw_loop_c_sw_loop_c_merge_seam = map_point(-1.6164, -0.2043);
+
+sw_connector_sw_connector_seam = map_point(-2.8290, -0.3360);
+
+sw_connector_sw_connector_merge_seam = map_point(-0.3360, -2.8290);
+sw_connector_mid = map_point(-1.3125, -1.3125);
+
+ne_loop_a_ne_loop_a_seam = map_point(0.2043, 1.6164);
+
+ne_loop_c_ne_loop_c_merge_seam = map_point(1.6164, 0.2043);
+
+ne_connector_ne_connector_seam = map_point(2.8290, 0.3360);
+
+ne_connector_ne_connector_merge_seam = map_point(0.3360, 2.8290);
+ne_connector_mid = map_point(1.3125, 1.3125);
+
+se_loop_a_se_loop_a_seam = map_point(1.6164, -0.2043);
+
+se_loop_c_se_loop_c_merge_seam = map_point(0.2043, -1.6164);
+
+se_connector_se_connector_seam = map_point(0.3360, -2.8290);
+
+se_connector_se_connector_merge_seam = map_point(2.8290, -0.3360);
+se_connector_mid = map_point(1.3125, -1.3125);
+
+nw_exit = lane_point(i_ew_03, 0, 1.0000);
+
+nw_merge = lane_point(i_ns_04, 0, 1.0000);
+
+sw_merge = lane_point(i_ew_03, 6, 1.0000);
+
+sw_exit = lane_point(i_ns_02, 0, 1.0000);
+
+ne_merge = lane_point(i_ew_05, 0, 1.0000);
+
+ne_exit = lane_point(i_ns_04, 6, 1.0000);
+
+se_exit = lane_point(i_ew_05, 6, 1.0000);
+
+se_merge = lane_point(i_ns_02, 6, 1.0000);
+
+nw_direct_exit = lane_point(i_ns_05, 0, 1.0000);
+
+nw_direct_merge = lane_point(i_ew_03a, 0, 0.0000);
+
+ne_direct_exit = lane_point(i_ew_07, 0, 0.0000);
+
+ne_direct_merge = lane_point(i_ns_05, 6, 1.0000);
+
+sw_direct_exit = lane_point(i_ew_03a, 6, 0.0000);
+
+sw_direct_merge = lane_point(i_ns_02a, 0, 0.0000);
+
+se_direct_exit = lane_point(i_ns_02a, 6, 0.0000);
+
+se_direct_merge = lane_point(i_ew_07, 6, 0.0000);
+
+i_ew_01 = interstate_three_lane(ew_w9, -7.7333, 0.0000, -6.4667, 0.0000, ew_w52);
+
+i_ew_02 = interstate_three_lane(ew_w52, -4.8000, 0.0000, -4.4000, 0.0000, ew_w4);
+
+i_ew_03a = interstate_core(ew_w4, -3.7667, 0, -3.5333, 0, ew_w33);
+i_ew_03b = interstate_core(ew_w33, -3.0667, 0, -2.8333, 0, ew_w26);
+i_ew_03c = interstate_core(ew_w26, -2.3667, 0, -2.1333, 0, ew_w19);
+i_ew_03 = interstate_core(ew_w19, -1.6667, 0, -1.4333, 0, ew_w12);
+
+i_ew_04a = interstate_core(ew_w12, -1.0, 0, -0.8, 0, ew_w06);
+i_ew_04 = interstate_core(ew_w06, -0.4, 0, -0.2, 0, ew_center);
+
+i_ew_05a = interstate_core(ew_center, 0.2, 0, 0.4, 0, ew_e06);
+i_ew_05 = interstate_core(ew_e06, 0.8, 0, 1.0, 0, ew_e12);
+
+i_ew_06a = interstate_core(ew_e12, 1.4333, 0, 1.6667, 0, ew_e19);
+i_ew_06b = interstate_core(ew_e19, 2.1333, 0, 2.3667, 0, ew_e26);
+i_ew_06c = interstate_core(ew_e26, 2.8333, 0, 3.0667, 0, ew_e33);
+i_ew_06 = interstate_core(ew_e33, 3.5333, 0, 3.7667, 0, ew_e4);
+
+i_ew_07 = interstate_core(ew_e4, 4.1667, 0, 4.3333, 0, ew_e45);
+i_ew_08 = interstate_three_lane(ew_e45, 6.0, 0, 7.5, 0, ew_e9);
+
+i_ns_01 = interstate_three_lane(ns_s6, 0.0000, -5.3333, 0.0000, -4.6667, ns_s4);
+
+i_ns_02a = interstate_core(ns_s4, 0, -3.7667, 0, -3.5333, ns_s33);
+i_ns_02b = interstate_core(ns_s33, 0, -3.0667, 0, -2.8333, ns_s26);
+i_ns_02c = interstate_core(ns_s26, 0, -2.3667, 0, -2.1333, ns_s19);
+i_ns_02 = interstate_core(ns_s19, 0, -1.6667, 0, -1.4333, ns_s12);
+
+i_ns_03a = interstate_core(ns_s12, 0, -1.0, 0, -0.8, ns_s06);
+i_ns_03 = interstate_core(ns_s06, 0, -0.4, 0, -0.2, ns_center);
+
+i_ns_04a = interstate_core(ns_center, 0, 0.2, 0, 0.4, ns_n06);
+i_ns_04 = interstate_core(ns_n06, 0, 0.8, 0, 1.0, ns_n12);
+
+i_ns_05a = interstate_core(ns_n12, 0, 1.4333, 0, 1.6667, ns_n19);
+i_ns_05b = interstate_core(ns_n19, 0, 2.1333, 0, 2.3667, ns_n26);
+i_ns_05c = interstate_core(ns_n26, 0, 2.8333, 0, 3.0667, ns_n33);
+i_ns_05 = interstate_core(ns_n33, 0, 3.5333, 0, 3.7667, ns_n4);
+
+i_ns_06 = interstate_three_lane(ns_n4, 0.0000, 4.6667, 0.0000, 5.3333, ns_n6);
+
+nw_loop_a_mouth = ramp_mouth(nw_exit, -1.3440, 0.1250, -1.4851, 0.1639, nw_loop_a_nw_loop_a_seam);
+
+nw_loop_a = exit_ramp(nw_loop_a_nw_loop_a_seam, -2.0323, 0.3320, -2.3500, 0.6408, nw_outer);
+
+nw_loop_b = exit_ramp(nw_outer, -2.3500, 1.8500, -1.8500, 2.3500, nw_crown);
+
+nw_loop_c = exit_ramp(nw_crown, -0.6408, 2.3500, -0.3320, 2.0323, nw_loop_c_nw_loop_c_merge_seam);
+
+nw_loop_c_merge = ramp_mouth(nw_loop_c_nw_loop_c_merge_seam, -0.1639, 1.4851, -0.1250, 1.3440, nw_merge);
+
+sw_loop_a_mouth = ramp_mouth(sw_exit, -0.1250, -1.3440, -0.1639, -1.4851, sw_loop_a_sw_loop_a_seam);
+
+sw_loop_a = exit_ramp(sw_loop_a_sw_loop_a_seam, -0.3320, -2.0323, -0.6408, -2.3500, sw_crown);
+
+sw_loop_b = exit_ramp(sw_crown, -1.8500, -2.3500, -2.3500, -1.8500, sw_outer);
+
+sw_loop_c = exit_ramp(sw_outer, -2.3500, -0.6408, -2.0323, -0.3320, sw_loop_c_sw_loop_c_merge_seam);
+
+sw_loop_c_merge = ramp_mouth(sw_loop_c_sw_loop_c_merge_seam, -1.4851, -0.1639, -1.3440, -0.1250, sw_merge);
+
+ne_loop_a_mouth = ramp_mouth(ne_exit, 0.1250, 1.3440, 0.1639, 1.4851, ne_loop_a_ne_loop_a_seam);
+
+ne_loop_a = exit_ramp(ne_loop_a_ne_loop_a_seam, 0.3320, 2.0323, 0.6408, 2.3500, ne_crown);
+
+ne_loop_b = exit_ramp(ne_crown, 1.8500, 2.3500, 2.3500, 1.8500, ne_outer);
+
+ne_loop_c = exit_ramp(ne_outer, 2.3500, 0.6408, 2.0323, 0.3320, ne_loop_c_ne_loop_c_merge_seam);
+
+ne_loop_c_merge = ramp_mouth(ne_loop_c_ne_loop_c_merge_seam, 1.4851, 0.1639, 1.3440, 0.1250, ne_merge);
+
+se_loop_a_mouth = ramp_mouth(se_exit, 1.3440, -0.1250, 1.4851, -0.1639, se_loop_a_se_loop_a_seam);
+
+se_loop_a = exit_ramp(se_loop_a_se_loop_a_seam, 2.0323, -0.3320, 2.3500, -0.6408, se_outer);
+
+se_loop_b = exit_ramp(se_outer, 2.3500, -1.8500, 1.8500, -2.3500, se_crown);
+
+se_loop_c = exit_ramp(se_crown, 0.6408, -2.3500, 0.3320, -2.0323, se_loop_c_se_loop_c_merge_seam);
+
+se_loop_c_merge = ramp_mouth(se_loop_c_se_loop_c_merge_seam, 0.1639, -1.4851, 0.1250, -1.3440, se_merge);
+
+nw_connector_mouth = ramp_mouth(nw_direct_exit, -0.1250, 3.6000, -0.2000, 3.2050, nw_connector_nw_connector_seam);
+
+nw_connector = exit_ramp(nw_connector_nw_connector_seam, -0.5400, 2.2650, -0.88125, 1.74375, nw_connector_mid);
+nw_connector_down = exit_ramp(nw_connector_mid, -1.74375, 0.88125, -2.2650, 0.5400, nw_connector_nw_connector_merge_seam);
+
+nw_connector_merge = ramp_mouth(nw_connector_nw_connector_merge_seam, -3.2050, 0.2000, -3.6000, 0.1250, nw_direct_merge);
+
+ne_connector_mouth = ramp_mouth(ne_direct_exit, 3.6000, 0.1250, 3.2050, 0.2000, ne_connector_ne_connector_seam);
+
+ne_connector = exit_ramp(ne_connector_ne_connector_seam, 2.2650, 0.5400, 1.74375, 0.88125, ne_connector_mid);
+ne_connector_down = exit_ramp(ne_connector_mid, 0.88125, 1.74375, 0.5400, 2.2650, ne_connector_ne_connector_merge_seam);
+
+ne_connector_merge = ramp_mouth(ne_connector_ne_connector_merge_seam, 0.2000, 3.2050, 0.1250, 3.6000, ne_direct_merge);
+
+sw_connector_mouth = ramp_mouth(sw_direct_exit, -3.6000, -0.1250, -3.2050, -0.2000, sw_connector_sw_connector_seam);
+
+sw_connector = exit_ramp(sw_connector_sw_connector_seam, -2.2650, -0.5400, -1.74375, -0.88125, sw_connector_mid);
+sw_connector_down = exit_ramp(sw_connector_mid, -0.88125, -1.74375, -0.5400, -2.2650, sw_connector_sw_connector_merge_seam);
+
+sw_connector_merge = ramp_mouth(sw_connector_sw_connector_merge_seam, -0.2000, -3.2050, -0.1250, -3.6000, sw_direct_merge);
+
+se_connector_mouth = ramp_mouth(se_direct_exit, 0.1250, -3.6000, 0.2000, -3.2050, se_connector_se_connector_seam);
+
+se_connector = exit_ramp(se_connector_se_connector_seam, 0.5400, -2.2650, 0.88125, -1.74375, se_connector_mid);
+se_connector_down = exit_ramp(se_connector_mid, 1.74375, -0.88125, 2.2650, -0.5400, se_connector_se_connector_merge_seam);
+
+se_connector_merge = ramp_mouth(se_connector_se_connector_merge_seam, 3.2050, -0.2000, 3.6000, -0.1250, se_direct_merge);
+
+grade(i_ns_02a, 0, 0.075);
+grade(i_ns_02b, 0.075, 0.15);
+grade(i_ns_02c, 0.15, 0.225);
+grade(i_ns_02, 0.225, 0.3);
+elevation(i_ns_03a, 0.3);
+elevation(i_ns_03, 0.3);
+elevation(i_ns_04a, 0.3);
+elevation(i_ns_04, 0.3);
+grade(i_ns_05a, 0.3, 0.225);
+grade(i_ns_05b, 0.225, 0.15);
+grade(i_ns_05c, 0.15, 0.075);
+grade(i_ns_05, 0.075, 0);
+grade(nw_loop_c, 0, 0.25);
+grade(nw_loop_c_merge, 0.25, 0.3);
+grade(sw_loop_a_mouth, 0.3, 0.25);
+grade(sw_loop_a, 0.25, 0);
+grade(ne_loop_a_mouth, 0.3, 0.25);
+grade(ne_loop_a, 0.25, 0);
+grade(se_loop_c, 0, 0.25);
+grade(se_loop_c_merge, 0.25, 0.3);
+grade(nw_connector_mouth, 0, 0.126);
+grade(nw_connector, 0.126, 0.65);
+grade(nw_connector_down, 0.65, 0);
+grade(sw_connector, 0, 0.65);
+grade(sw_connector_down, 0.65, 0.126);
+grade(sw_connector_merge, 0.126, 0);
+grade(ne_connector, 0, 0.65);
+grade(ne_connector_down, 0.65, 0.126);
+grade(ne_connector_merge, 0.126, 0);
+grade(se_connector_mouth, 0, 0.126);
+grade(se_connector, 0.126, 0.65);
+grade(se_connector_down, 0.65, 0);

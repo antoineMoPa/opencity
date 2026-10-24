@@ -52,6 +52,7 @@ end;
 
 road exit_ramp:
     verge-carlane-verge;
+    role ramp;
 end;
 
 road interstate_three_lane:
@@ -64,6 +65,7 @@ end;
 
 road ramp_mouth:
     carlane-verge;
+    role merge;
 end;
 
 ew_w9 = map_point(-9.0000, 0.0000);

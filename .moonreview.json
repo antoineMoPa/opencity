@@ -1,6 +1,6 @@
 {
-  "build": "cargo build --features editor --bin editor",
-  "run": "cargo run --features editor --bin editor",
+  "build": "cargo build",
+  "run": "cargo run",
   "indent": {
     "spaces": 4
   },

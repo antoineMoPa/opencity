@@ -51,6 +51,7 @@ road divided_highway:
 end;
 road exit_ramp:
     verge-carlane-verge;
+    role ramp;
 end;
 road interstate_three_lane:
     verge-carlane-carlane-carlane-middle-carlane-carlane-carlane-verge;

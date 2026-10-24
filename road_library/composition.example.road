@@ -1,0 +1,3 @@
+place(four_way, cross, 0, 0, 0);
+place(three_way, tee, 2.4, 0, 0);
+join(cross, port_east, tee, port_west);

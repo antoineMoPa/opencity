@@ -68,66 +68,44 @@ fn band_color(kind: RoadElementKind) -> [u8; 4] {
     [rgb[0], rgb[1], rgb[2], 255]
 }
 
-fn offset(segment: &Segment, t: f32, width: f32) -> WorldPoint {
-    let center = segment.point_at(t);
-    let tangent = segment.tangent_at(t);
-    let length = (tangent.x * tangent.x + tangent.y * tangent.y)
-        .sqrt()
-        .max(0.0001);
-    WorldPoint {
-        x: center.x - tangent.y / length * width,
-        y: center.y + tangent.x / length * width,
-    }
-}
-
-fn add_segment(mesh: &mut Geometry, segment: &Segment, road: Option<&RoadDefinition>) {
-    let bands: Vec<_> = road
-        .map(|road| {
-            road.elements
-                .iter()
-                .map(|element| {
-                    (
-                        map::element_world_width(element.kind),
-                        band_color(element.kind),
-                    )
-                })
-                .collect()
-        })
-        .unwrap_or_else(|| vec![(0.16, [100, 110, 115, 255])]);
-    let total: f32 = bands.iter().map(|(width, _)| width).sum();
-    let mut left = -total / 2.0;
-    for (width, color) in bands {
-        let right = left + width;
-        for step in 0..24 {
-            let t0 = step as f32 / 24.0;
-            let t1 = (step + 1) as f32 / 24.0;
-            let z0 = segment.height_at(t0);
-            let z1 = segment.height_at(t1);
-            mesh.quad(
-                [
-                    (offset(segment, t0, left), z0),
-                    (offset(segment, t0, right), z0),
-                    (offset(segment, t1, right), z1),
-                    (offset(segment, t1, left), z1),
-                ],
-                color,
-            );
-            if z0 > 0.001 || z1 > 0.001 {
-                for edge in [left, right] {
-                    let side = [color[0] / 2, color[1] / 2, color[2] / 2, 255];
-                    mesh.quad(
-                        [
-                            (offset(segment, t0, edge), 0.0),
-                            (offset(segment, t1, edge), 0.0),
-                            (offset(segment, t1, edge), z1),
-                            (offset(segment, t0, edge), z0),
-                        ],
-                        side,
-                    );
-                }
+fn add_segment(
+    mesh: &mut Geometry,
+    _segment: &Segment,
+    road: Option<&RoadDefinition>,
+    geometry: &opencity::road_geometry::RoadGeometry,
+    index: usize,
+) {
+    let surface_bias = if road.is_some_and(|r| r.role == opencity::RoadRole::Merge) {
+        0.005
+    } else {
+        0.0
+    };
+    if let Some(road) = road {
+        for pair in geometry.cross_sections(index).windows(2) {
+            for (band, element) in road.elements.iter().enumerate() {
+                let corners = [
+                    pair[0].boundaries[band],
+                    pair[0].boundaries[band + 1],
+                    pair[1].boundaries[band + 1],
+                    pair[1].boundaries[band],
+                ];
+                mesh.quad(
+                    corners.map(|v| (v.point, v.height + surface_bias)),
+                    band_color(element.kind),
+                );
             }
         }
-        left = right;
+    }
+    for wall in geometry.walls.iter().filter(|w| w.segment == index) {
+        mesh.quad(
+            [
+                (wall.start.point, wall.start.height - 0.08),
+                (wall.end.point, wall.end.height - 0.08),
+                (wall.end.point, wall.end.height + surface_bias),
+                (wall.start.point, wall.start.height + surface_bias),
+            ],
+            [42, 50, 52, 255],
+        );
     }
 }
 
@@ -139,8 +117,9 @@ fn pad(bytes: &mut Vec<u8>, multiple: usize, fill: u8) {
 
 pub fn export(program: &Program) -> Vec<u8> {
     let projection = map::project(program);
+    let geometry = opencity::road_geometry::RoadGeometry::compile(program, &projection);
     let mut mesh = Geometry::new();
-    for segment in &projection.segments {
+    for (index, segment) in projection.segments.iter().enumerate() {
         let road = program
             .statements
             .iter()
@@ -148,7 +127,7 @@ pub fn export(program: &Program) -> Vec<u8> {
                 Statement::Road(road) if road.name == segment.road_name => Some(road),
                 _ => None,
             });
-        add_segment(&mut mesh, segment, road);
+        add_segment(&mut mesh, segment, road, &geometry, index);
     }
     for intersection in map::intersections(program, &projection) {
         let width = program
@@ -413,6 +392,33 @@ mod tests {
     use super::*;
 
     #[test]
+    fn elevated_road_exports_only_outer_side_walls() {
+        let program = opencity::parse("road divided: verge-carlane-middle-carlane-verge; end; p = map_point(0, 0); q = map_point(1, 0); road_piece = divided(p, 0.3, 0, 0.7, 0, q); elevation(road_piece, 0.3);").unwrap();
+        let projection = map::project(&program);
+        let road = program
+            .statements
+            .iter()
+            .find_map(|statement| match statement {
+                Statement::Road(road) => Some(road),
+                _ => None,
+            })
+            .unwrap();
+        let resolved = opencity::road_geometry::RoadGeometry::compile(&program, &projection);
+        let mut geometry = Geometry::new();
+        add_segment(
+            &mut geometry,
+            &projection.segments[0],
+            Some(road),
+            &resolved,
+            0,
+        );
+        assert_eq!(
+            geometry.positions.len(),
+            (5 * (resolved.cross_sections(0).len() - 1) + resolved.walls.len()) * 4
+        );
+    }
+
+    #[test]
     fn overlapping_ground_surfaces_export_at_separate_heights() {
         let program = opencity::parse(
             "beach(0, 0, 2, 0, 2, 2, 0, 2); land(0, 0, 2, 0, 2, 2, 0, 2); vegetation(forest, 0, 0, 2, 0, 2, 2, 0, 2);",
@@ -475,5 +481,22 @@ mod tests {
         assert!(json["accessors"][0]["count"].as_u64().unwrap() > 40);
         assert_eq!(json["accessors"][0]["min"][1], 0.0);
         assert!((json["accessors"][0]["max"][1].as_f64().unwrap() - 0.4).abs() < 0.00001);
+    }
+
+    #[test]
+    fn road_library_cloverleaf_exports_separate_decks() {
+        let program = opencity::parse("place(cloverleaf, interchange, 0, 0, 0);")
+            .expect("native cloverleaf placement parses");
+        let bytes = export(&program);
+        let mesh = super::super::model::parse_glb(&bytes).expect("cloverleaf GLB parses");
+        let heights: Vec<_> = mesh
+            .triangles
+            .iter()
+            .flatten()
+            .map(|vertex| vertex.position[1])
+            .collect();
+        assert!(heights.iter().any(|height| height.abs() < 0.0001));
+        assert!(heights.iter().any(|height| (*height - 0.15).abs() < 0.0001));
+        assert!(heights.iter().any(|height| (*height - 0.3).abs() < 0.0001));
     }
 }
