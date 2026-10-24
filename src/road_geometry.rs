@@ -243,9 +243,43 @@ fn attached_parent(
             })
         })
 }
+fn surface_rows(
+    segment: &Segment,
+    road: &RoadDefinition,
+    profile: &crate::road_profiles::RoadProfile,
+) -> (Vec<CrossSection>, bool) {
+    let (ts, ok) = parameters(segment);
+    let rows = ts
+        .into_iter()
+        .map(|t| {
+            let (widths, mut offset) = crate::road_profiles::section_widths(road, profile, t);
+            let mut boundaries = vec![offset_vertex(segment, t, offset)];
+            for width in widths {
+                offset += width;
+                boundaries.push(offset_vertex(segment, t, offset));
+            }
+            CrossSection { t, boundaries }
+        })
+        .collect();
+    (rows, ok)
+}
+
 impl RoadGeometry {
     pub fn cross_sections(&self, segment: usize) -> &[CrossSection] {
         &self.surfaces[segment].rows
+    }
+
+    /// Compile only one road's surface rows while resolving its profile against
+    /// the complete projection (including attached parent roads).
+    pub fn placement_cross_sections(
+        program: &Program,
+        projection: &Projection,
+        index: usize,
+    ) -> Option<(Vec<CrossSection>, bool)> {
+        let segment = projection.segments.get(index)?;
+        let road = definition(program, segment)?;
+        let profiles = crate::road_profiles::road_profiles(program, projection);
+        Some(surface_rows(segment, road, &profiles[index]))
     }
 
     pub fn compile(program: &Program, projection: &Projection) -> Self {
@@ -256,10 +290,6 @@ impl RoadGeometry {
             .iter()
             .enumerate()
             .map(|(index, segment)| {
-                let (ts, ok) = parameters(segment);
-                if !ok {
-                    unresolved.push(index);
-                }
                 let Some(road) = definition(program, segment) else {
                     return Surface {
                         rows: vec![],
@@ -268,19 +298,10 @@ impl RoadGeometry {
                         edges: [vec![], vec![]],
                     };
                 };
-                let rows: Vec<_> = ts
-                    .iter()
-                    .map(|&t| {
-                        let (widths, mut offset) =
-                            crate::road_profiles::section_widths(road, &profiles[index], t);
-                        let mut boundaries = vec![offset_vertex(segment, t, offset)];
-                        for width in widths {
-                            offset += width;
-                            boundaries.push(offset_vertex(segment, t, offset));
-                        }
-                        CrossSection { t, boundaries }
-                    })
-                    .collect();
+                let (rows, ok) = surface_rows(segment, road, &profiles[index]);
+                if !ok {
+                    unresolved.push(index);
+                }
                 let edges = [
                     rows.iter().map(|r| r.boundaries[0]).collect(),
                     rows.iter().map(|r| *r.boundaries.last().unwrap()).collect(),
@@ -516,6 +537,55 @@ mod tests {
             point: WorldPoint { x, y },
             height: z,
         }
+    }
+    #[test]
+    fn placement_rows_match_full_compiler_with_parent_profiles() {
+        let mut program = crate::parse("road street: carlane-carlane; end; a=street(-1,0,1,0); grade(a,0.2,0.6); b=street(0,2,1,3); grade(b,0.1,0.3);").unwrap();
+        let projection = map::project(&program);
+        let parent = projection.segments[0].source;
+        let (reference, start) = map::create_lane_point(&mut program, parent, 0, 0.6).unwrap();
+        let Statement::Road(road) = program.statements[0].clone() else {
+            unreachable!()
+        };
+        let (index, _) = map::append_connected(
+            &mut program,
+            &road,
+            start,
+            Some(&reference),
+            WorldPoint { x: 2.0, y: 1.0 },
+            None,
+        );
+        map::create_lane_split(
+            &mut program,
+            &reference,
+            map::SegmentSource::TopLevel(index),
+            map::SplitMode::KeepLane,
+        );
+        let projection = map::project(&program);
+        let geometry = RoadGeometry::compile(&program, &projection);
+        for index in 0..projection.segments.len() {
+            let (selected, resolved) =
+                RoadGeometry::placement_cross_sections(&program, &projection, index).unwrap();
+            assert!(resolved);
+            let full = geometry.cross_sections(index);
+            assert_eq!(selected.len(), full.len());
+            for (a, b) in selected.iter().zip(full) {
+                assert_eq!(a.t, b.t);
+                for (a, b) in a.boundaries.iter().zip(&b.boundaries) {
+                    assert_eq!(a.point, b.point);
+                    assert_eq!(a.height, b.height);
+                }
+            }
+        }
+    }
+    #[test]
+    fn placement_rows_do_not_subdivide_unrelated_large_curves() {
+        let program = crate::parse("road street: carlane; end; small=street(0,0,1,0); unrelated=street(0,10,1000000,1000000,-1000000,1000000,1,10);").unwrap();
+        let projection = map::project(&program);
+        let (rows, resolved) =
+            RoadGeometry::placement_cross_sections(&program, &projection, 0).unwrap();
+        assert!(resolved);
+        assert!(rows.len() < 100);
     }
     #[test]
     fn clips_a_short_opening_inside_a_long_wall_piece() {

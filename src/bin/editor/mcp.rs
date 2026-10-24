@@ -28,7 +28,7 @@ struct Request {
 
 pub struct Bridge {
     requests: Receiver<Request>,
-    screenshot: Option<Sender<Value>>,
+    screenshot: Option<(Sender<Value>, bool)>,
     #[cfg(unix)]
     socket_path: PathBuf,
 }
@@ -41,12 +41,15 @@ fn tools() -> Value {
     json!({"tools":[
         tool("get_road_state", "Get the current road AST source and projected road segments", json!({}), &[]),
         tool("check_design_rules", "Check road joins and intersection edge cross sections", json!({}), &[]),
-        tool("get_viewport_image", "Capture the current editor viewport as a PNG image", json!({}), &[]),
+        tool("get_viewport_image", "Capture the current editor viewport as a PNG image; include_ui captures the entire editor window", json!({"include_ui":{"type":"boolean","default":false}}), &[]),
         tool("get_viewport", "Get map center and zoom in pixels per world unit", json!({}), &[]),
         tool("set_viewport", "Set map center and zoom", json!({"center_x":{"type":"number"},"center_y":{"type":"number"},"zoom":{"type":"number"}}), &["center_x","center_y","zoom"]),
         tool("replace_document", "Replace the editor document with valid OpenCity road source as one undoable edit", json!({"source":{"type":"string"}}), &["source"]),
         tool("save_document", "Save the current editor document to an absolute .road path", json!({"path":{"type":"string"}}), &["path"]),
         tool("add_road", "Place a cubic road using an existing road type; optional endpoint references share junctions", json!({"road_type":{"type":"string"},"name":{"type":"string"},"start_ref":{"type":"string"},"end_ref":{"type":"string"},"start_x":{"type":"number"},"start_y":{"type":"number"},"end_x":{"type":"number"},"end_y":{"type":"number"},"control1_x":{"type":"number"},"control1_y":{"type":"number"},"control2_x":{"type":"number"},"control2_y":{"type":"number"}}), &["road_type","start_x","start_y","end_x","end_y"]),
+        tool("get_connection_workspace", "List stable connection IDs, exact points, ports, lane attachments and cached design issues", json!({}), &[]),
+        tool("open_connection_editor", "Compatibility command: focus a connection in the full 3D viewport; no workspace is opened", json!({"connection_id":{"type":"string"},"camera":{"type":"string","enum":["top","isometric","road_level"]}}), &[]),
+        tool("edit_connection", "Atomically edit a local connection. Point edits require segment,x,y; grade requires segment,start_height,end_height; attachment requires reference,lane,t; intersection requires x,y,kind,profile. Shared/anchored references are preserved. Run check_design_rules after edits.", json!({"connection_id":{"type":"string"},"edit":{"type":"string","enum":["start","handle1","handle2","end","grade","attachment","intersection"]},"segment":{"type":"string"},"reference":{"type":"string"},"lane":{"type":"integer","minimum":0},"t":{"type":"number","minimum":0,"maximum":1},"x":{"type":"number"},"y":{"type":"number"},"start_height":{"type":"number"},"end_height":{"type":"number"},"kind":{"type":"string","enum":["right_turn","three_way","four_way"]},"profile":{"type":"string"}}), &["connection_id","edit"]),
         tool("set_intersection", "Define or remove a square turn or intersection with a fixed edge cross section", json!({"point_ref":{"type":"string"},"kind":{"type":"string","enum":["right_turn","three_way","four_way","none"]},"road_type":{"type":"string"}}), &["point_ref","kind"]),
         tool("move_road", "Translate a placed road and its connected endpoints", json!({"segment_index":{"type":"integer"},"dx":{"type":"number"},"dy":{"type":"number"}}), &["segment_index","dx","dy"]),
         tool("move_control_point", "Set the first or second Bézier control point", json!({"segment_index":{"type":"integer"},"control":{"type":"integer","enum":[1,2]},"x":{"type":"number"},"y":{"type":"number"}}), &["segment_index","control","x","y"]),
@@ -295,20 +298,31 @@ impl RoadEditor {
         let Some(bridge) = &self.mcp else { return };
         if let Ok(request) = bridge.requests.try_recv() {
             if request.name == "get_viewport_image" {
-                if let Some(bridge) = &mut self.mcp {
-                    if bridge.screenshot.is_some() {
-                        let _ = request
-                            .reply
-                            .send(tool_reply(Err("Screenshot already pending".into())));
-                    } else {
-                        bridge.screenshot = Some(request.reply);
-                        self.view = View::Map;
-                        ctx.send_viewport_cmd(
-                            egui::ViewportCommand::Screenshot(Default::default()),
-                        );
+                match screenshot_includes_ui(&request.args) {
+                    Err(error) => {
+                        let _ = request.reply.send(tool_reply(Err(error)));
+                    }
+                    Ok(include_ui) => {
+                        if let Some(bridge) = &mut self.mcp {
+                            if bridge.screenshot.is_some() {
+                                let _ = request
+                                    .reply
+                                    .send(tool_reply(Err("Screenshot already pending".into())));
+                            } else {
+                                bridge.screenshot = Some((request.reply, include_ui));
+                                self.view = View::Map;
+                                ctx.send_viewport_cmd(egui::ViewportCommand::Screenshot(
+                                    Default::default(),
+                                ));
+                            }
+                        }
                     }
                 }
             } else {
+                if request.name == "get_connection_workspace" {
+                    let projection = self.projected_map();
+                    self.design_issues(ctx, &projection);
+                }
                 let before = self.program.clone();
                 let result = self.call_mcp(&request.name, &request.args);
                 self.record_history(before, false);
@@ -324,8 +338,8 @@ impl RoadEditor {
         });
         if let Some(image) = screenshot {
             if let Some(bridge) = &mut self.mcp {
-                if let Some(reply) = bridge.screenshot.take() {
-                    let result = encode_image(&image, self.map_rect, ctx.pixels_per_point())
+                if let Some((reply, include_ui)) = bridge.screenshot.take() {
+                    let result = encode_image(&image, if include_ui { None } else { self.map_rect }, ctx.pixels_per_point())
                         .map(|data| json!({"content":[{"type":"image","data":data,"mimeType":"image/png"}]}));
                     match result {
                         Ok(image_result) => {
@@ -342,6 +356,9 @@ impl RoadEditor {
 
     pub(super) fn call_mcp(&mut self, name: &str, args: &Value) -> Result<Value, String> {
         match name {
+            "get_connection_workspace" | "open_connection_editor" | "edit_connection" => {
+                self.connection_api(name, args)
+            }
             "check_design_rules" => {
                 let projection = map::project(&self.program);
                 let profiles = super::paint_profiles(&self.program, &projection);
@@ -423,16 +440,29 @@ impl RoadEditor {
                         projection.unresolved
                     ));
                 }
+                self.minimal = Default::default();
+                self.map_tool = super::MapTool::Select;
+                self.landscape_points.clear();
+                self.dragging_endpoint = None;
+                self.dragging_control = None;
+                self.dragging_intersection = None;
+                self.iso_drag_pan = false;
+                self.iso_drag_orbit = false;
+                self.box_start = None;
+                self.selected_landscape = None;
+                self.selected_intersection = None;
+                self.selected_segments.clear();
                 self.selected_road = program
                     .statements
                     .iter()
                     .position(|statement| matches!(statement, Statement::Road(_)));
                 self.selected_segment = None;
                 self.selected_endpoint = None;
-                self.lane_end_choice = None;
                 self.map_start = None;
                 self.map_start_ref = None;
                 self.path = None;
+                self.connection_member = None;
+                self.connection_id = None;
                 self.program = program;
                 self.road_name_draft = self
                     .road()
@@ -674,6 +704,14 @@ impl RoadEditor {
     }
 }
 
+fn screenshot_includes_ui(args: &Value) -> Result<bool, String> {
+    match args.get("include_ui") {
+        None => Ok(false),
+        Some(Value::Bool(value)) => Ok(*value),
+        Some(_) => Err("include_ui must be a boolean".into()),
+    }
+}
+
 fn encode_image(
     image: &egui::ColorImage,
     rect: Option<egui::Rect>,
@@ -760,6 +798,21 @@ mod tests {
         let decoder = png::Decoder::new(std::io::Cursor::new(bytes));
         let reader = decoder.read_info().unwrap();
         assert_eq!((reader.info().width, reader.info().height), (2, 2));
+    }
+
+    #[test]
+    fn screenshot_including_ui_preserves_full_image_and_validates_option() {
+        assert!(!screenshot_includes_ui(&json!({})).unwrap());
+        assert!(screenshot_includes_ui(&json!({"include_ui":true})).unwrap());
+        assert!(screenshot_includes_ui(&json!({"include_ui":"yes"})).is_err());
+        let image = egui::ColorImage::filled([8, 6], egui::Color32::RED);
+        let encoded = encode_image(&image, None, 2.0).unwrap();
+        let bytes = base64::engine::general_purpose::STANDARD
+            .decode(encoded)
+            .unwrap();
+        let decoder = png::Decoder::new(std::io::Cursor::new(bytes));
+        let reader = decoder.read_info().unwrap();
+        assert_eq!((reader.info().width, reader.info().height), (8, 6));
     }
 
     #[test]

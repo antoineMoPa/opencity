@@ -611,13 +611,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "egui_frames"
-version = "0.4.0"
-dependencies = [
- "egui",
-]
-
-[[package]]
 name = "egui_glow"
 version = "0.36.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1351,6 +1344,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "moon_toggle_switch"
+version = "0.1.0"
+dependencies = [
+ "egui",
+]
+
+[[package]]
 name = "moxcms"
 version = "0.8.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1810,7 +1810,7 @@ dependencies = [
  "eframe",
  "egui_command_palette",
  "egui_extras",
- "egui_frames",
+ "moon_toggle_switch",
  "muda",
  "png 0.17.16",
  "rfd",

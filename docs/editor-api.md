@@ -24,6 +24,19 @@ This returns a top-level `segment_index`. Optional `control1_x`, `control1_y`, `
 
 The other tools are `check_design_rules`, `get_viewport`, `set_viewport`, `set_intersection`, `move_road`, `move_control_point`, `move_endpoint`, `undo`, and `redo`. The Rust MCP `tools/list` response provides their current JSON schemas. The [language and editor guide](../docs.md) explains road source and editing semantics.
 
-## MCP stdio
+## Connection queries and precision edits
 
-Configure an MCP client to run the editor binary with argument `mcp` (or `--mcp`). The adapter implements line-delimited JSON-RPC 2.0 with `initialize`, `ping`, `tools/list`, and `tools/call`. For example, send `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"get_road_state","arguments":{}}}` followed by a newline. The reply's `result` is the same tool result described above. The editor window must already be open.
+`get_connection_workspace` lists named merges and intersections with stable connection IDs, their member roads, ports, lane attachments, and design-check status. `open_connection_editor` is a compatibility command: an optional `connection_id` selects and focuses a connection in the full isometric viewport. It never opens a panel or filters the map. The legacy `camera` argument is accepted; this compatibility command focuses the isometric view. Top, Isometric and Vehicular remain available through the view switch. `edit_connection` performs validated, undoable AST edits. See the [connection editing guide](road-building-guide-for-agents.md#8-inspect-and-edit-connections-through-the-rust-api) for arguments and limitations.
+
+`get_viewport_image` accepts `{"include_ui":true}` to capture the entire editor window including the selected road name field. Omit this option for the map rectangle. Check `design_checks` before interpreting cached issues; `pending` does not mean that geometry is clear. The abandoned `cut_connection_segment` and `close_connection_editor` tools have been removed. There is no workspace to cut within or close; `workspace` is returned as null for query compatibility. Precision editing remains stateless and uses the full document.
+
+Red map annotations are top-level source calls with unique assigned IDs. Use the existing source/document API to create or edit them; they do not count as roads, landscape, obstacles or design-rule geometry:
+
+```road
+note_1 = annotation_segment(0, 0, 2, 1);
+note_2 = annotation_text("Red label: \"quoted\" \\ path 東京", 1, 2);
+```
+
+Coordinates are ground-plane world coordinates. Labels are screen-facing red text; segments are red overlays. String arguments retain quoted source tokens, including JSON-compatible escapes. These calls survive save/reopen, document replacement, undo and redo. The palette provides Annotation segment (two clicks) and Annotation text (click anchor, type, Enter). Escape cancels; clicking outside an active inline label cancels. No annotation edit/selection API is added; edit the source or undo to correct markup.
+
+The minimal app's File Clear action (including the legacy internal New command ID and Cmd/Ctrl+N) always opens a confirmation modal. Confirmation removes top-level calls, keeps road/block definitions, preserves path/saved baseline and records one undoable edit. Cancel leaves AST/history and pending placement untouched. The confirmation uses a compact, viewport-bounded modal with wrapped copy, generous inner spacing and right-aligned equal-height actions; Cancel retains default keyboard focus. This differs from the backend new-document operation, which still creates a blank document for automation. Cross-section editing is a dedicated full-window mode reached through the palette; its profile edits use the same document/history. The viewport Top/Isometric/Vehicular switch, revealed by hovering the top 100 logical pixels, changes only camera state. Its 320ms transition preserves geographic focus and scale, and geometry editing pauses until the destination projection is ready; Box select changes only selection.

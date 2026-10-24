@@ -1,10 +1,26 @@
-struct Camera { view: vec4<f32>, focus: vec4<f32>, viewport: vec4<f32>, elevation: vec4<f32> };
+struct Camera { view: vec4<f32>, focus: vec4<f32>, viewport: vec4<f32>, elevation: vec4<f32>, clip: array<vec4<f32>, 4> };
 @group(0) @binding(2) var<uniform> camera: Camera;
 struct VertexInput { @location(0) world: vec4<f32>, @location(1) color: vec4<f32> };
 struct VertexOutput { @builtin(position) position: vec4<f32>, @location(0) color: vec4<f32> };
 @vertex fn scene_vs(input: VertexInput) -> VertexOutput {
     var output: VertexOutput;
+    if camera.elevation.z > 0.5 {
+        let point = vec4<f32>(input.world.xyz, 1.0);
+        output.position = vec4<f32>(dot(camera.clip[0], point), dot(camera.clip[1], point),
+            dot(camera.clip[2], point), dot(camera.clip[3], point));
+        let perspective_scale = length(camera.clip[3].xyz);
+        let overview_scale = length(camera.clip[0].xyz) * camera.viewport.x / (camera.viewport.y * 1.428);
+        let perspective = clamp(perspective_scale / max(overview_scale, 0.000001), 0.0, 1.0);
+        let layer_depth = (1.0 - perspective) * output.position.w / 2000.0
+            + 0.04 * perspective_scale * perspective_scale
+                / max(abs(output.position.w), max(0.04 * perspective_scale, 0.000001));
+        output.position.z -= input.world.w * layer_depth;
+
+        output.color = input.color;
+        return output;
+    }
     let point = input.world.xy;
+
     let height = input.world.z;
     let delta = point - camera.focus.xy;
     var offset = vec2<f32>(point.x, -point.y);

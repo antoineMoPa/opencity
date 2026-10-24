@@ -1,5 +1,6 @@
 //! Embedded GLB triangle meshes used by building placements.
 
+#[cfg(any(not(target_arch = "wasm32"), test))]
 use serde_json::Value;
 
 #[derive(Clone, Copy, Debug)]
@@ -15,7 +16,9 @@ pub struct ModelMesh {
     pub max: [f32; 3],
 }
 
+#[cfg(any(not(target_arch = "wasm32"), test))]
 type Matrix = [[f32; 4]; 4];
+#[cfg(any(not(target_arch = "wasm32"), test))]
 const IDENTITY: Matrix = [
     [1.0, 0.0, 0.0, 0.0],
     [0.0, 1.0, 0.0, 0.0],
@@ -23,6 +26,7 @@ const IDENTITY: Matrix = [
     [0.0, 0.0, 0.0, 1.0],
 ];
 
+#[cfg(any(not(target_arch = "wasm32"), test))]
 fn number(value: &Value) -> Option<f32> {
     value
         .as_f64()
@@ -30,16 +34,19 @@ fn number(value: &Value) -> Option<f32> {
         .filter(|value| value.is_finite())
 }
 
+#[cfg(any(not(target_arch = "wasm32"), test))]
 fn index(value: &Value) -> Option<usize> {
     value.as_u64().and_then(|value| usize::try_from(value).ok())
 }
 
+#[cfg(any(not(target_arch = "wasm32"), test))]
 fn words(bytes: &[u8], at: usize) -> Option<u32> {
     Some(u32::from_le_bytes(
         bytes.get(at..at.checked_add(4)?)?.try_into().ok()?,
     ))
 }
 
+#[cfg(any(not(target_arch = "wasm32"), test))]
 fn multiply(a: Matrix, b: Matrix) -> Matrix {
     let mut result = [[0.0; 4]; 4];
     for column in 0..4 {
@@ -52,6 +59,7 @@ fn multiply(a: Matrix, b: Matrix) -> Matrix {
     result
 }
 
+#[cfg(any(not(target_arch = "wasm32"), test))]
 fn transform(matrix: Matrix, point: [f32; 3]) -> [f32; 3] {
     [
         matrix[0][0] * point[0] + matrix[1][0] * point[1] + matrix[2][0] * point[2] + matrix[3][0],
@@ -60,6 +68,7 @@ fn transform(matrix: Matrix, point: [f32; 3]) -> [f32; 3] {
     ]
 }
 
+#[cfg(any(not(target_arch = "wasm32"), test))]
 fn node_matrix(node: &Value) -> Result<Matrix, String> {
     if let Some(values) = node["matrix"].as_array() {
         if values.len() != 16 {
@@ -126,6 +135,7 @@ fn node_matrix(node: &Value) -> Result<Matrix, String> {
     Ok(result)
 }
 
+#[cfg(any(not(target_arch = "wasm32"), test))]
 struct Accessor<'a> {
     bin: &'a [u8],
     start: usize,
@@ -136,6 +146,7 @@ struct Accessor<'a> {
     scaled: bool,
 }
 
+#[cfg(any(not(target_arch = "wasm32"), test))]
 impl<'a> Accessor<'a> {
     fn new(root: &Value, bin: &'a [u8], id: usize) -> Result<Self, String> {
         let accessor = root["accessors"].get(id).ok_or("missing accessor")?;
@@ -286,6 +297,7 @@ impl<'a> Accessor<'a> {
     }
 }
 
+#[cfg(any(not(target_arch = "wasm32"), test))]
 fn visit_node(
     root: &Value,
     bin: &[u8],
@@ -386,6 +398,7 @@ fn visit_node(
     Ok(())
 }
 
+#[cfg(any(not(target_arch = "wasm32"), test))]
 pub fn parse_glb(bytes: &[u8]) -> Result<ModelMesh, String> {
     if bytes.len() < 20
         || &bytes[..4] != b"glTF"
