@@ -1,0 +1,12 @@
+road street:
+    sidewalk carlane middle carlane sidewalk;
+end
+
+block span({ length, height }: { length: number, height: number }):
+    lane = street(0, 0, length, 0);
+    grade(lane, 0, height);
+    land(0, 0, length, 0, length, 1);
+end
+
+short = span(10, 20, { length: 5, height: 0.5 });
+long = span(20, 20, 1, { length: 8, height: 1 });

@@ -20,7 +20,7 @@ To place a straight road with an existing type, send:
 {"name":"add_road","arguments":{"road_type":"local","start_x":0,"start_y":0,"end_x":2,"end_y":0}}
 ```
 
-This returns a top-level `segment_index`. Optional `control1_x`, `control1_y`, `control2_x`, and `control2_y` set Bézier controls. Optional `start_ref` and `end_ref` use exact junction references from the current state; their coordinates must match. The `replace_document` tool accepts `{ "source": "..." }` with complete valid `.road` source and applies it as one undoable edit. `save_document` requires an absolute `.road` path. Road coordinates use map world units; viewport zoom is 18 to 2400 pixels per unit.
+This returns a top-level `segment_index`. Optional `control1_x`, `control1_y`, `control2_x`, and `control2_y` set Bézier controls. Optional `start_ref` and `end_ref` use exact junction references from the current state; their coordinates must match. The `replace_document` tool accepts `{ "source": "..." }` with complete valid `.road` source and applies it as one undoable edit. `save_document` requires an absolute `.road` path. Road coordinates use map world units; viewport zoom is 18 to 2400 pixels per unit for ordinary maps, with a 0.1 minimum for documents containing explicit intersection components.
 
 The other tools are `check_design_rules`, `get_viewport`, `set_viewport`, `set_intersection`, `move_road`, `move_control_point`, `move_endpoint`, `undo`, and `redo`. The Rust MCP `tools/list` response provides their current JSON schemas. The [language and editor guide](../docs.md) explains road source and editing semantics.
 

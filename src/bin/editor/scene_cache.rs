@@ -188,16 +188,25 @@ impl RoadEditor {
         if camera == CameraView::Vehicular {
             return;
         }
-        for segment in &projection.segments {
+        if self.selected_segment.is_none() && self.selected_segments.is_empty() {
+            return;
+        }
+        let profiles = paint_profiles(&self.program, projection);
+        for (index, segment) in projection.segments.iter().enumerate() {
             if self.selected_segment != Some(segment.source)
                 && !self.selected_segments.contains(&segment.source)
             {
                 continue;
             }
             let steps = if segment_is_straight(segment) { 1 } else { 32 };
+            let start = profiles[index].start_clip.unwrap_or(0.);
+            let end = profiles[index].end_clip.unwrap_or(1.);
+            if start >= end {
+                continue;
+            }
             let path = (0..=steps)
                 .map(|step| {
-                    let t = step as f32 / steps as f32;
+                    let t = start + (end - start) * step as f32 / steps as f32;
                     let world = segment.point_at(t);
                     match camera {
                         CameraView::Top => screen_of(rect, self.map_pan, self.map_zoom, world),

@@ -3,6 +3,9 @@ use super::*;
 
 #[derive(Default)]
 pub(super) struct MinimalEditor {
+    pub(super) intersection_viewer: Option<network_ui::Viewer>,
+    pub(super) network_options: Option<network_ui::NetworkOptions>,
+    pub(super) networks_cache: Option<(Program, Arc<opencity::network::NetworkProjection>)>,
     pub(super) placement_error: Option<String>,
     pub(super) intersection_rotation: u8,
     pub(super) pending_road: Option<RoadDefinition>,

@@ -316,12 +316,7 @@ pub(super) fn paint_profiled_road(
         }
         painter.add(egui::Shape::mesh(mesh));
     }
-    let outline = if selected {
-        palette.map_selected
-    } else {
-        palette.map_outline
-    };
-    for edge in [0, road.elements.len()] {
+    for edge in [0, road.elements.len()].into_iter().filter(|_| selected) {
         let mut path = Vec::new();
         for row in &boundaries {
             let within_parent = profile
@@ -336,7 +331,7 @@ pub(super) fn paint_profiled_road(
                 if path.len() > 1 {
                     painter.add(egui::Shape::line(
                         std::mem::take(&mut path),
-                        egui::Stroke::new(if selected { 2.5 } else { 1.5 }, outline),
+                        egui::Stroke::new(2.5, palette.map_selected),
                     ));
                 } else {
                     path.clear();
@@ -348,7 +343,7 @@ pub(super) fn paint_profiled_road(
         if path.len() > 1 {
             painter.add(egui::Shape::line(
                 path,
-                egui::Stroke::new(if selected { 2.5 } else { 1.5 }, outline),
+                egui::Stroke::new(2.5, palette.map_selected),
             ));
         }
     }
@@ -475,17 +470,12 @@ pub(super) fn paint_road_segment(
         .iter()
         .map(|kind| map_element_width(*kind, zoom))
         .sum();
-    painter.add(egui::Shape::line(
-        spine.clone(),
-        egui::Stroke::new(
-            total + if selected { 6.0 } else { 3.0 },
-            if selected {
-                palette.map_selected
-            } else {
-                palette.map_outline
-            },
-        ),
-    ));
+    if selected {
+        painter.add(egui::Shape::line(
+            spine.clone(),
+            egui::Stroke::new(total + 6.0, palette.map_selected),
+        ));
+    }
     let mut offset = -total / 2.0;
     let mut track_bands = Vec::new();
     let mut airfield_bands = Vec::new();

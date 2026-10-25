@@ -2,11 +2,14 @@ use std::fs;
 use std::path::Path;
 
 use crate::ast::{
-    Argument, BlockDefinition, Call, Program, RoadDefinition, RoadDirection, RoadElement,
-    RoadElementKind, RoadRole, Statement,
+    Argument, BlockDefinition, BlockParameter, BlockParameterType, Call, Program, RoadDefinition,
+    RoadDirection, RoadElement, RoadElementKind, RoadRole, Statement,
 };
 use crate::error::{Error, SyntaxError};
 use crate::lexer::{tokenize, Token, TokenKind};
+
+#[path = "parser/network.rs"]
+mod network;
 
 struct Parser {
     tokens: Vec<Token>,
@@ -75,8 +78,9 @@ impl Parser {
             };
             elements.push(RoadElement { kind, catch });
             if self.at(TokenKind::Hyphen) {
+                // Keep existing road files readable; the writer emits spaces.
                 self.bump();
-            } else {
+            } else if !self.at(TokenKind::Identifier) {
                 break;
             }
         }
@@ -128,19 +132,145 @@ impl Parser {
     fn block(&mut self) -> Result<BlockDefinition, SyntaxError> {
         self.expect(TokenKind::Block)?;
         let name = self.expect(TokenKind::Identifier)?.text;
+        let parameters = if self.at(TokenKind::OpenParen) {
+            Some(self.block_parameters()?)
+        } else {
+            None
+        };
         self.expect(TokenKind::Colon)?;
         let mut calls = Vec::new();
         while !self.at(TokenKind::End) {
             if self.at(TokenKind::Eof) {
                 return Err(self.error("expected End, found Eof".into()));
             }
-            calls.push(self.call()?);
+            let call = self.call()?;
+            if let Some(parameters) = &parameters {
+                if call
+                    .assigns
+                    .iter()
+                    .any(|name| parameters.iter().any(|p| &p.name == name))
+                {
+                    return Err(self.error("block result names cannot shadow parameters".into()));
+                }
+            }
+            calls.push(call);
         }
         self.bump();
         if self.at(TokenKind::Semicolon) {
             self.bump();
         }
-        Ok(BlockDefinition { name, calls })
+        Ok(BlockDefinition {
+            name,
+            parameters,
+            calls,
+        })
+    }
+
+    fn block_parameters(&mut self) -> Result<Vec<BlockParameter>, SyntaxError> {
+        self.expect(TokenKind::OpenParen)?;
+        self.expect(TokenKind::OpenBrace)?;
+        let mut names = Vec::new();
+        while !self.at(TokenKind::CloseBrace) {
+            let token = self.expect(TokenKind::Identifier)?;
+            if names.contains(&token.text) {
+                return Err(SyntaxError {
+                    span: token.span,
+                    message: "duplicate block parameter".into(),
+                });
+            }
+            names.push(token.text);
+            if !self.at(TokenKind::Comma) {
+                break;
+            }
+            self.bump();
+        }
+        self.expect(TokenKind::CloseBrace)?;
+        self.expect(TokenKind::Colon)?;
+        self.expect(TokenKind::OpenBrace)?;
+        let mut typed = Vec::<BlockParameter>::new();
+        while !self.at(TokenKind::CloseBrace) {
+            let name = self.expect(TokenKind::Identifier)?;
+            if !names.contains(&name.text) || typed.iter().any(|p| p.name == name.text) {
+                return Err(SyntaxError {
+                    span: name.span,
+                    message: "unknown or duplicate parameter type property".into(),
+                });
+            }
+            self.expect(TokenKind::Colon)?;
+            let token = self.expect(TokenKind::Identifier)?;
+            let kind =
+                BlockParameterType::from_keyword(&token.text).ok_or_else(|| SyntaxError {
+                    span: token.span,
+                    message: format!("unknown block parameter type '{}'", token.text),
+                })?;
+            typed.push(BlockParameter {
+                name: name.text,
+                kind,
+            });
+            if !self.at(TokenKind::Comma) {
+                break;
+            }
+            self.bump();
+        }
+        self.expect(TokenKind::CloseBrace)?;
+        self.expect(TokenKind::CloseParen)?;
+        names
+            .into_iter()
+            .map(|name| {
+                typed
+                    .iter()
+                    .find(|p| p.name == name)
+                    .cloned()
+                    .ok_or_else(|| self.error(format!("missing type for block parameter '{name}'")))
+            })
+            .collect()
+    }
+
+    fn argument(&mut self) -> Result<Argument, SyntaxError> {
+        if self.at(TokenKind::OpenBrace) {
+            self.bump();
+            let mut properties = Vec::<(String, Argument)>::new();
+            while !self.at(TokenKind::CloseBrace) {
+                let name = self.expect(TokenKind::Identifier)?;
+                if properties.iter().any(|(key, _)| key == &name.text) {
+                    return Err(SyntaxError {
+                        span: name.span,
+                        message: "duplicate object property".into(),
+                    });
+                }
+                let value = if self.at(TokenKind::Colon) {
+                    self.bump();
+                    self.argument()?
+                } else {
+                    Argument::Identifier(name.text.clone())
+                };
+                properties.push((name.text, value));
+                if !self.at(TokenKind::Comma) {
+                    break;
+                }
+                self.bump();
+            }
+            self.expect(TokenKind::CloseBrace)?;
+            return Ok(Argument::Object(properties));
+        }
+        let token = self.bump();
+        match token.kind {
+            TokenKind::Number => Ok(Argument::Number(token.text)),
+            TokenKind::Identifier => {
+                let mut name = token.text;
+                while self.at(TokenKind::Dot) {
+                    self.bump();
+                    name.push('.');
+                    name.push_str(&self.expect(TokenKind::Identifier)?.text);
+                }
+                Ok(Argument::Identifier(name))
+            }
+            TokenKind::String => Ok(Argument::String(token.text)),
+            _ => Err(SyntaxError {
+                span: token.span,
+                message: "expected a number, identifier, string, or object argument".into(),
+            }),
+        }
     }
 
     fn call(&mut self) -> Result<Call, SyntaxError> {
@@ -160,18 +290,7 @@ impl Parser {
         let mut args = Vec::new();
         if !self.at(TokenKind::CloseParen) {
             loop {
-                let token = self.bump();
-                args.push(match token.kind {
-                    TokenKind::Number => Argument::Number(token.text),
-                    TokenKind::Identifier => Argument::Identifier(token.text),
-                    TokenKind::String => Argument::String(token.text),
-                    _ => {
-                        return Err(SyntaxError {
-                            span: token.span,
-                            message: "expected a number or identifier argument".into(),
-                        })
-                    }
-                });
+                args.push(self.argument()?);
                 if self.at(TokenKind::Comma) {
                     self.bump();
                 } else {
@@ -194,6 +313,9 @@ impl Parser {
             statements.push(match self.current().kind {
                 TokenKind::Road => Statement::Road(self.road()?),
                 TokenKind::Block => Statement::Block(self.block()?),
+                TokenKind::Identifier if self.network_ahead() => {
+                    Statement::Network(self.network()?)
+                }
                 _ => Statement::Call(self.call()?),
             });
         }
@@ -203,7 +325,34 @@ impl Parser {
 
 /// Parse a complete OpenCity source file.
 pub fn parse(source: &str) -> Result<Program, SyntaxError> {
-    crate::patterns::expand(parse_raw(source)?)
+    let program = crate::patterns::expand(parse_raw(source)?)?;
+    for (index, statement) in program.statements.iter().enumerate() {
+        let Statement::Network(definition) = statement else {
+            continue;
+        };
+        let Some(name) = &definition.name else {
+            continue;
+        };
+        if program.statements.iter().enumerate().any(|(other, s)| {
+            other != index
+                && match s {
+                    Statement::Network(d) => d.name.as_ref() == Some(name),
+                    Statement::Road(d) => &d.name == name,
+                    Statement::Block(d) => &d.name == name,
+                    _ => false,
+                }
+        }) {
+            return Err(SyntaxError {
+                span: crate::Span {
+                    offset: 0,
+                    line: 1,
+                    column: 1,
+                },
+                message: format!("duplicate component definition name '{name}'"),
+            });
+        }
+    }
+    Ok(program)
 }
 
 pub(crate) fn parse_raw(source: &str) -> Result<Program, SyntaxError> {

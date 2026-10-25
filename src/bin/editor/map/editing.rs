@@ -391,7 +391,7 @@ pub fn prune_unused_points(program: &mut Program) {
         let calls: Vec<&Call> = match statement {
             Statement::Call(call) => vec![call],
             Statement::Block(block) => block.calls.iter().collect(),
-            Statement::Road(_) => Vec::new(),
+            Statement::Road(_) | Statement::Network(_) => Vec::new(),
         };
         for call in calls {
             if call.args.len() == 6 {

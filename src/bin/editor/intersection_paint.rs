@@ -233,7 +233,7 @@ pub(super) fn intersection_paint(
             direction,
         });
     }
-    let half = program
+    let road_half = program
         .statements
         .iter()
         .filter_map(|statement| match statement {
@@ -255,8 +255,8 @@ pub(super) fn intersection_paint(
             _ => None,
         })
         .fold(0.0_f32, f32::max)
-        * zoom
         * 0.5;
+    let half = map::intersection_footprint_half(intersection, road_half) * zoom;
     let closed = if road
         .elements
         .iter()
@@ -321,6 +321,27 @@ pub(super) fn paint_intersection(
     let Some(paint) = intersection_paint(program, projection, intersection, rect, pan, zoom) else {
         return;
     };
+    if let Some(instance) =
+        opencity::network::default_four_way_instance(program, projection, intersection)
+    {
+        let screen = |point| {
+            let p = instance.world_point(point);
+            screen_of(rect, pan, zoom, WorldPoint { x: p.x, y: p.y })
+        };
+        let clipped = painter.with_clip_rect(paint.square.intersect(painter.clip_rect()));
+        network_ui::draw_geometry(
+            &clipped,
+            &instance.geometry,
+            &screen,
+            true,
+            true,
+            false,
+            false,
+            None,
+            palette.theme,
+        );
+        return;
+    }
     painter.rect_filled(
         paint.square,
         0.0,

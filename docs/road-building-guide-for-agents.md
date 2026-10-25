@@ -48,7 +48,7 @@ road connector:
     carlane;
     direction forward;
     role merge;
-end;
+end
 ```
 
 A merge must have an explicit `lane_point` attachment to a parent **car lane**. Its other end connects to the ramp with a shared point reference. Match elevation and travel direction. Changing a label or declaring a merge cannot authorize a crossing of an unrelated road or an explicit barrier.

@@ -103,7 +103,7 @@ pub fn block_height(args: &[Argument]) -> Option<f32> {
             .parse::<f32>()
             .ok()
             .filter(|height| height.is_finite()),
-        Argument::Identifier(_) | Argument::String(_) => None,
+        Argument::Identifier(_) | Argument::String(_) | Argument::Object(_) => None,
     }
 }
 

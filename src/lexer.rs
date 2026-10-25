@@ -21,6 +21,13 @@ pub enum TokenKind {
     Equals,
     OpenParen,
     CloseParen,
+    OpenBrace,
+    CloseBrace,
+    Dot,
+    Range,
+    Arrow,
+    OpenBracket,
+    CloseBracket,
     Comma,
     Hyphen,
     Semicolon,
@@ -65,6 +72,33 @@ pub fn tokenize(source: &str) -> Result<Vec<Token>, SyntaxError> {
             column,
         };
         let kind = match bytes[offset] {
+            b'#' => {
+                while offset < bytes.len() && bytes[offset] != b'\n' {
+                    offset += 1;
+                    column += 1;
+                }
+                continue;
+            }
+            b'[' => {
+                offset += 1;
+                TokenKind::OpenBracket
+            }
+            b']' => {
+                offset += 1;
+                TokenKind::CloseBracket
+            }
+            b'.' if bytes.get(offset + 1) == Some(&b'.') => {
+                offset += 2;
+                TokenKind::Range
+            }
+            b'.' => {
+                offset += 1;
+                TokenKind::Dot
+            }
+            b'-' if bytes.get(offset + 1) == Some(&b'>') => {
+                offset += 2;
+                TokenKind::Arrow
+            }
             b' ' | b'\t' | b'\r' | b'\n' => {
                 while offset < bytes.len() && bytes[offset].is_ascii_whitespace() {
                     if bytes[offset] == b'\n' {
@@ -157,6 +191,14 @@ pub fn tokenize(source: &str) -> Result<Vec<Token>, SyntaxError> {
             b',' => {
                 offset += 1;
                 TokenKind::Comma
+            }
+            b'{' => {
+                offset += 1;
+                TokenKind::OpenBrace
+            }
+            b'}' => {
+                offset += 1;
+                TokenKind::CloseBrace
             }
             b'-' if bytes.get(offset + 1).is_some_and(u8::is_ascii_digit) => {
                 offset += 2;

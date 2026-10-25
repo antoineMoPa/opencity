@@ -1,22 +1,22 @@
 road exit_ramp:
-    verge-carlane-verge;
+    verge carlane verge;
     direction forward;
     role ramp;
-end;
+end
 
 road interstate_three_lane:
-    verge-carlane-carlane-carlane-middle-carlane-carlane-carlane-verge;
-end;
+    verge carlane carlane carlane middle carlane carlane carlane verge;
+end
 
 road interstate_core:
-    carlane-carlane-carlane-middle-carlane-carlane-carlane;
-end;
+    carlane carlane carlane middle carlane carlane carlane;
+end
 
 road ramp_mouth:
     carlane;
     direction forward;
     role merge;
-end;
+end
 
 ew_w9 = map_point(-9.0000, 0.0000);
 

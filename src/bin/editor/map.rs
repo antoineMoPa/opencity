@@ -14,12 +14,15 @@ pub use model::{
     SplitMode, WorldPoint,
 };
 
+#[path = "map/intersection_footprints.rs"]
+mod intersection_footprints;
 #[path = "map/intersections.rs"]
 mod intersections;
 pub use intersections::{
-    intersection_arms, intersection_port_direction, intersections, place_intersection,
-    port_faces_road, port_in_use, remove_placed_intersection, right_angle, rotate_intersection,
-    set_intersection, translate_intersection, Intersection, IntersectionKind, IntersectionPort,
+    intersection_arms, intersection_footprint_half, intersection_port_direction, intersections,
+    place_intersection, port_faces_road, port_in_use, remove_placed_intersection, right_angle,
+    rotate_intersection, set_intersection, translate_intersection, Intersection, IntersectionKind,
+    IntersectionPort,
 };
 
 #[path = "map/projection.rs"]

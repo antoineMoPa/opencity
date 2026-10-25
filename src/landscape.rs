@@ -6,7 +6,7 @@
 
 use std::fmt;
 
-use crate::elevation::{block_height, elevation_in_calls, elevation_of};
+use crate::elevation::{elevation_in_calls, elevation_of};
 use crate::{Argument, BlockDefinition, Call, Program, Statement};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -318,31 +318,6 @@ fn feature(
     })
 }
 
-fn block_origin(call: &Call, origin: [f32; 2]) -> Result<([f32; 2], f32), LandscapeError> {
-    if !(2..=3).contains(&call.args.len()) {
-        return Err(error(
-            call,
-            "block placement needs x, y, and optional elevation",
-        ));
-    }
-    let x = number(&call.args[0]).ok_or_else(|| error(call, "block x must be a finite number"))?;
-    let y = number(&call.args[1]).ok_or_else(|| error(call, "block y must be a finite number"))?;
-    let z = if call.args.len() == 3 {
-        block_height(&call.args)
-            .ok_or_else(|| error(call, "block elevation must be a finite number"))?
-    } else {
-        0.0
-    };
-    let translated = [origin[0] + x, origin[1] + y];
-    if !translated[0].is_finite() || !translated[1].is_finite() {
-        return Err(error(
-            call,
-            "translated block coordinates must be finite numbers",
-        ));
-    }
-    Ok((translated, z))
-}
-
 fn visit_call(
     call: &Call,
     program: &Program,
@@ -374,13 +349,21 @@ fn visit_call(
         result.errors.push(error(call, "recursive block placement"));
         return;
     }
-    let (origin, local_elevation) = match block_origin(call, origin) {
-        Ok(placement) => placement,
-        Err(error) => {
-            result.errors.push(error);
+    let bound = match block.instantiate(&call.args) {
+        Ok(bound) => bound,
+        Err(message) => {
+            result.errors.push(error(call, &message));
             return;
         }
     };
+    let origin = [origin[0] + bound.origin[0], origin[1] + bound.origin[1]];
+    if !origin.iter().all(|value| value.is_finite()) {
+        result.errors.push(error(
+            call,
+            "translated block coordinates must be finite numbers",
+        ));
+        return;
+    }
     let named_elevation = call
         .assigns
         .first()
@@ -389,15 +372,15 @@ fn visit_call(
         })
         .unwrap_or(0.0);
     stack.push(block.name.clone());
-    let block_calls: Vec<_> = block.calls.iter().collect();
-    for inner in &block.calls {
+    let block_calls: Vec<_> = bound.calls.iter().collect();
+    for inner in &bound.calls {
         visit_call(
             inner,
             program,
             blocks,
             &block_calls,
             origin,
-            elevation + local_elevation + named_elevation,
+            elevation + bound.elevation + named_elevation,
             stack,
             result,
         );

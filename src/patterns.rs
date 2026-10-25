@@ -268,7 +268,7 @@ fn placed_statements(
         .flat_map(|statement| match statement {
             Statement::Road(road) => vec![road.name.as_str()],
             Statement::Call(call) => call.assigns.iter().map(String::as_str).collect(),
-            Statement::Block(_) => Vec::new(),
+            Statement::Block(_) | Statement::Network(_) => Vec::new(),
         })
         .collect();
     let roads: HashSet<_> = placement
@@ -295,6 +295,11 @@ fn placed_statements(
                 result.push(Statement::Road(road));
             }
             Statement::Block(_) => return Err(failure("road patterns cannot contain blocks")),
+            Statement::Network(_) => {
+                return Err(failure(
+                    "built-in road patterns cannot contain explicit network definitions",
+                ))
+            }
             Statement::Call(call) => {
                 if call.name == "map_point"
                     && call

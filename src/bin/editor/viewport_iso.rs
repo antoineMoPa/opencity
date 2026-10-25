@@ -17,6 +17,8 @@ impl RoadEditor {
                     let count = projection.segments.len() as f32;
                     self.orbit_target = WorldPoint { x: sum_x / count, y: sum_y / count };
                     self.map_zoom = 55.0;
+                } else {
+                    self.fit_network_scene(rect);
                 }
             }
             if response.hovered() && !ui.ctx().egui_wants_keyboard_input() {
@@ -37,6 +39,7 @@ impl RoadEditor {
                 let scroll = ui.input(|input| input.smooth_scroll_delta.y);
                 if scroll != 0.0 {
                     let pointer = ui.ctx().pointer_hover_pos().unwrap_or(rect.center());
+                    let minimum_zoom=self.map_minimum_zoom();
                     iso_zoom_at_pointer(
                         rect,
                         &mut self.map_pan,
@@ -45,13 +48,15 @@ impl RoadEditor {
                         self.orbit_angle, self.orbit_elevation,
                         pointer,
                         scroll,
+                        minimum_zoom,
                     );
                 }
             }
             let intersection_block = self.intersection_placement_input(ui, &response, rect);
             let annotation_block = self.annotation_input(ui, &response, rect);
             let box_block = self.box_select_input(ui, &response, rect, &projection, true);
-            let point_block = self.point_options_ui(ui, &response, rect, &projection, true);
+            let network_block = self.network_map_ui(ui, &response, rect, &projection, true);
+            let point_block = network_block || self.point_options_ui(ui, &response, rect, &projection, true);
             let spatial_block = intersection_block || point_block || box_block || annotation_block || self.minimal.pointer_over_toolbar(ui.ctx()) || self.spatial_edit_ui(ui, rect, &projection, true);
             if response.dragged_by(egui::PointerButton::Middle) && !ui.ctx().egui_wants_keyboard_input() { self.map_pan += response.drag_delta(); }
             if !spatial_block && response.drag_started_by(egui::PointerButton::Primary) {
@@ -467,6 +472,7 @@ impl RoadEditor {
                 })));
             self.paint_selection_overlay(&painter, rect, &projection, palette, CameraView::Isometric);
             self.paint_annotations(ui, rect);
+            self.paint_network_overlays(ui, rect, true);
             self.paint_intersection_preview(ui, rect);
             if self.point_options.is_none() && matches!(self.map_tool, MapTool::Draw | MapTool::Select) {
                 if let Some(pointer) = ui.ctx().pointer_hover_pos().filter(|point| rect.contains(*point)) {

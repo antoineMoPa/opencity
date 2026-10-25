@@ -2,6 +2,43 @@
 use super::*;
 
 #[test]
+fn car_lane_only_road_has_no_extra_edge_bands() {
+    let program = parse("road street: carlane carlane; end street(0,0,1,0);").unwrap();
+    let projection = map::project(&program);
+    let geometry = opencity::road_geometry::RoadGeometry::compile(&program, &projection);
+    let profiles = paint_profiles(&program, &projection);
+    let road = road_for_segment(&program, &projection.segments[0]).unwrap();
+    for theme in [egui::Theme::Light, egui::Theme::Dark] {
+        let palette = editor_palette(theme);
+        for selected in [false, true] {
+            let mut scene = Scene::default();
+            add_resolved_road_surface(
+                &mut scene,
+                &geometry,
+                0,
+                road,
+                &profiles[0],
+                palette,
+                selected,
+            );
+            assert!(!scene.vertices.is_empty());
+            assert!(scene.vertices.iter().all(|v| {
+                v.color == kind_color(RoadElementKind::CarLane, theme)
+                    || v.color == palette.map_centerline
+                    || (selected && v.color == palette.map_selected)
+            }));
+            assert_eq!(
+                scene
+                    .vertices
+                    .iter()
+                    .any(|v| v.color == palette.map_selected),
+                selected,
+            );
+        }
+    }
+}
+
+#[test]
 fn library_junction_rendered_edges_meet_road_pavement_in_every_orientation() {
     let palette = editor_palette(egui::Theme::Dark);
     for asset in ["three_way", "four_way"] {

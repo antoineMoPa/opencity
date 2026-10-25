@@ -1,9 +1,13 @@
 //! Shared world-space cross-section alignment and taper rules.
 use crate::{map, Program, RoadDefinition, RoadElementKind, Statement};
 use std::collections::HashMap;
+#[path = "road_profiles/intersections.rs"]
+mod intersections;
 
 #[derive(Default)]
 pub struct RoadProfile {
+    pub start_clip: Option<f32>,
+    pub end_clip: Option<f32>,
     pub start_alignment: Option<usize>,
     pub merge_alignment: Option<usize>,
     pub start_taper: Vec<usize>,
@@ -250,6 +254,7 @@ pub fn road_profiles(program: &Program, projection: &map::Projection) -> Vec<Roa
             profiles[outgoing].start_taper = extra;
         }
     }
+    intersections::apply(program, projection, &mut profiles);
     profiles
 }
 

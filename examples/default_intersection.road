@@ -1,0 +1,15 @@
+road street:
+    sidewalk carlane carlane sidewalk;
+end
+
+center = map_point(0, 0);
+north = map_point(0, 1);
+east = map_point(1, 0);
+south = map_point(0, -1);
+west = map_point(-1, 0);
+
+north_approach = street(north, 0, 0.7, 0, 0.3, center);
+east_approach = street(center, 0.3, 0, 0.7, 0, east);
+south_approach = street(center, 0, -0.3, 0, -0.7, south);
+west_approach = street(west, -0.7, 0, -0.3, 0, center);
+intersection4(center, street);

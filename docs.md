@@ -92,27 +92,55 @@ The crate is organized under `src/` by responsibility: `lexer.rs`, `parser.rs`, 
 
 ## Definition language
 
+Separate road elements with spaces. Tabs and line breaks also work. Existing hyphen-separated files remain readable; saving emits spaces.
+
 ```text
 road normal_road:
-    buildingedge($1)-sidewalk-parkinglane-bikelane-buslane-carlane-middle-carlane-buslane-buildingedge($2);
-end;
+    buildingedge($1) sidewalk parkinglane bikelane buslane carlane middle carlane buslane buildingedge($2);
+end
 
 block normal_block:
     a, b = normal_road(0.0, 0.0, 1.0, 0.0);
     buildings(a, b);
-end;
+end
 
 normal_block(0.0, 1.0);
 ```
 
-Road elements are `busstop`, `sidewalk`, `parkinglane`, `bikelane`, `buslane`, `middle`, `carlane`, `buildingedge`, `verge`, `barrier`, `traintrack`, `tramtrack`, `subwaytrack`, `runway`, `taxiway`, and `apron`. A road element may capture a numeric parameter such as `$1`. Calls accept numeric literals, including negative coordinates, or identifiers and may assign results to names. A semicolon after `end` is optional when reading and always emitted when writing.
+Road elements are `busstop`, `sidewalk`, `parkinglane`, `bikelane`, `buslane`, `middle`, `carlane`, `buildingedge`, `verge`, `barrier`, `traintrack`, `tramtrack`, `subwaytrack`, `runway`, `taxiway`, and `apron`. A road element may capture a numeric parameter such as `$1`. Calls accept numeric literals, including negative coordinates, or identifiers and may assign results to names. Roads and blocks close with `end`, without a semicolon. Existing `end;` syntax remains readable.
 
 Road definitions can declare `direction forward;`, `direction reverse;`, or `direction both;` after their cross section and before `end`. The default is `both`, so existing files remain bidirectional. Forward follows each placed road's first point to its last; reverse travels the other way. `RoadDefinition::lane_direction` gives the allowed travel for a cross section lane. For a bidirectional road with a `middle` divider, lanes before the divider run in reverse and lanes after it run forward, following right-hand traffic. Projected segments expose `direction` and `permits_travel` for routing. The target map's ramps and ramp mouths are explicitly forward, and their paths run from entry to merge.
 
 Run the Rust checks with `cargo test`.
+
+### Reusable blocks with typed parameters
+
+Blocks can destructure an object using TypeScript-style `{ variables }: { types }` syntax:
+
+```text
+block span({ length, height }: { length: number, height: number }):
+    lane = normal_road(0, 0, length, 0);
+    grade(lane, 0, height);
+end
+
+short = span(10, 20, { length: 5, height: 0.5 });
+long = span(20, 20, 1, { height: 1, length: 8 });
+```
+
+Placement arguments are `x, y, { values }`, or `x, y, elevation, { values }`. Coordinates inside the block are local to each placement, and heights add to the placement's elevation. Object property order does not matter. Every declared parameter is required; unknown properties and values of the wrong type invalidate the placement. Parameter names cannot be reused for call results inside the block.
+
+Supported types are `number` (a finite number), `string` (a quoted literal), and `identifier` (a symbolic name, such as a road profile). An `identifier` parameter may also be called: `profile(0, 0, length, 0);`. Parameters work in road calls, landscape calls, elevation and grade calls, and nested block placements. Forward a parameter with `{ length: length }` or the shorthand `{ length }`. Each instance binds its own values without changing the definition or other instances. Blocks without a parameter declaration keep their existing `name(x, y)` or `name(x, y, elevation)` syntax.
+
+See [parameterized_blocks.road](examples/parameterized_blocks.road) for a complete example.
 
 The palette starts with Add road, Add highway, Add interstate, Add terrain and Add concrete. These road commands map explicitly to neighborhood_street, divided_highway and interstate_three_lane. Existing definitions with those names take precedence; missing bundled profiles are added only when placement commits. Cancel leaves no extra definitions or geometry. Custom map profiles remain searchable. Clear appears after the construction commands, removes all placements while retaining road and block definitions, and defaults to Cancel. One undo restores the map.
 
 Hover the top 100 logical pixels of the viewport to reveal Moon's Top/Isometric/Vehicular ToggleSwitch at the top right, inset 12px. It hides when the pointer leaves that strip, keeping a switch gesture visible through release. Only the switch consumes input; the rest of the strip remains usable canvas. Clicking it preserves the palette query; Tab still cycles views while the palette is open. View changes preserve geographic focus and scale through a 320ms projection transition; Vehicular entry uses nearby traffic lanes, and returning to an overview follows the latest vehicle location. Vehicular Left/Right steering follows the visible turn direction at 1.5 radians/second. W/S and A/D translate at 0.3 world units/second and scrolling at 0.0003 world units/pixel, both 10 times slower than before. Choosing a placement tool or Box select from Vehicular returns to the last editing view. Box select uses a one-shot primary-button marquee in Top/Isometric; release selects intersecting visible road paths and returns to Select, Escape cancels. Selection adds no undo entry and does not dirty the file. Existing red annotations remain world-anchored in all three views; annotation placement uses Top/Isometric.
 
 Road placement in Top/Isometric uses visible terrain surfaces and checks the complete compiled road surface for clearance. Free roads may be lifted uniformly while preserving their slope, so they can float over lower terrain patches. This provides conservative clearance rather than terrain-following road engineering. A route tied to existing anchors rejects without changing the map if terrain blocks it; choose another endpoint or press Escape. First-click geometry and missing profile definitions remain drafts until a valid placement commits; profile, road and grade changes share one undo step.
+
+### Explicit intersections, interchanges, and inspection
+
+The [intersection language guide](docs/intersections.md) covers reusable `intersection`, `interchange`, and `road_segment` definitions with ports, line/arc/cubic paths, named anchors, explicit permitted movements, surfaces, and markings. See [intersections.road](examples/intersections.road) for the proposal's three complete examples. Click an intersection in the map and choose **Open intersection viewer** to inspect it independently without editing the document.
+
+Use `opencity intersection-svg INPUT.road --name NAME --output OUTPUT.svg` or `opencity intersection-png INPUT.road --name NAME --output OUTPUT.png` for headless exports. Both commands also work through `editor`, and are listed in each executable's `--help`. The guide documents all export options and the lightweight CLI build.

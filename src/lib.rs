@@ -3,7 +3,7 @@
 //! ```
 //! use opencity::parse;
 //!
-//! let source = "road lane: sidewalk-carlane; end; lane(0, 0, 1, 0);";
+//! let source = "road lane: sidewalk carlane; end lane(0, 0, 1, 0);";
 //! let ast = parse(source)?;
 //! let road_text = ast.to_road_source();
 //! assert_eq!(parse(&road_text)?, ast);
@@ -14,17 +14,20 @@
 //!
 //! ```
 //! use opencity::{check_design_rules, parse};
-//! let program = parse("road street: carlane; end; street(0, 0, 1, 0);")?;
+//! let program = parse("road street: carlane; end street(0, 0, 1, 0);")?;
 //! assert!(check_design_rules(&program).is_empty());
 //! # Ok::<(), opencity::Error>(())
 //! ```
 
 mod ast;
+mod blocks;
+pub mod cli;
 mod design_rules;
 mod elevation;
 mod error;
 mod landscape;
 mod lexer;
+pub mod network;
 mod parser;
 mod patterns;
 pub mod road_geometry;
@@ -40,9 +43,10 @@ extern crate self as opencity;
 mod web_editor;
 
 pub use ast::{
-    Argument, BlockDefinition, Call, Program, RoadDefinition, RoadDirection, RoadElement,
-    RoadElementKind, RoadRole, Statement,
+    Argument, BlockDefinition, BlockParameter, BlockParameterType, Call, Program, RoadDefinition,
+    RoadDirection, RoadElement, RoadElementKind, RoadRole, Statement,
 };
+pub use blocks::BlockInstance;
 pub use design_rules::{
     check_design_rules, check_design_rules_with_projection, check_vehicle_lane_continuity,
     check_vehicle_lane_intrusions, DesignIssue, DesignRule,

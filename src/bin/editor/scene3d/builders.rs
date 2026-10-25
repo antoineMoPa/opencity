@@ -31,6 +31,7 @@ pub fn build_scene_with_model_base(
     #[cfg(test)]
     let started = std::time::Instant::now();
     let mut scene = Scene::default();
+    networks::append_networks(&mut scene, program, palette.theme);
     let ctx = egui::Context::default();
     let profiles = paint_profiles(program, projection);
     let geometry = opencity::road_geometry::RoadGeometry::compile(program, projection);
@@ -120,6 +121,7 @@ impl WebSceneBuild {
         let intersections = map::intersections(&program, &projection);
         let mut landscape = project_landscape_features(&program).features;
         let mut scene = Scene::default();
+        networks::append_networks(&mut scene, &program, palette.theme);
         if !landscape
             .iter()
             .any(|feature| matches!(feature.kind, LandscapeKind::Land | LandscapeKind::Beach))

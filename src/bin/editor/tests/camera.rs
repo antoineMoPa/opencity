@@ -131,6 +131,7 @@ fn isometric_zoom_keeps_cursor_ground_point_fixed() {
                 ISO_ELEVATION,
                 pointer,
                 scroll,
+                MIN_MAP_ZOOM,
             );
             assert!(
                 pointer.distance(iso_screen(
@@ -145,7 +146,7 @@ fn isometric_zoom_keeps_cursor_ground_point_fixed() {
                 )) < 0.01
             );
         }
-        assert_eq!(zoom, 18.0);
+        assert_eq!(zoom, MIN_MAP_ZOOM);
         iso_zoom_at_pointer(
             rect,
             &mut pan,
@@ -155,6 +156,7 @@ fn isometric_zoom_keeps_cursor_ground_point_fixed() {
             ISO_ELEVATION,
             pointer,
             100000.0,
+            MIN_MAP_ZOOM,
         );
         assert_eq!(zoom, MAX_MAP_ZOOM);
         let close_anchor_error = pointer.distance(iso_screen(

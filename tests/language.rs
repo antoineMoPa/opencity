@@ -6,6 +6,31 @@ use opencity::{
 const EXAMPLE: &str = include_str!("../examples/city.road");
 
 #[test]
+fn road_elements_use_spaces_when_read_and_written() {
+    let elements = "sidewalk parkinglane carlane middle carlane parkinglane sidewalk";
+    let source = format!("road street:\n    {elements};\nend\n");
+    let program = parse(&source).unwrap();
+    let Statement::Road(road) = &program.statements[0] else {
+        panic!("expected road")
+    };
+    assert_eq!(road.elements.len(), 7);
+    assert_eq!(program.to_road_source(), source);
+    let legacy = parse(
+        "road street: sidewalk-parkinglane-carlane-middle-carlane-parkinglane-sidewalk; end;",
+    )
+    .unwrap();
+    assert_eq!(legacy, program);
+    assert_eq!(legacy.to_road_source(), source);
+}
+
+#[test]
+fn road_elements_accept_tabs_and_newlines_with_parameter_captures() {
+    let program = parse("road street: buildingedge($1)\t sidewalk\n carlane\r\n buildingedge($2); direction forward; end;").unwrap();
+    assert_eq!(program.to_road_source(), "road street:\n    buildingedge($1) sidewalk carlane buildingedge($2);\n    direction forward;\nend\n");
+    assert_eq!(parse(&program.to_road_source()).unwrap(), program);
+}
+
+#[test]
 fn parses_readme_language_and_round_trips() {
     let program = parse(EXAMPLE).unwrap();
     assert_eq!(program.statements.len(), 3);
@@ -60,26 +85,28 @@ fn keywords_match_complete_identifiers() {
 
 #[test]
 fn rejects_bad_syntax_with_location() {
-    let error = parse("road lane:\n  sidewalk-nope; end;").unwrap_err();
+    let error = parse("road lane:\n  sidewalk nope; end;").unwrap_err();
     assert_eq!((error.span.line, error.span.column), (2, 12));
     assert!(error.message.contains("unknown road element"));
     assert!(parse("road lane: sidewalk; ").is_err());
     assert!(parse("a, = lane(0);").is_err());
     assert!(parse("lane(0,);").is_err());
     assert!(parse("lane($x);").is_err());
+    assert!(parse("road lane: ; end;").is_err());
+    assert!(parse("road lane: sidewalk carlane end;").is_err());
 }
 
 #[test]
 fn parses_negative_map_coordinates_without_confusing_road_separators() {
-    let source = "road lane: verge-carlane-verge; end; lane(-1.25, 2, 3, -4.5);";
+    let source = "road lane: verge carlane verge; end; lane(-1.25, 2, 3, -4.5);";
     let program = parse(source).unwrap();
     assert_eq!(parse(&program.to_road_source()).unwrap(), program);
 }
 
 #[test]
 fn road_direction_round_trips_and_exposes_lane_travel() {
-    let source = "road boulevard: sidewalk-carlane-middle-carlane-sidewalk; direction both; end; \
-                  road ramp: verge-carlane-verge; direction forward;
+    let source = "road boulevard: sidewalk carlane middle carlane sidewalk; direction both; end; \
+                  road ramp: verge carlane verge; direction forward;
     role ramp; end; \
                   road return: carlane; direction reverse; end;";
     let program = parse(source).unwrap();
@@ -514,7 +541,7 @@ fn projects_land_and_water_with_block_translation_and_elevation() {
           pool = lake(0, 0, 2, 0, 1, 2);\n\
           elevation(pool, -1);\n\
           river(1, 2, 4, 3);\n\
-        end;\n\
+        end\n\
         basin = watershed(10, -5, -2);\n\
         elevation(basin, 3);";
     let program = parse(source).unwrap();
@@ -547,7 +574,7 @@ fn invalid_landscape_calls_do_not_hide_valid_shapes() {
         land(0, 0, 1, 0);\n\
         river(0, 0, 1, 1);\n\
         lake(0, 0, x, 1, 2, 2);\n\
-        block recursive: recursive(0, 0); end;\n\
+        block recursive: recursive(0, 0); end\n\
         recursive(1, 1);",
     )
     .unwrap();

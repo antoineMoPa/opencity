@@ -70,9 +70,10 @@ pub(super) fn iso_zoom_at_pointer(
     elevation: f32,
     pointer: egui::Pos2,
     scroll: f32,
+    minimum_zoom: f32,
 ) {
     let anchored = iso_ground_point(rect, *pan, *zoom, target, angle, elevation, pointer);
-    *zoom = (*zoom * (1.0 + scroll * 0.002)).clamp(MIN_MAP_ZOOM, MAX_MAP_ZOOM);
+    *zoom = (*zoom * (1.0 + scroll * 0.002)).clamp(minimum_zoom, MAX_MAP_ZOOM);
     *pan += pointer - iso_screen(rect, *pan, *zoom, target, angle, elevation, anchored, 0.0);
 }
 

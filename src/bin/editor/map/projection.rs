@@ -5,7 +5,7 @@ use super::*;
 pub(super) fn number(argument: &Argument) -> Option<f32> {
     match argument {
         Argument::Number(text) => text.parse::<f32>().ok().filter(|value| value.is_finite()),
-        Argument::Identifier(_) | Argument::String(_) => None,
+        Argument::Identifier(_) | Argument::String(_) | Argument::Object(_) => None,
     }
 }
 
@@ -14,6 +14,45 @@ pub(super) fn point_args(call: &Call, index: usize) -> Option<WorldPoint> {
         x: number(call.args.get(index)?)?,
         y: number(call.args.get(index + 1)?)?,
     })
+}
+
+fn component_ports(program: &Program) -> Vec<(MapPoint, f32)> {
+    opencity::network::project(program)
+        .instances
+        .iter()
+        .flat_map(|instance| {
+            instance
+                .geometry
+                .ports
+                .iter()
+                .map(|port| {
+                    let point = instance.world_point(port.position);
+                    let heading = port.heading.vector();
+                    (
+                        MapPoint {
+                            name: format!(
+                                "{}.{}.{}",
+                                instance.name,
+                                port.name,
+                                port.role.keyword()
+                            ),
+                            position: WorldPoint {
+                                x: point.x,
+                                y: point.y,
+                            },
+                            base: None,
+                            base_direction: None,
+                            direction: Some(WorldPoint {
+                                x: heading[0],
+                                y: -heading[1],
+                            }),
+                        },
+                        point.z,
+                    )
+                })
+                .collect::<Vec<_>>()
+        })
+        .collect()
 }
 
 pub(super) fn line_controls(start: WorldPoint, end: WorldPoint) -> [WorldPoint; 2] {
@@ -82,16 +121,6 @@ fn segment_points(
     }
 }
 
-fn block_origin(call: &Call) -> Option<WorldPoint> {
-    if !matches!(call.args.len(), 2 | 3) {
-        return None;
-    }
-    Some(WorldPoint {
-        x: number(&call.args[0])?,
-        y: number(&call.args[1])?,
-    })
-}
-
 pub fn project(program: &Program) -> Projection {
     let mut points: Vec<MapPoint> = program
         .statements
@@ -112,6 +141,7 @@ pub fn project(program: &Program) -> Projection {
             })
         })
         .collect();
+    points.extend(component_ports(program).into_iter().map(|(point, _)| point));
     let lane_calls: Vec<_> = program
         .statements
         .iter()
@@ -201,6 +231,10 @@ pub fn project(program: &Program) -> Projection {
 }
 
 fn project_with_points(program: &Program, points: &[MapPoint]) -> Projection {
+    let port_heights: HashMap<_, _> = component_ports(program)
+        .into_iter()
+        .map(|(point, z)| (point.name, z))
+        .collect();
     let mut point_by_name = HashMap::with_capacity(points.len());
     for point in points {
         point_by_name.entry(point.name.as_str()).or_insert(point);
@@ -262,10 +296,24 @@ fn project_with_points(program: &Program, points: &[MapPoint]) -> Projection {
             if let Some((start, end, controls, start_ref, end_ref)) =
                 segment_points(call, &point_by_name)
             {
-                let (start_z, end_z) = call.assigns.first().map_or((0.0, 0.0), |name| {
+                let port_z = (
+                    start_ref
+                        .as_ref()
+                        .and_then(|name| port_heights.get(name))
+                        .copied()
+                        .unwrap_or(0.),
+                    end_ref
+                        .as_ref()
+                        .and_then(|name| port_heights.get(name))
+                        .copied()
+                        .unwrap_or(0.),
+                );
+                let (start_z, end_z) = call.assigns.first().map_or(port_z, |name| {
                     grades.get(name.as_str()).copied().unwrap_or_else(|| {
-                        let z = elevations.get(name.as_str()).copied().unwrap_or(0.0);
-                        (z, z)
+                        elevations
+                            .get(name.as_str())
+                            .map(|z| (*z, *z))
+                            .unwrap_or(port_z)
                     })
                 });
                 segments.push(Segment {
@@ -301,6 +349,8 @@ fn project_with_points(program: &Program, points: &[MapPoint]) -> Projection {
         let mut stack = Vec::new();
         let mut next_nested_call = 0;
         project_block_road_calls(
+            program,
+            "",
             call,
             index,
             &blocks,
@@ -323,6 +373,8 @@ fn project_with_points(program: &Program, points: &[MapPoint]) -> Projection {
 
 #[allow(clippy::too_many_arguments)]
 fn project_block_road_calls(
+    program: &Program,
+    namespace: &str,
     placement: &Call,
     instance: usize,
     blocks: &[(usize, &opencity::BlockDefinition)],
@@ -341,26 +393,27 @@ fn project_block_road_calls(
     else {
         return;
     };
+    let local_name = placement.assigns.first().unwrap_or(&placement.name);
+    let qualified = if namespace.is_empty() {
+        local_name.clone()
+    } else {
+        format!("{namespace}.{local_name}")
+    };
     if stack.contains(&block_index) {
         *unresolved += 1;
         return;
     }
-    let Some(local_origin) = block_origin(placement) else {
+    let Ok(bound) = block.instantiate(&placement.args) else {
         *unresolved += 1;
         return;
     };
-    let local_elevation = if placement.args.len() == 3 {
-        let Some(height) = opencity::block_height(&placement.args) else {
-            *unresolved += 1;
-            return;
-        };
-        height
-    } else {
-        0.0
+    let local_origin = WorldPoint {
+        x: bound.origin[0],
+        y: bound.origin[1],
     };
     let origin = parent_origin.translated(local_origin);
     let elevation = parent_elevation
-        + local_elevation
+        + bound.elevation
         + placement
             .assigns
             .first()
@@ -371,20 +424,53 @@ fn project_block_road_calls(
         return;
     }
     stack.push(block_index);
-    let local_calls: Vec<_> = block.calls.iter().collect();
-    for (call_index, inner) in block.calls.iter().enumerate() {
+    let local_calls: Vec<_> = bound.calls.iter().collect();
+    let local_program = Program {
+        statements: program
+            .statements
+            .iter()
+            .filter(|s| {
+                !matches!(s, Statement::Call(_))
+                    && !matches!(s,Statement::Network(d) if d.origin.is_some())
+            })
+            .cloned()
+            .chain(bound.calls.iter().cloned().map(Statement::Call))
+            .collect(),
+    };
+    let local_ports = component_ports(&local_program);
+    let local_points: HashMap<_, _> = local_ports
+        .iter()
+        .map(|(point, _)| (point.name.as_str(), point))
+        .collect();
+    let local_heights: HashMap<_, _> = local_ports
+        .iter()
+        .map(|(point, z)| (point.name.as_str(), *z))
+        .collect();
+    for (call_index, inner) in bound.calls.iter().enumerate() {
         if let Some(&direction) = roads.get(inner.name.as_str()) {
-            // Block roads use local numeric coordinates; global map points are not local.
+            // Numeric coordinates and component ports are scoped to this block.
             if let Some((start, end, controls, start_ref, end_ref)) =
-                segment_points(inner, &HashMap::new())
+                segment_points(inner, &local_points)
             {
-                let (local_start_z, local_end_z) =
-                    inner.assigns.first().map_or((0.0, 0.0), |name| {
-                        opencity::grade_in_calls(&local_calls, name).unwrap_or_else(|| {
-                            let z = opencity::elevation_in_calls(&local_calls, name).unwrap_or(0.0);
-                            (z, z)
-                        })
-                    });
+                let port_z = (
+                    start_ref
+                        .as_deref()
+                        .and_then(|name| local_heights.get(name))
+                        .copied()
+                        .unwrap_or(0.),
+                    end_ref
+                        .as_deref()
+                        .and_then(|name| local_heights.get(name))
+                        .copied()
+                        .unwrap_or(0.),
+                );
+                let (local_start_z, local_end_z) = inner.assigns.first().map_or(port_z, |name| {
+                    opencity::grade_in_calls(&local_calls, name).unwrap_or_else(|| {
+                        opencity::elevation_in_calls(&local_calls, name)
+                            .map(|z| (z, z))
+                            .unwrap_or(port_z)
+                    })
+                });
                 let start_z = elevation + local_start_z;
                 let end_z = elevation + local_end_z;
                 // Direct calls retain their lexical index. Nested calls use a unique
@@ -411,8 +497,8 @@ fn project_block_road_calls(
                         controls[0].translated(origin),
                         controls[1].translated(origin),
                     ],
-                    start_ref,
-                    end_ref,
+                    start_ref: start_ref.map(|name| format!("{qualified}.{name}")),
+                    end_ref: end_ref.map(|name| format!("{qualified}.{name}")),
                     elevation: (start_z + end_z) / 2.0,
                     start_z,
                     end_z,
@@ -422,6 +508,8 @@ fn project_block_road_calls(
             }
         } else if blocks.iter().any(|(_, block)| block.name == inner.name) {
             project_block_road_calls(
+                program,
+                &qualified,
                 inner,
                 instance,
                 blocks,

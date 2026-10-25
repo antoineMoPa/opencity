@@ -1,98 +1,98 @@
 road neighborhood_street:
-    sidewalk-parkinglane-carlane-middle-carlane-parkinglane-sidewalk;
-end;
+    sidewalk parkinglane carlane middle carlane parkinglane sidewalk;
+end
 
 road main_street:
-    buildingedge-sidewalk-parkinglane-carlane-middle-carlane-parkinglane-sidewalk-buildingedge;
-end;
+    buildingedge sidewalk parkinglane carlane middle carlane parkinglane sidewalk buildingedge;
+end
 
 road downtown_avenue:
-    buildingedge-sidewalk-bikelane-parkinglane-carlane-buslane-middle-buslane-carlane-parkinglane-bikelane-sidewalk-buildingedge;
-end;
+    buildingedge sidewalk bikelane parkinglane carlane buslane middle buslane carlane parkinglane bikelane sidewalk buildingedge;
+end
 
 road protected_bikeway:
-    sidewalk-bikelane-parkinglane-carlane-middle-carlane-parkinglane-bikelane-sidewalk;
-end;
+    sidewalk bikelane parkinglane carlane middle carlane parkinglane bikelane sidewalk;
+end
 
 road transit_corridor:
-    sidewalk-busstop-buslane-carlane-middle-carlane-buslane-busstop-sidewalk;
-end;
+    sidewalk busstop buslane carlane middle carlane buslane busstop sidewalk;
+end
 
 road market_street:
-    buildingedge-sidewalk-bikelane-carlane-carlane-parkinglane-sidewalk-buildingedge;
-end;
+    buildingedge sidewalk bikelane carlane carlane parkinglane sidewalk buildingedge;
+end
 
 road pedestrian_mall:
-    buildingedge-sidewalk-middle-sidewalk-buildingedge;
-end;
+    buildingedge sidewalk middle sidewalk buildingedge;
+end
 
 road country_lane:
-    verge-carlane-middle-carlane-verge;
-end;
+    verge carlane middle carlane verge;
+end
 
 road transition_lane:
-    carlane-middle-carlane;
-end;
+    carlane middle carlane;
+end
 
 road farm_track:
-    verge-carlane-verge;
-end;
+    verge carlane verge;
+end
 
 road rural_road:
-    verge-carlane-middle-carlane-verge;
-end;
+    verge carlane middle carlane verge;
+end
 
 road rural_highway:
-    verge-carlane-carlane-carlane-carlane-verge;
-end;
+    verge carlane carlane carlane carlane verge;
+end
 
 road mountain_road:
-    carlane-middle-carlane;
-end;
+    carlane middle carlane;
+end
 
 road divided_highway:
-    verge-carlane-carlane-middle-carlane-carlane-verge;
-end;
+    verge carlane carlane middle carlane carlane verge;
+end
 
 road exit_ramp:
-    verge-carlane-verge;
+    verge carlane verge;
     role ramp;
-end;
+end
 
 road ramp_mouth:
-    carlane-verge;
+    carlane verge;
     role merge;
-end;
+end
 
 road interstate_three_lane:
-    verge-carlane-carlane-carlane-middle-carlane-carlane-carlane-verge;
-end;
+    verge carlane carlane carlane middle carlane carlane carlane verge;
+end
 
 road interstate_four_lane:
-    verge-carlane-carlane-carlane-carlane-middle-carlane-carlane-carlane-carlane-verge;
-end;
+    verge carlane carlane carlane carlane middle carlane carlane carlane carlane verge;
+end
 
 road regional_rail:
-    verge-traintrack-traintrack-verge;
-end;
+    verge traintrack traintrack verge;
+end
 
 road city_tram:
-    sidewalk-tramtrack-tramtrack-sidewalk;
-end;
+    sidewalk tramtrack tramtrack sidewalk;
+end
 
 road metro_tunnel:
-    subwaytrack-subwaytrack;
-end;
+    subwaytrack subwaytrack;
+end
 
 road waterside_cycleway:
-    verge-bikelane-bikelane-verge;
-end;
+    verge bikelane bikelane verge;
+end
 
 block cycle_rail_bridge:
     rail_deck = regional_rail(-0.35, 0, 0.35, 0);
     cycle_deck = waterside_cycleway(0, -0.60, 0, 0.60);
     elevation(cycle_deck, 0.18);
-end;
+end
 
 town_land = land(-9.2, -8.8, 10.7, -8.8, 10.7, 5.4, -9.2, 5.4);
 

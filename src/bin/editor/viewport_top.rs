@@ -24,9 +24,13 @@ impl RoadEditor {
             if self.fit_scene_once {
                 self.fit_scene_once = false;
                 let landscape = project_landscape_features(&self.program);
-                if !before.segments.is_empty() || !landscape.features.is_empty() {
+                let networks = self.network_world_bounds();
+                if !before.segments.is_empty() || !landscape.features.is_empty() || networks.is_some() {
                     let mut min = WorldPoint { x: f32::INFINITY, y: f32::INFINITY };
                     let mut max = WorldPoint { x: f32::NEG_INFINITY, y: f32::NEG_INFINITY };
+                    if let Some(bounds)=networks {
+                        min=WorldPoint{x:bounds[0],y:bounds[1]};max=WorldPoint{x:bounds[2],y:bounds[3]};
+                    }
                     for segment in &before.segments {
                         for point in [segment.start, segment.controls[0], segment.controls[1], segment.end] {
                             min.x = min.x.min(point.x);
@@ -45,7 +49,7 @@ impl RoadEditor {
                     let height = (max.y - min.y).max(0.1);
                     self.map_zoom = ((rect.width() - 76.0).max(80.0) / width)
                         .min((rect.height() - 76.0).max(80.0) / height)
-                        .clamp(18.0, 120.0);
+                        .clamp(self.map_minimum_zoom(), 120.0);
                     self.map_pan = egui::vec2(
                         -(min.x + max.x) * self.map_zoom / 2.0,
                         (min.y + max.y) * self.map_zoom / 2.0,
@@ -58,7 +62,7 @@ impl RoadEditor {
                     let pointer = ui.ctx().pointer_hover_pos().unwrap_or(rect.center());
                     let anchored = world_of(rect, self.map_pan, self.map_zoom, pointer);
                     self.map_zoom = (self.map_zoom * (1.0 + scroll * 0.002))
-                        .clamp(MIN_MAP_ZOOM, MAX_MAP_ZOOM);
+                        .clamp(self.map_minimum_zoom(), MAX_MAP_ZOOM);
                     self.map_pan = pointer
                         - rect.center()
                         - egui::vec2(anchored.x * self.map_zoom, -anchored.y * self.map_zoom);
@@ -67,7 +71,8 @@ impl RoadEditor {
             let intersection_block = self.intersection_placement_input(ui, &response, rect);
             let annotation_block = self.annotation_input(ui, &response, rect);
             let box_block = self.box_select_input(ui, &response, rect, &before, false);
-            let point_block = self.point_options_ui(ui, &response, rect, &before, false);
+            let network_block = self.network_map_ui(ui, &response, rect, &before, false);
+            let point_block = network_block || self.point_options_ui(ui, &response, rect, &before, false);
             let spatial_block = intersection_block || point_block || box_block || annotation_block || self.minimal.pointer_over_toolbar(ui.ctx()) || self.spatial_edit_ui(ui, rect, &before, false);
             let junctions = junction_candidates(&self.program, &before);
             let element_ends = element_end_candidates(&before, &self.program);
@@ -530,6 +535,7 @@ impl RoadEditor {
                 })));
             self.paint_selection_overlay(&painter, rect, &projection, palette, CameraView::Top);
             self.paint_annotations(ui, rect);
+            self.paint_network_overlays(ui, rect, false);
             self.paint_intersection_preview(ui, rect);
             let annotation_scale = (self.map_zoom / ANNOTATION_OVERVIEW_ZOOM
                 * ANNOTATION_OVERVIEW_SCALE).min(1.0);

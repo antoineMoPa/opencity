@@ -1,0 +1,37 @@
+//! Shared road colors for city geometry, component inspection and exports.
+use crate::RoadElementKind as K;
+pub fn road_color(kind: K, light: bool) -> [u8; 3] {
+    match (light, kind) {
+        (false, K::BuildingEdge) => [75, 84, 82],
+        (false, K::Sidewalk) => [207, 203, 186],
+        (false, K::BikeLane) => [58, 131, 105],
+        (false, K::ParkingLane) => [163, 168, 165],
+        (false, K::BusLane) => [164, 76, 71],
+        (false, K::CarLane | K::Middle) => [175, 180, 174],
+        (false, K::BusStop) => [162, 121, 53],
+        (false, K::Verge) => [115, 164, 83],
+        (false, K::Barrier) => [165, 170, 162],
+        (false, K::TrainTrack) => [102, 91, 77],
+        (false, K::TramTrack) => [93, 105, 112],
+        (false, K::SubwayTrack) => [65, 73, 102],
+        (false, K::Runway) => [65, 70, 76],
+        (false, K::Taxiway) => [75, 81, 87],
+        (false, K::Apron) => [101, 109, 113],
+        (true, K::BuildingEdge) => [190, 198, 205],
+        (true, K::Sidewalk) => [220, 197, 164],
+        (true, K::BikeLane) => [133, 198, 166],
+        (true, K::ParkingLane) => [169, 184, 205],
+        (true, K::BusLane) => [225, 154, 146],
+        (true, K::CarLane) => [151, 176, 205],
+        (true, K::BusStop) => [230, 188, 110],
+        (true, K::Middle) => [204, 191, 148],
+        (true, K::Verge) => [158, 200, 160],
+        (true, K::Barrier) => [107, 115, 112],
+        (true, K::TrainTrack) => [166, 151, 130],
+        (true, K::TramTrack) => [169, 178, 182],
+        (true, K::SubwayTrack) => [111, 123, 158],
+        (true, K::Runway) => [83, 89, 94],
+        (true, K::Taxiway) => [111, 117, 120],
+        (true, K::Apron) => [158, 163, 160],
+    }
+}

@@ -1,0 +1,77 @@
+road local: carlane middle carlane; end
+road collector: sidewalk carlane middle carlane sidewalk; end
+road arterial: sidewalk carlane carlane middle carlane carlane sidewalk; end
+road freeway: verge carlane carlane middle carlane carlane verge; end
+road urban: buildingedge sidewalk bikelane parkinglane carlane buslane middle buslane carlane parkinglane bikelane sidewalk buildingedge; end
+
+# Local four-way
+local_center=map_point(0,0);
+local_n=map_point(0,1);
+local_e=map_point(1,0);
+local_s=map_point(0,-1);
+local_w=map_point(-1,0);
+local_north=local(local_n,0,0.7,0,0.3,local_center);
+local_east=local(local_center,0.3,0,0.7,0,local_e);
+local_south=local(local_center,0,-0.3,0,-0.7,local_s);
+local_west=local(local_w,-0.7,0,-0.3,0,local_center);
+intersection4(local_center,local);
+
+# Collector four-way
+collector_center=map_point(2,0);
+collector_n=map_point(2,1);
+collector_e=map_point(3,0);
+collector_s=map_point(2,-1);
+collector_w=map_point(1,0);
+collector_north=collector(collector_n,2,0.7,2,0.3,collector_center);
+collector_east=collector(collector_center,2.3,0,2.7,0,collector_e);
+collector_south=collector(collector_center,2,-0.3,2,-0.7,collector_s);
+collector_west=collector(collector_w,1.3,0,1.7,0,collector_center);
+intersection4(collector_center,collector);
+
+# Arterial four-way
+arterial_center=map_point(4,0);
+arterial_n=map_point(4,1);
+arterial_e=map_point(5,0);
+arterial_s=map_point(4,-1);
+arterial_w=map_point(3,0);
+arterial_north=arterial(arterial_n,4,0.7,4,0.3,arterial_center);
+arterial_east=arterial(arterial_center,4.3,0,4.7,0,arterial_e);
+arterial_south=arterial(arterial_center,4,-0.3,4,-0.7,arterial_s);
+arterial_west=arterial(arterial_w,3.3,0,3.7,0,arterial_center);
+intersection4(arterial_center,arterial);
+
+# Freeway four-way
+freeway_center=map_point(6,0);
+freeway_n=map_point(6,1);
+freeway_e=map_point(7,0);
+freeway_s=map_point(6,-1);
+freeway_w=map_point(5,0);
+freeway_north=freeway(freeway_n,6,0.7,6,0.3,freeway_center);
+freeway_east=freeway(freeway_center,6.3,0,6.7,0,freeway_e);
+freeway_south=freeway(freeway_center,6,-0.3,6,-0.7,freeway_s);
+freeway_west=freeway(freeway_w,5.3,0,5.7,0,freeway_center);
+intersection4(freeway_center,freeway);
+
+# Urban four-way
+urban_center=map_point(8,0);
+urban_n=map_point(8,1);
+urban_e=map_point(9,0);
+urban_s=map_point(8,-1);
+urban_w=map_point(7,0);
+urban_north=urban(urban_n,8,0.7,8,0.3,urban_center);
+urban_east=urban(urban_center,8.3,0,8.7,0,urban_e);
+urban_south=urban(urban_center,8,-0.3,8,-0.7,urban_s);
+urban_west=urban(urban_w,7.3,0,7.7,0,urban_center);
+intersection4(urban_center,urban);
+
+# Mixed four-way
+mixed_center=map_point(10,0);
+mixed_n=map_point(10,1);
+mixed_e=map_point(11,0);
+mixed_s=map_point(10,-1);
+mixed_w=map_point(9,0);
+mixed_north=local(mixed_n,10,0.7,10,0.3,mixed_center);
+mixed_east=arterial(mixed_center,10.3,0,10.7,0,mixed_e);
+mixed_south=local(mixed_center,10,-0.3,10,-0.7,mixed_s);
+mixed_west=arterial(mixed_w,9.3,0,9.7,0,mixed_center);
+intersection4(mixed_center,arterial,north,local,south,local);

@@ -194,6 +194,10 @@ pub(super) fn add_resolved_road_surface(
             palette.map_centerline,
             -0.003,
         );
+        // Road edges come from the authored bands; only selection adds a border.
+        if !selected {
+            continue;
+        }
         for side in [0, 1] {
             let edge = if side == 0 { left } else { right };
             let midpoint = between(edge[0], edge[1], 0.5).point;
@@ -221,11 +225,7 @@ pub(super) fn add_resolved_road_surface(
                     between(left[1], right[1], inset),
                     between(left[0], right[0], inset),
                 ],
-                if selected {
-                    palette.map_selected
-                } else {
-                    palette.map_outline
-                },
+                palette.map_selected,
                 -0.003,
             );
         }

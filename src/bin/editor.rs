@@ -27,6 +27,8 @@ mod mcp;
 mod minimal;
 #[path = "editor/model.rs"]
 mod model;
+#[path = "editor/network_ui.rs"]
+mod network_ui;
 #[path = "editor/point_options.rs"]
 mod point_options;
 #[path = "editor/scene3d.rs"]
@@ -62,6 +64,7 @@ const KINDS: [RoadElementKind; 16] = [
 const ANNOTATION_OVERVIEW_ZOOM: f32 = 75.0;
 const ANNOTATION_OVERVIEW_SCALE: f32 = 0.1;
 const MIN_MAP_ZOOM: f32 = 18.0;
+const MIN_COMPONENT_MAP_ZOOM: f32 = 0.1;
 const MAX_MAP_ZOOM: f32 = 2400.0;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -356,6 +359,13 @@ mod tests;
 
 #[cfg(not(target_arch = "wasm32"))]
 fn main() -> eframe::Result {
+    if let Some(result) = opencity::cli::run(std::env::args_os().skip(1).collect()) {
+        if let Err(error) = result {
+            eprintln!("{error}");
+            std::process::exit(1);
+        }
+        return Ok(());
+    }
     let mut args = std::env::args_os().skip(1);
     let first = args.next();
     if matches!(first.as_deref(), Some(value) if value == "mcp" || value == "--mcp") {

@@ -133,46 +133,9 @@ pub(super) fn kind_short(kind: RoadElementKind) -> &'static str {
 }
 
 pub(super) fn kind_color(kind: RoadElementKind, theme: egui::Theme) -> Color32 {
-    match theme {
-        egui::Theme::Dark => match kind {
-            RoadElementKind::BuildingEdge => Color32::from_rgb(75, 84, 82),
-            RoadElementKind::Sidewalk => Color32::from_rgb(207, 203, 186),
-            RoadElementKind::BikeLane => Color32::from_rgb(58, 131, 105),
-            RoadElementKind::ParkingLane => Color32::from_rgb(163, 168, 165),
-            RoadElementKind::BusLane => Color32::from_rgb(164, 76, 71),
-            RoadElementKind::CarLane => Color32::from_rgb(175, 180, 174),
-            RoadElementKind::BusStop => Color32::from_rgb(162, 121, 53),
-            RoadElementKind::Middle => Color32::from_rgb(175, 180, 174),
-            RoadElementKind::Verge => Color32::from_rgb(115, 164, 83),
-            RoadElementKind::Barrier => Color32::from_rgb(165, 170, 162),
-            RoadElementKind::TrainTrack => Color32::from_rgb(102, 91, 77),
-            RoadElementKind::TramTrack => Color32::from_rgb(93, 105, 112),
-            RoadElementKind::SubwayTrack => Color32::from_rgb(65, 73, 102),
-            RoadElementKind::Runway => Color32::from_rgb(65, 70, 76),
-            RoadElementKind::Taxiway => Color32::from_rgb(75, 81, 87),
-            RoadElementKind::Apron => Color32::from_rgb(101, 109, 113),
-        },
-        egui::Theme::Light => match kind {
-            RoadElementKind::BuildingEdge => Color32::from_rgb(190, 198, 205),
-            RoadElementKind::Sidewalk => Color32::from_rgb(220, 197, 164),
-            RoadElementKind::BikeLane => Color32::from_rgb(133, 198, 166),
-            RoadElementKind::ParkingLane => Color32::from_rgb(169, 184, 205),
-            RoadElementKind::BusLane => Color32::from_rgb(225, 154, 146),
-            RoadElementKind::CarLane => Color32::from_rgb(151, 176, 205),
-            RoadElementKind::BusStop => Color32::from_rgb(230, 188, 110),
-            RoadElementKind::Middle => Color32::from_rgb(204, 191, 148),
-            RoadElementKind::Verge => Color32::from_rgb(158, 200, 160),
-            RoadElementKind::Barrier => Color32::from_rgb(107, 115, 112),
-            RoadElementKind::TrainTrack => Color32::from_rgb(166, 151, 130),
-            RoadElementKind::TramTrack => Color32::from_rgb(169, 178, 182),
-            RoadElementKind::SubwayTrack => Color32::from_rgb(111, 123, 158),
-            RoadElementKind::Runway => Color32::from_rgb(83, 89, 94),
-            RoadElementKind::Taxiway => Color32::from_rgb(111, 117, 120),
-            RoadElementKind::Apron => Color32::from_rgb(158, 163, 160),
-        },
-    }
+    let [r, g, b] = opencity::network::road_color(kind, theme == egui::Theme::Light);
+    Color32::from_rgb(r, g, b)
 }
-
 pub(super) fn element_width(kind: RoadElementKind) -> f32 {
     match kind {
         RoadElementKind::BuildingEdge => 72.0,

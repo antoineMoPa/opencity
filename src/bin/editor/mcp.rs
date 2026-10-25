@@ -15,9 +15,7 @@ use base64::Engine;
 use eframe::egui;
 use serde_json::{json, Value};
 
-use super::{
-    map, CameraView, RoadEditor, SegmentSource, View, WorldPoint, MAX_MAP_ZOOM, MIN_MAP_ZOOM,
-};
+use super::{map, CameraView, RoadEditor, SegmentSource, View, WorldPoint, MAX_MAP_ZOOM};
 use opencity::Statement;
 
 struct Request {
@@ -414,10 +412,9 @@ impl RoadEditor {
             "set_viewport" => {
                 let center = point(args, "center_x", "center_y")?;
                 let zoom = number(args, "zoom")?;
-                if !(MIN_MAP_ZOOM..=MAX_MAP_ZOOM).contains(&zoom) {
-                    return Err(format!(
-                        "zoom must be between {MIN_MAP_ZOOM} and {MAX_MAP_ZOOM}"
-                    ));
+                let minimum = self.map_minimum_zoom();
+                if !(minimum..=MAX_MAP_ZOOM).contains(&zoom) {
+                    return Err(format!("zoom must be between {minimum} and {MAX_MAP_ZOOM}"));
                 }
                 self.map_zoom = zoom;
                 if self.camera_view == CameraView::Isometric {

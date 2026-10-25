@@ -36,6 +36,9 @@ impl RoadEditor {
                     Statement::Call(call) => call.assigns.iter().any(|assign| assign == &candidate),
                     Statement::Road(road) => road.name == candidate,
                     Statement::Block(block) => block.name == candidate,
+                    Statement::Network(network) => {
+                        network.name.as_deref() == Some(candidate.as_str())
+                    }
                 });
             if !used {
                 break candidate;

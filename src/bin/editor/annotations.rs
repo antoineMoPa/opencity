@@ -102,6 +102,7 @@ impl RoadEditor {
                 Statement::Call(c) => c.assigns.contains(&id),
                 Statement::Road(r) => r.name == id,
                 Statement::Block(b) => b.name == id,
+                Statement::Network(n) => n.name.as_deref() == Some(id.as_str()),
             }) {
                 break id;
             }

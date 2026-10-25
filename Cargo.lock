@@ -1813,6 +1813,7 @@ dependencies = [
  "moon_toggle_switch",
  "muda",
  "png 0.17.16",
+ "resvg",
  "rfd",
  "serde_json",
  "wasm-bindgen",

@@ -1,14 +1,14 @@
-road local: carlane-middle-carlane; end;
-road collector: sidewalk-carlane-middle-carlane-sidewalk; end;
-road arterial: sidewalk-carlane-carlane-middle-carlane-carlane-sidewalk; end;
-road freeway: verge-carlane-carlane-middle-carlane-carlane-verge; end;
-road ramp: verge-carlane-verge; direction forward;
-    role ramp; end;
-road ramp_mouth: carlane-verge; direction forward;
-    role merge; end;
-road airport_runway: verge-runway-verge; end;
-road airport_taxiway: verge-taxiway-verge; end;
-road airport_apron: apron; end;
+road local: carlane middle carlane; end
+road collector: sidewalk carlane middle carlane sidewalk; end
+road arterial: sidewalk carlane carlane middle carlane carlane sidewalk; end
+road freeway: verge carlane carlane middle carlane carlane verge; end
+road ramp: verge carlane verge; direction forward;
+    role ramp; end
+road ramp_mouth: carlane verge; direction forward;
+    role merge; end
+road airport_runway: verge runway verge; end
+road airport_taxiway: verge taxiway verge; end
+road airport_apron: apron; end
 p_0000 = map_point(-9.8333, 5.3167);
 p_0001 = map_point(-8.8833, 5.0);
 p_0002 = map_point(-7.0833, 4.65);

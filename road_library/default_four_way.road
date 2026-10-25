@@ -1,0 +1,114 @@
+intersection default_four_way {
+    # External lane anchors and travel headings
+    port N {
+        in  at (-0.15, -1.6) heading south;
+        out at ( 0.15, -1.6) heading north;
+    }
+    port S {
+        in  at ( 0.15,  1.6) heading north;
+        out at (-0.15,  1.6) heading south;
+    }
+    port E {
+        in  at ( 1.6, -0.15) heading west;
+        out at ( 1.6,  0.15) heading east;
+    }
+    port W {
+        in  at (-1.6,  0.15) heading east;
+        out at (-1.6, -0.15) heading west;
+    }
+
+    # North approach: through, right, left
+    path N_S { from N.in; line to S.out; }
+    path N_W {
+        from N.in;
+        cubic (-0.15, -0.4), (-0.4, -0.15) to W.out;
+    }
+    path N_E {
+        from N.in;
+        cubic (-0.15, 0.2), (0.35, 0.15) to E.out;
+    }
+
+    # South approach
+    path S_N { from S.in; line to N.out; }
+    path S_E {
+        from S.in;
+        cubic (0.15, 0.4), (0.4, 0.15) to E.out;
+    }
+    path S_W {
+        from S.in;
+        cubic (0.15, -0.2), (-0.35, -0.15) to W.out;
+    }
+
+    # East approach
+    path E_W { from E.in; line to W.out; }
+    path E_N {
+        from E.in;
+        cubic (0.4, -0.15), (0.15, -0.4) to N.out;
+    }
+    path E_S {
+        from E.in;
+        cubic (-0.2, -0.15), (-0.15, 0.4) to S.out;
+    }
+
+    # West approach
+    path W_E { from W.in; line to E.out; }
+    path W_N {
+        from W.in;
+        cubic (0.2, 0.15), (0.15, -0.4) to N.out;
+    }
+    path W_S {
+        from W.in;
+        cubic (-0.4, 0.15), (-0.15, 0.4) to S.out;
+    }
+
+    # Explicitly authorize each vehicle trajectory
+    allow vehicle N.in -> S.out via N_S;
+    allow vehicle N.in -> W.out via N_W;
+    allow vehicle N.in -> E.out via N_E;
+    allow vehicle S.in -> N.out via S_N;
+    allow vehicle S.in -> E.out via S_E;
+    allow vehicle S.in -> W.out via S_W;
+    allow vehicle E.in -> W.out via E_W;
+    allow vehicle E.in -> N.out via E_N;
+    allow vehicle E.in -> S.out via E_S;
+    allow vehicle W.in -> E.out via W_E;
+    allow vehicle W.in -> N.out via W_N;
+    allow vehicle W.in -> S.out via W_S;
+
+    path junction_pavement { move (-1.6, 0); line (1.6, 0); }
+    surface junction_pavement along junction_pavement width 3.2;
+
+    # Physical pavement has its own center paths.
+    path pavement_ns { move (0, -2.6); line (0, 2.6); }
+    path pavement_ew { move (-2.6, 0); line (2.6, 0); }
+    surface north_south along pavement_ns width 1.4;
+    surface east_west along pavement_ew width 1.4;
+
+    # Counterclockwise fillets join each approach tangentially.
+    path curb_NW { move (-2.6, -0.7); line (-1.6, -0.7); arc to (-0.7, -1.6) radius 0.9 counterclockwise; line (-0.7, -2.6); }
+    path curb_NE { move (0.7, -2.6); line (0.7, -1.6); arc to (1.6, -0.7) radius 0.9 counterclockwise; line (2.6, -0.7); }
+    path curb_SE { move (2.6, 0.7); line (1.6, 0.7); arc to (0.7, 1.6) radius 0.9 counterclockwise; line (0.7, 2.6); }
+    path curb_SW { move (-0.7, 2.6); line (-0.7, 1.6); arc to (-1.6, 0.7) radius 0.9 counterclockwise; line (-2.6, 0.7); }
+    surface corner_road_NW along curb_NW width 0.3 side right;
+    surface corner_road_NE along curb_NE width 0.3 side right;
+    surface corner_road_SE along curb_SE width 0.3 side right;
+    surface corner_road_SW along curb_SW width 0.3 side right;
+    surface ground_NW along curb_NW width 0.3 side left material verge;
+    surface ground_NE along curb_NE width 0.3 side left material verge;
+    surface ground_SE along curb_SE width 0.3 side left material verge;
+    surface ground_SW along curb_SW width 0.3 side left material verge;
+    surface sidewalk_NW along curb_NW width 0.18 side left material sidewalk;
+    surface sidewalk_NE along curb_NE width 0.18 side left material sidewalk;
+    surface sidewalk_SE along curb_SE width 0.18 side left material sidewalk;
+    surface sidewalk_SW along curb_SW width 0.18 side left material sidewalk;
+
+    # One stop bar across the inbound side of every approach.
+    path stop_N { move (-0.62, -1.45); line (-0.08, -1.45); }
+    path stop_E { move (1.45, -0.62); line (1.45, -0.08); }
+    path stop_S { move (0.08, 1.45); line (0.62, 1.45); }
+    path stop_W { move (-1.45, 0.08); line (-1.45, 0.62); }
+    marking stop_N along stop_N width 0.025 color white;
+    marking stop_E along stop_E width 0.025 color white;
+    marking stop_S along stop_S width 0.025 color white;
+    marking stop_W along stop_W width 0.025 color white;
+}

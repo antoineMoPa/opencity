@@ -53,7 +53,8 @@ fn standalone_intersection_has_edge_ports_and_roads_stop_at_them() {
         .iter()
         .map(|element| element_world_width(element.kind))
         .sum::<f32>()
-        / 2.0;
+        / 2.0
+        * opencity::network::default_four_way_footprint_factor();
     assert!((east.position.x - (2.0 + half)).abs() < 0.0001);
     assert_eq!(east.position.y, 3.0);
     assert!(port_faces_road(

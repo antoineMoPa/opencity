@@ -1,6 +1,6 @@
 road library_street:
-    sidewalk-parkinglane-carlane-middle-carlane-parkinglane-sidewalk;
-end;
+    sidewalk parkinglane carlane middle carlane parkinglane sidewalk;
+end
 
 tee_center = map_point(0, 0);
 tee_n = map_point(0, 0.1215);

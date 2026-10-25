@@ -12,11 +12,14 @@ impl Program {
                 source.push('\n');
             }
             match statement {
+                Statement::Network(definition) => {
+                    crate::network::write_definition(&mut source, definition)
+                }
                 Statement::Road(road) => {
                     source.push_str(&format!("road {}:\n    ", road.name));
                     for (index, element) in road.elements.iter().enumerate() {
                         if index > 0 {
-                            source.push('-');
+                            source.push(' ');
                         }
                         source.push_str(element.kind.keyword());
                         if let Some(catch) = element.catch {
@@ -30,15 +33,35 @@ impl Program {
                     if road.role != crate::RoadRole::Ordinary {
                         source.push_str(&format!("    role {};\n", road.role.keyword()));
                     }
-                    source.push_str("end;\n");
+                    source.push_str("end\n");
                 }
                 Statement::Block(block) => {
-                    source.push_str(&format!("block {}:\n", block.name));
+                    source.push_str(&format!("block {}", block.name));
+                    if let Some(parameters) = &block.parameters {
+                        source.push_str("({ ");
+                        source.push_str(
+                            &parameters
+                                .iter()
+                                .map(|p| p.name.as_str())
+                                .collect::<Vec<_>>()
+                                .join(", "),
+                        );
+                        source.push_str(" }: { ");
+                        source.push_str(
+                            &parameters
+                                .iter()
+                                .map(|p| format!("{}: {}", p.name, p.kind.keyword()))
+                                .collect::<Vec<_>>()
+                                .join(", "),
+                        );
+                        source.push_str(" })");
+                    }
+                    source.push_str(":\n");
                     for call in &block.calls {
                         source.push_str("    ");
                         write_call(&mut source, call);
                     }
-                    source.push_str("end;\n");
+                    source.push_str("end\n");
                 }
                 Statement::Call(call) => write_call(&mut source, call),
             }
@@ -70,11 +93,27 @@ fn write_call(source: &mut String, call: &Call) {
         if index > 0 {
             source.push_str(", ");
         }
-        match arg {
-            Argument::Number(value) | Argument::Identifier(value) | Argument::String(value) => {
-                source.push_str(value)
-            }
-        }
+        write_argument(source, arg);
     }
     source.push_str(");\n");
+}
+
+fn write_argument(source: &mut String, arg: &Argument) {
+    match arg {
+        Argument::Number(value) | Argument::Identifier(value) | Argument::String(value) => {
+            source.push_str(value)
+        }
+        Argument::Object(properties) => {
+            source.push_str("{ ");
+            for (index, (name, value)) in properties.iter().enumerate() {
+                if index > 0 {
+                    source.push_str(", ");
+                }
+                source.push_str(name);
+                source.push_str(": ");
+                write_argument(source, value);
+            }
+            source.push_str(" }");
+        }
+    }
 }

@@ -7,6 +7,7 @@ pub struct Program {
 pub enum Statement {
     Road(RoadDefinition),
     Block(BlockDefinition),
+    Network(crate::network::Definition),
     Call(Call),
 }
 
@@ -191,7 +192,41 @@ impl RoadElementKind {
 #[derive(Clone, Debug, PartialEq)]
 pub struct BlockDefinition {
     pub name: String,
+    /// Destructured, typed object parameters; `None` keeps the legacy signature.
+    pub parameters: Option<Vec<BlockParameter>>,
     pub calls: Vec<Call>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct BlockParameter {
+    pub name: String,
+    pub kind: BlockParameterType,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BlockParameterType {
+    Number,
+    String,
+    Identifier,
+}
+
+impl BlockParameterType {
+    pub fn from_keyword(keyword: &str) -> Option<Self> {
+        match keyword {
+            "number" => Some(Self::Number),
+            "string" => Some(Self::String),
+            "identifier" => Some(Self::Identifier),
+            _ => None,
+        }
+    }
+
+    pub fn keyword(self) -> &'static str {
+        match self {
+            Self::Number => "number",
+            Self::String => "string",
+            Self::Identifier => "identifier",
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -208,4 +243,6 @@ pub enum Argument {
     Identifier(String),
     /// A quoted asset path or other literal string.
     String(String),
+    /// Named values, in source order.
+    Object(Vec<(String, Argument)>),
 }

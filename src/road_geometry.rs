@@ -249,8 +249,14 @@ fn surface_rows(
     profile: &crate::road_profiles::RoadProfile,
 ) -> (Vec<CrossSection>, bool) {
     let (ts, ok) = parameters(segment);
-    let rows = ts
-        .into_iter()
+    let start = profile.start_clip.unwrap_or(0.);
+    let end = profile.end_clip.unwrap_or(1.);
+    if start >= end {
+        return (Vec::new(), ok);
+    }
+    let rows = std::iter::once(start)
+        .chain(ts.into_iter().filter(|t| *t > start && *t < end))
+        .chain(std::iter::once(end))
         .map(|t| {
             let (widths, mut offset) = crate::road_profiles::section_widths(road, profile, t);
             let mut boundaries = vec![offset_vertex(segment, t, offset)];

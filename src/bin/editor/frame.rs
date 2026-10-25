@@ -39,6 +39,10 @@ impl RoadEditor {
         }
         #[cfg(not(target_arch = "wasm32"))]
         self.handle_mcp(&ctx);
+        if self.minimal.intersection_viewer.is_some() {
+            self.intersection_viewer_ui(root);
+            return;
+        }
         let before = self.program.clone();
         // Native menu events arrive outside egui's input stream.
         #[cfg(target_os = "macos")]

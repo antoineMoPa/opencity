@@ -38,6 +38,7 @@ impl IntersectionKind {
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Intersection {
+    pub footprint_half: f32,
     pub point_ref: String,
     pub position: WorldPoint,
     pub kind: IntersectionKind,
@@ -85,6 +86,30 @@ pub struct IntersectionPort {
     pub point_ref: String,
     pub position: WorldPoint,
     pub direction: WorldPoint,
+}
+
+/// Existing placed ports define their footprint; center-connected four-ways
+/// reserve the turn radius authored by the shared component.
+pub fn intersection_footprint_half(intersection: &Intersection, road_half: f32) -> f32 {
+    if intersection.footprint_half > 0. {
+        return intersection.footprint_half;
+    }
+    if !intersection.ports.is_empty() {
+        return intersection
+            .ports
+            .iter()
+            .map(|port| {
+                (port.position.x - intersection.position.x)
+                    .abs()
+                    .max((port.position.y - intersection.position.y).abs())
+            })
+            .fold(road_half, f32::max);
+    }
+    if intersection.kind == IntersectionKind::FourWay {
+        road_half * opencity::network::default_four_way_footprint_factor()
+    } else {
+        road_half
+    }
 }
 
 fn port_directions(kind: IntersectionKind) -> &'static [WorldPoint] {
@@ -183,7 +208,7 @@ pub fn intersections(program: &Program, projection: &Projection) -> Vec<Intersec
             arms_by_point.entry(name).or_default().push((index, true));
         }
     }
-    program
+    let mut result:Vec<_>=program
         .statements
         .iter()
         .filter_map(|statement| {
@@ -263,6 +288,7 @@ pub fn intersections(program: &Program, projection: &Projection) -> Vec<Intersec
                 Vec::new()
             };
             Some(Intersection {
+                footprint_half:0.,
                 point_ref: point_ref.clone(),
                 position: point.position,
                 kind,
@@ -271,7 +297,9 @@ pub fn intersections(program: &Program, projection: &Projection) -> Vec<Intersec
                 ports,
             })
         })
-        .collect()
+        .collect();
+    super::intersection_footprints::assign(program, projection, &mut result);
+    result
 }
 
 pub fn place_intersection(
@@ -291,12 +319,17 @@ pub fn place_intersection(
         }
         suffix += 1;
     };
-    let half = road
+    let road_half = road
         .elements
         .iter()
         .map(|element| element_world_width(element.kind))
         .sum::<f32>()
         * 0.5;
+    let half = if kind == IntersectionKind::FourWay {
+        road_half * opencity::network::default_four_way_footprint_factor()
+    } else {
+        road_half
+    };
     program.statements.push(Statement::Call(Call {
         assigns: vec![center.clone()],
         name: "map_point".into(),

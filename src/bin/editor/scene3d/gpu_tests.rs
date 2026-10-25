@@ -690,3 +690,75 @@ fn render_starter_scene_pngs() {
 
 #[path = "gpu_transition_tests.rs"]
 mod transition_tests;
+
+#[test]
+fn junction_interior_renders_once_without_approach_centerlines_in_both_views() {
+    let program = parse(include_str!(
+        "../../../../examples/default_intersection.road"
+    ))
+    .unwrap();
+    let projection = map::project(&program);
+    let scene = Arc::new(build_scene(
+        &program,
+        &projection,
+        editor_palette(egui::Theme::Dark),
+        &[],
+        None,
+    ));
+    for camera in [CameraView::Top, CameraView::Isometric] {
+        let callback = SceneCallback {
+            transition: None,
+            scene: Arc::clone(&scene),
+            rect: egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(128., 128.)),
+            pan: egui::Vec2::ZERO,
+            zoom: 800.,
+            target: WorldPoint { x: 0., y: 0. },
+            angle: 0.7,
+            elevation: ISO_ELEVATION,
+            eye_height: 0.,
+            camera,
+            background: Color32::BLACK,
+            target_format: wgpu::TextureFormat::Bgra8Unorm,
+        };
+        let Some(pixels) = render_test_callback(callback) else {
+            return;
+        };
+        for y in 62..66 {
+            for x in 62..66 {
+                let pixel = &pixels[(y * 128 + x) * 4..][..4];
+                let expected = [174, 180, 175];
+                for channel in 0..3 {
+                    assert!(
+                        (pixel[channel] as i32 - expected[channel]).abs() < 5,
+                        "road paint leaks through junction: {pixel:?}"
+                    );
+                }
+            }
+        }
+        if let Some(folder) = std::env::var_os("OPENCITY_INTERSECTION_QA") {
+            let folder = std::path::PathBuf::from(folder);
+            std::fs::create_dir_all(&folder).unwrap();
+            let path = folder.join(if camera == CameraView::Top {
+                "junction-top.png"
+            } else {
+                "junction-isometric.png"
+            });
+            let file = std::fs::File::create(path).unwrap();
+            let mut encoder = png::Encoder::new(file, 128, 128);
+            encoder.set_color(png::ColorType::Rgba);
+            encoder.set_depth(png::BitDepth::Eight);
+            let rgba: Vec<_> = pixels
+                .chunks_exact(4)
+                .flat_map(|p| [p[2], p[1], p[0], p[3]])
+                .collect();
+            encoder
+                .write_header()
+                .unwrap()
+                .write_image_data(&rgba)
+                .unwrap();
+        }
+    }
+}
+
+#[path = "profile_gpu_tests.rs"]
+mod profile_gpu_tests;

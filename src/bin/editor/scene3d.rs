@@ -136,6 +136,8 @@ mod builders;
 mod geometry;
 #[path = "scene3d/landscape.rs"]
 mod landscape;
+#[path = "scene3d/networks.rs"]
+mod networks;
 #[path = "scene3d/renderer.rs"]
 mod renderer;
 
