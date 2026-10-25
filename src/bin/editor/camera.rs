@@ -2,6 +2,49 @@
 use super::*;
 
 impl RoadEditor {
+    /// Frame terrain-only documents even before they contain roads or networks.
+    pub(super) fn fit_elevation_scene(&mut self, rect: egui::Rect) -> bool {
+        let Ok(Some(spec)) = opencity::heightmap::ElevationMapSpec::from_program(&self.program)
+        else {
+            return false;
+        };
+        let center = WorldPoint {
+            x: spec.origin[0] + spec.size[0] * 0.5,
+            y: spec.origin[1] + spec.size[1] * 0.5,
+        };
+        let mut bounds = egui::Rect::NOTHING;
+        for x in [spec.origin[0], spec.origin[0] + spec.size[0]] {
+            for y in [spec.origin[1], spec.origin[1] + spec.size[1]] {
+                for height in spec.heights {
+                    let point = WorldPoint { x, y };
+                    let screen = if self.camera_view == CameraView::Top {
+                        egui::pos2(x - center.x, center.y - y)
+                    } else {
+                        iso_screen(
+                            rect,
+                            egui::Vec2::ZERO,
+                            1.0,
+                            center,
+                            self.orbit_angle,
+                            self.orbit_elevation,
+                            point,
+                            height,
+                        )
+                    };
+                    bounds.extend_with(screen);
+                }
+            }
+        }
+        self.map_zoom = (rect.width() / bounds.width()).min(rect.height() / bounds.height()) * 0.85;
+        self.orbit_target = center;
+        self.map_pan = if self.camera_view == CameraView::Top {
+            egui::vec2(-center.x * self.map_zoom, center.y * self.map_zoom)
+        } else {
+            egui::Vec2::ZERO
+        };
+        true
+    }
+
     pub(super) fn set_camera_view(&mut self, view: CameraView) {
         if self.camera_view == view {
             return;

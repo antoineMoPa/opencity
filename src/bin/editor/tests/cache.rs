@@ -111,7 +111,7 @@ fn placed_car_only_merge_mouth_receives_parent_profile() {
 #[ignore = "manual target map scene timing"]
 fn profile_target_scene_selection_cache() {
     let mut editor = sample_editor();
-    editor.program = boot_program();
+    editor.program = starter_program();
     let projection = map::project(&editor.program);
     let palette = editor_palette(egui::Theme::Dark);
     let ctx = egui::Context::default();
@@ -126,7 +126,7 @@ fn profile_target_scene_selection_cache() {
 #[test]
 fn projection_cache_tracks_edits_across_zoom_frames() {
     let mut editor = sample_editor();
-    editor.program = boot_program();
+    editor.program = starter_program();
     let first = editor.projected_map();
     editor.map_zoom += 10.0;
     assert!(Arc::ptr_eq(&first, &editor.projected_map()));
@@ -165,7 +165,7 @@ fn profile_target_zoom_ui_frames() {
         (CameraView::Isometric, 1000.0),
     ] {
         let mut editor = sample_editor();
-        editor.program = boot_program();
+        editor.program = starter_program();
         editor.camera_view = camera;
         let ctx = egui::Context::default();
         let mut frames = Vec::new();
@@ -197,7 +197,7 @@ fn profile_target_zoom_ui_frames() {
 #[ignore = "manual target map edit timing"]
 fn profile_target_geometry_edit() {
     let mut editor = sample_editor();
-    editor.program = boot_program();
+    editor.program = starter_program();
     let first = map::project(&editor.program);
     let segment = first
         .segments

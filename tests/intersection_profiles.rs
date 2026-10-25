@@ -28,11 +28,6 @@ fn every_profile_band_reaches_the_same_material_on_the_junction_side_of_its_port
     check_seams(SOURCE);
 }
 
-#[test]
-fn default_city_four_way_seams_match_their_connected_roads() {
-    check_seams(include_str!("../examples/target_map.road"));
-}
-
 fn check_seams(source: &str) {
     let program = parse(source).unwrap();
     let projection = map::project(&program);

@@ -128,10 +128,17 @@ impl WebSceneBuild {
         let intersections = map::intersections(&program, &projection);
         let mut landscape = project_landscape_features(&program).features;
         let mut scene = Scene::default();
+        let heightmap = super::super::elevation_map::load(&program, None)
+            .ok()
+            .flatten();
+        if let Some(map) = &heightmap {
+            heightmap::append_heightmap(&mut scene, map, palette);
+        }
         networks::append_networks(&mut scene, &program, palette.theme);
-        if !landscape
-            .iter()
-            .any(|feature| matches!(feature.kind, LandscapeKind::Land | LandscapeKind::Beach))
+        if heightmap.is_none()
+            && !landscape
+                .iter()
+                .any(|feature| matches!(feature.kind, LandscapeKind::Land | LandscapeKind::Beach))
         {
             scene.vertices.extend_from_slice(grid_vertices(palette));
         }

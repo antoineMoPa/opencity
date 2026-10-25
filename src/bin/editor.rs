@@ -150,7 +150,7 @@ fn starter_program() -> Program {
 }
 
 fn boot_program() -> Program {
-    parse(include_str!("../../examples/target_map.road")).expect("bundled target map parses")
+    parse(include_str!("../../examples/default_map.road")).expect("bundled default map parses")
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]

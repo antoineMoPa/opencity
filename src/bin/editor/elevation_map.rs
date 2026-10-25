@@ -12,6 +12,22 @@ pub(super) fn load(
     let Some(spec) = ElevationMapSpec::from_program(program)? else {
         return Ok(None);
     };
+    // An unsaved default document has no asset directory. Bundle its terrain
+    // so startup works from any working directory, including the web editor.
+    if base.is_none() && spec.path == "default_elevation.png" {
+        static BUNDLED: std::sync::OnceLock<std::sync::Mutex<Option<Arc<ElevationMap>>>> =
+            std::sync::OnceLock::new();
+        let mut cache = BUNDLED.get_or_init(Default::default).lock().unwrap();
+        if let Some(map) = cache.as_ref().filter(|map| map.spec == spec) {
+            return Ok(Some(Arc::clone(map)));
+        }
+        let map = Arc::new(ElevationMap::from_png(
+            spec,
+            include_bytes!("../../../examples/default_elevation.png"),
+        )?);
+        *cache = Some(Arc::clone(&map));
+        return Ok(Some(map));
+    }
     #[cfg(target_arch = "wasm32")]
     {
         let _ = base;

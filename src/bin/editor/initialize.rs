@@ -26,7 +26,7 @@ impl RoadEditor {
             skip_history: false,
             path: None,
             dirty: false,
-            selected_road: Some(0),
+            selected_road: None,
             selected_element: None,
             selected_segment: None,
             selected_intersection: None,

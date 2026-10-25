@@ -10,14 +10,15 @@ impl RoadEditor {
             let projection = self.projected_map();
             if self.fit_scene_once {
                 self.fit_scene_once = false;
-                if !projection.segments.is_empty() {
+                let terrain_fitted = self.fit_elevation_scene(rect);
+                if !terrain_fitted && !projection.segments.is_empty() {
                     let (sum_x, sum_y) = projection.segments.iter().fold((0.0, 0.0), |(x, y), segment| {
                         let middle = segment.point_at(0.5); (x + middle.x, y + middle.y)
                     });
                     let count = projection.segments.len() as f32;
                     self.orbit_target = WorldPoint { x: sum_x / count, y: sum_y / count };
                     self.map_zoom = 55.0;
-                } else {
+                } else if !terrain_fitted {
                     self.fit_network_scene(rect);
                 }
             }

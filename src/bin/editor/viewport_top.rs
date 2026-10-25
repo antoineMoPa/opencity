@@ -25,7 +25,7 @@ impl RoadEditor {
                 self.fit_scene_once = false;
                 let landscape = project_landscape_features(&self.program);
                 let networks = self.network_world_bounds();
-                if !before.segments.is_empty() || !landscape.features.is_empty() || networks.is_some() {
+                if !self.fit_elevation_scene(rect) && (!before.segments.is_empty() || !landscape.features.is_empty() || networks.is_some()) {
                     let mut min = WorldPoint { x: f32::INFINITY, y: f32::INFINITY };
                     let mut max = WorldPoint { x: f32::NEG_INFINITY, y: f32::NEG_INFINITY };
                     if let Some(bounds)=networks {

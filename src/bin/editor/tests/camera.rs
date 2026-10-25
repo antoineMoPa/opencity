@@ -1,6 +1,48 @@
 use super::*;
 
 #[test]
+fn terrain_only_default_fits_top_and_isometric_viewports() {
+    let mut editor = sample_editor();
+    editor.program = boot_program();
+    let spec = opencity::heightmap::ElevationMapSpec::from_program(&editor.program)
+        .unwrap()
+        .unwrap();
+    for size in [
+        egui::vec2(1200.0, 760.0),
+        egui::vec2(640.0, 480.0),
+        egui::vec2(420.0, 700.0),
+    ] {
+        let rect = egui::Rect::from_min_size(egui::pos2(10.0, 20.0), size);
+        for camera in [CameraView::Top, CameraView::Isometric] {
+            editor.camera_view = camera;
+            assert!(editor.fit_elevation_scene(rect));
+            for x in [spec.origin[0], spec.origin[0] + spec.size[0]] {
+                for y in [spec.origin[1], spec.origin[1] + spec.size[1]] {
+                    for height in spec.heights {
+                        let point = WorldPoint { x, y };
+                        let screen = if camera == CameraView::Top {
+                            screen_of(rect, editor.map_pan, editor.map_zoom, point)
+                        } else {
+                            iso_screen(
+                                rect,
+                                editor.map_pan,
+                                editor.map_zoom,
+                                editor.orbit_target,
+                                editor.orbit_angle,
+                                editor.orbit_elevation,
+                                point,
+                                height,
+                            )
+                        };
+                        assert!(rect.contains(screen), "terrain corner clipped in {size:?}");
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[test]
 fn isometric_ground_pick_tracks_orbit_and_pan() {
     let rect = egui::Rect::from_min_size(egui::pos2(10.0, 20.0), egui::vec2(640.0, 480.0));
     let target = WorldPoint { x: 2.0, y: -3.0 };

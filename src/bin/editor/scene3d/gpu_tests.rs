@@ -423,18 +423,11 @@ fn render_starter_scene_pngs() {
         f32::NEG_INFINITY,
         f32::NEG_INFINITY,
     );
-    for segment in &projection.segments {
-        for point in [
-            segment.start,
-            segment.controls[0],
-            segment.controls[1],
-            segment.end,
-        ] {
-            min_x = min_x.min(point.x);
-            min_y = min_y.min(point.y);
-            max_x = max_x.max(point.x);
-            max_y = max_y.max(point.y);
-        }
+    for vertex in &scene.vertices {
+        min_x = min_x.min(vertex.point.x);
+        min_y = min_y.min(vertex.point.y);
+        max_x = max_x.max(vertex.point.x);
+        max_y = max_y.max(vertex.point.y);
     }
     let center = WorldPoint {
         x: (min_x + max_x) * 0.5,
@@ -461,22 +454,10 @@ fn render_starter_scene_pngs() {
         ("iso-interchange", CameraView::Isometric, interchange, 115.0),
     ];
     if qa_target {
-        for (name, x, y) in [
-            ("top-west-junction", 265.0, 242.0),
-            ("top-east-junction", 1385.0, 486.0),
-            ("top-north-terminal", 816.0, 90.0),
-            ("top-south-terminal", 817.0, 628.0),
-        ] {
-            views.push((
-                name,
-                CameraView::Top,
-                WorldPoint {
-                    x: (x - 768.0) / 60.0,
-                    y: (512.0 - y) / 60.0,
-                },
-                90.0,
-            ));
-        }
+        views = vec![
+            ("top-full", CameraView::Top, center, fit),
+            ("iso-full", CameraView::Isometric, center, fit),
+        ];
     }
     if qa_library {
         views = vec![

@@ -1,6 +1,6 @@
 # Building a correct OpenCity map from a reference image
 
-Use this guide when translating an image such as [`target.png`](../target.png) into an editable `.road` map such as [`examples/target_map.road`](../examples/target_map.road). Advance through small, connected patches. Establish each intersection locally before extending its roads. The image gives visual intent; the `.road` file must supply topology, permitted travel, grade, and precise junction geometry.
+Use this guide when translating an image such as [`target.png`](../target.png) into an editable `.road` map such as [`examples/default_map.road`](../examples/default_map.road). Advance through small, connected patches. Establish each intersection locally before extending its roads. The image gives visual intent; the `.road` file must supply topology, permitted travel, grade, and precise junction geometry.
 
 ## 1. Establish coordinates and road classes
 

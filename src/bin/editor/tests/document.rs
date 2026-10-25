@@ -254,86 +254,62 @@ fn default_library_has_city_rural_and_interstate_profiles() {
 }
 
 #[test]
-fn target_boot_map_projects_all_road_placements_and_junctions() {
+fn default_boot_map_is_fresh_terrain_with_open_straits_and_buildable_plains() {
     let program = boot_program();
     let projection = map::project(&program);
     assert_eq!(projection.unresolved, 0);
-    assert!(projection.segments.len() >= 700);
-    assert!(map::intersections(&program, &projection).len() >= 200);
-    let landscape = project_landscape_features(&program);
-    assert!(landscape.errors.is_empty());
-    let buildings = landscape
-        .features
-        .iter()
-        .filter(|feature| feature.kind == LandscapeKind::Building)
-        .count();
-    assert!(buildings >= 400, "the boot map should fill the city grids");
-    assert_eq!(landscape.features.len(), buildings + 56);
-    assert_eq!(
-        landscape
-            .features
-            .iter()
-            .filter(|feature| feature.kind == LandscapeKind::Land)
-            .count(),
-        7
-    );
-    assert_eq!(
-        landscape
-            .features
-            .iter()
-            .filter(|feature| feature.kind == LandscapeKind::Beach)
-            .count(),
-        7
-    );
-    let concrete: std::collections::HashSet<_> = landscape
-        .features
-        .iter()
-        .filter(|feature| feature.kind == LandscapeKind::Concrete)
-        .filter_map(|feature| feature.name.as_deref())
-        .collect();
-    assert_eq!(concrete.len(), 34);
-    for name in [
-        "west_port_north_landing",
-        "west_port_south_quay",
-        "west_industrial_inner_1",
-        "airport_primary_shoulder",
-        "airport_terminal_hardstand",
-        "east_port_main_apron",
-        "east_port_long_pier",
-        "east_industrial_west_1",
-    ] {
-        assert!(concrete.contains(name), "missing concrete area {name}");
-    }
-    let issues = design_rule_issues(
-        &program,
-        &projection,
-        &paint_profiles(&program, &projection),
-    );
+    assert!(projection.segments.is_empty());
+    assert!(map::intersections(&program, &projection).is_empty());
     assert!(
-        existing_design_checks_are_clear(&issues),
-        "target design issues: {:?}",
-        issues
-            .iter()
-            .map(|issue| (&issue.code, &issue.message))
-            .take(12)
-            .collect::<Vec<_>>()
+        project_landscape_features(&program).features.is_empty(),
+        "the unplaced terrain recipe must not create terraced scene geometry"
     );
-    for road_name in [
-        "freeway",
-        "ramp",
-        "local",
-        "airport_runway",
-        "airport_taxiway",
-        "airport_apron",
+    let terrain = elevation_map::load(&program, None).unwrap().unwrap();
+    let base = Path::new(env!("CARGO_MANIFEST_DIR")).join("examples");
+    let external = elevation_map::load(&program, Some(&base)).unwrap().unwrap();
+    assert_eq!(terrain.spec.water_level, Some(0.0));
+    // Open ocean, inter-island channel, southern strait, and both lake basins.
+    for point in [
+        [0.0, 0.0],
+        [1.0, 2.0],
+        [-4.5, -3.0],
+        [-5.8, 1.28],
+        [8.7, 4.9],
     ] {
         assert!(
-            projection
-                .segments
-                .iter()
-                .any(|segment| segment.road_name == road_name),
-            "missing {road_name}"
+            terrain.height_at(point).unwrap() < 0.0,
+            "expected water at {point:?}"
         );
     }
+    // Main islands, southern island and all five offshore islets stay distinct.
+    for point in [
+        [-8.0, 0.5],
+        [7.0, 0.5],
+        [-1.5, -4.8],
+        [-9.45, 7.30],
+        [4.55, 5.5],
+        [-5.08, -3.8],
+        [-1.6, -2.5],
+        [8.7, -5.05],
+    ] {
+        assert!(
+            terrain.height_at(point).unwrap() > 0.0,
+            "expected land at {point:?}"
+        );
+        assert_eq!(terrain.height_at(point), external.height_at(point));
+    }
+    for point in [[-7.5, 0.2], [6.0, 0.5]] {
+        assert!((terrain.height_at(point).unwrap() - 0.10).abs() < 0.001);
+    }
+    assert!(terrain.height_at([-6.0, 5.2]).unwrap() > 0.5);
+    assert!(terrain.height_at([7.7, 4.7]).unwrap() > 0.3);
+    // Ocean covers every edge, leaving no exposed green strips at the map boundary.
+    for i in 0..1024 {
+        for (x, y) in [(i, 0), (i, 1023), (0, i), (1023, i)] {
+            assert!(terrain.point(x, y)[2] < 0.0);
+        }
+    }
+    assert_eq!(parse(&program.to_road_source()).unwrap(), program);
 }
 
 #[test]
