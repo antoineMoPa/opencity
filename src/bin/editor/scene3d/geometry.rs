@@ -51,6 +51,7 @@ pub(super) fn capture_geometry(
                         height: height(world),
                         depth_bias: -(layer as f32) * 0.0003,
                         color: vertex.color,
+                        surface: [0.0; 4],
                     }
                 })
                 .collect();
@@ -97,12 +98,14 @@ pub(super) fn add_elevated_edges(
             height: wall.start.height + PAVEMENT_OFFSET,
             depth_bias: 0.0,
             color,
+            surface: [0.0; 4],
         };
         let current = WorldVertex {
             point: wall.end.point,
             height: wall.end.height + PAVEMENT_OFFSET,
             depth_bias: 0.0,
             color,
+            surface: [0.0; 4],
         };
         let prior_bottom = WorldVertex {
             height: wall.start.height - 0.08,
@@ -146,6 +149,7 @@ pub(super) fn add_resolved_road_surface(
                 height: vertex.height + PAVEMENT_OFFSET,
                 depth_bias: bias,
                 color,
+                surface: [0.0; 4],
             });
         }
     };
@@ -235,7 +239,7 @@ pub(super) fn add_resolved_road_surface(
 /// Preserve each connected road's height along its entire junction edge.
 /// Between edges, inverse squared distance blends differing approach heights.
 /// A junction without roads rests on the same zero-grade pavement plane.
-pub(super) fn intersection_surface_height(
+pub(crate) fn intersection_surface_height(
     point: WorldPoint,
     seams: &[(WorldPoint, WorldPoint, f32)],
 ) -> f32 {

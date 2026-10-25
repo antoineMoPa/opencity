@@ -2,7 +2,9 @@
 mod defaults;
 mod materials;
 mod profile_binding;
+mod turns;
 pub use materials::road_color;
+pub use turns::default_right_turn_instance;
 mod geometry;
 pub use defaults::{
     default_four_way, default_four_way_footprint_factor, default_four_way_instance,

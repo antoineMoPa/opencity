@@ -57,10 +57,15 @@ impl RoadEditor {
             }
             let painter = ui.painter_at(rect);
             let scene = self.scene_geometry(ui.ctx(), palette, &projection);
+            if scene.has_animated_water() {
+                ui.ctx()
+                    .request_repaint_after(std::time::Duration::from_millis(33));
+            }
             painter.add(egui::Shape::Callback(
                 eframe::egui_wgpu::Callback::new_paint_callback(
                     rect,
                     scene3d::SceneCallback {
+                        time_seconds: ui.input(|input| (input.time % 4.0) as f32),
                         transition: self.camera_transition_matrix(rect),
                         scene,
                         rect,

@@ -188,14 +188,18 @@ pub(super) fn paint_landscape_feature(
             Color32::from_rgb(206, 188, 152),
             Color32::from_rgb(138, 112, 70),
         ),
-        (egui::Theme::Dark, LandscapeKind::Building) => (
-            Color32::from_rgb(192, 198, 194),
-            Color32::from_rgb(115, 128, 127),
-        ),
-        (egui::Theme::Light, LandscapeKind::Building) => (
-            Color32::from_rgb(178, 184, 189),
-            Color32::from_rgb(86, 97, 105),
-        ),
+        (_, LandscapeKind::Building) => {
+            let rgb = feature
+                .building_style
+                .unwrap_or_default()
+                .material
+                .roof_rgb();
+            let edge = rgb.map(|channel| (channel as f32 * 0.65) as u8);
+            (
+                Color32::from_rgb(rgb[0], rgb[1], rgb[2]),
+                Color32::from_rgb(edge[0], edge[1], edge[2]),
+            )
+        }
         (egui::Theme::Dark, LandscapeKind::Lake | LandscapeKind::River) => (
             Color32::from_rgb(15, 123, 187),
             Color32::from_rgb(36, 163, 211),

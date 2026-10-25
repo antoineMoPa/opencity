@@ -28,6 +28,45 @@ fn every_profile_band_reaches_the_same_material_on_the_junction_side_of_its_port
     check_seams(SOURCE);
 }
 
+#[test]
+fn curved_junctions_leave_the_outside_corners_open_instead_of_painting_grass() {
+    let program = parse(SOURCE).unwrap();
+    let projection = map::project(&program);
+    for junction in map::intersections(&program, &projection)
+        .into_iter()
+        .filter(|j| j.kind == map::IntersectionKind::FourWay)
+    {
+        let instance =
+            network::default_four_way_instance(&program, &projection, &junction).unwrap();
+        assert!(!instance
+            .geometry
+            .bands
+            .iter()
+            .any(|band| band.name.starts_with("ground_")));
+        for sx in [-1.0, 1.0] {
+            for sy in [-1.0, 1.0] {
+                let corner = Point {
+                    x: sx * junction.footprint_half * 0.99,
+                    y: sy * junction.footprint_half * 0.99,
+                    z: 0.0,
+                };
+                assert!(
+                    !instance
+                        .geometry
+                        .bands
+                        .iter()
+                        .filter(|band| band.kind == BandKind::Surface)
+                        .flat_map(|band| instance.geometry.band_quads(band))
+                        .flat_map(triangles)
+                        .any(|triangle| inside(corner, triangle)),
+                    "{} still fills outside its rounded corner",
+                    junction.point_ref
+                );
+            }
+        }
+    }
+}
+
 fn check_seams(source: &str) {
     let program = parse(source).unwrap();
     let projection = map::project(&program);

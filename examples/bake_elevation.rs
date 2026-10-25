@@ -55,6 +55,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut program = parse(&std::fs::read_to_string(&source)?)?;
     let spec = ElevationMapSpec::from_program(&program)?.ok_or("Missing elevation_map")?;
     let water = spec.water_level.ok_or("Missing water_level")?;
+    // Keep the reference's shoreline and hill softness when geography grows;
+    // road widths and physical heights are deliberately independent of this.
+    let contour_scale = spec.size[0] / 25.6;
+    // Bake only the recipe, independent of buildings and ground-cover calls.
+    program
+        .statements
+        .retain(|statement| !matches!(statement, opencity::Statement::Call(_)));
     program
         .statements
         .extend(parse("terrain_source(0, 0);")?.statements);
@@ -88,30 +95,35 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 .map(|(_, points)| shore_distance(points, p))
                 .fold(f32::NEG_INFINITY, f32::max);
             let mut height = if coast < 0.0 {
-                water - 0.18 * ease(-coast / 0.55)
+                water - 0.18 * ease(-coast / (0.55 * contour_scale))
             } else {
-                water + 0.10 * ease(coast / 0.30)
+                water + 0.10 * ease(coast / (0.30 * contour_scale))
             };
             if coast > 0.0 {
                 for (f, points) in &contours {
                     match f.kind {
                         LandscapeKind::Terrain => {
-                            let hill = ease(shore_distance(points, p) / 0.65);
+                            let hill = ease(shore_distance(points, p) / (0.65 * contour_scale));
                             let summit = f.terrain_height.unwrap_or(0.10);
                             if hill > 0.0 {
-                                let relief = (0.10 + (summit - 0.10) * hill) * ease(coast / 0.30);
+                                let relief = (0.10 + (summit - 0.10) * hill)
+                                    * ease(coast / (0.30 * contour_scale));
                                 height = height.max(water + relief);
                             }
                         }
                         LandscapeKind::Lake => {
-                            let basin = ease((shore_distance(points, p) + 0.12) / 0.24);
+                            let basin = ease(
+                                (shore_distance(points, p) + 0.12 * contour_scale)
+                                    / (0.24 * contour_scale),
+                            );
                             height += (water - 0.08 - height) * basin;
                         }
                         _ => {}
                     }
                 }
                 // Let the shore reach sea level smoothly even near a hill footprint.
-                height = height.min(water + (spec.heights[1] - water) * ease(coast / 0.20));
+                height = height
+                    .min(water + (spec.heights[1] - water) * ease(coast / (0.20 * contour_scale)));
             }
             let sample = ((height - spec.heights[0]) * 65535.0
                 / (spec.heights[1] - spec.heights[0]))

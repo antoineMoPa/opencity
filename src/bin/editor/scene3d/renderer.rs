@@ -2,6 +2,7 @@
 use super::*;
 
 pub struct SceneCallback {
+    pub time_seconds: f32,
     pub transition: Option<camera_transition::ClipMatrix>,
     pub scene: Arc<Scene>,
     pub rect: egui::Rect,
@@ -17,6 +18,7 @@ pub struct SceneCallback {
 }
 
 struct RenderResources {
+    water: water_gpu::WaterResources,
     scene_pipeline: wgpu::RenderPipeline,
     close_zoom_pipeline: wgpu::RenderPipeline,
     camera_buffer: wgpu::Buffer,
@@ -109,7 +111,7 @@ impl egui_wgpu::CallbackTrait for SceneCallback {
             .get::<RenderResources>()
             .is_none_or(|r| r.target_format != self.target_format)
         {
-            resources.insert(RenderResources::new(device, self.target_format));
+            resources.insert(RenderResources::new(device, queue, self.target_format));
         }
         let renderer = resources.get_mut::<RenderResources>().unwrap();
         if renderer
@@ -123,6 +125,7 @@ impl egui_wgpu::CallbackTrait for SceneCallback {
                 contents: bytes_of(vertices),
                 usage: wgpu::BufferUsages::VERTEX,
             });
+            renderer.water.update(device, queue, &self.scene);
             renderer.scene_buffer = Some((Arc::clone(&self.scene), buffer));
         }
         let camera = CameraUniform {
@@ -152,7 +155,7 @@ impl egui_wgpu::CallbackTrait for SceneCallback {
                 self.elevation.tan(),
                 self.eye_height,
                 f32::from(self.transition.is_some()),
-                0.0,
+                self.time_seconds,
             ],
             clip: self.transition.unwrap_or([[0.0; 4]; 4]),
         };
@@ -267,6 +270,7 @@ impl egui_wgpu::CallbackTrait for SceneCallback {
                 &renderer.scene_pipeline
             });
             pass.set_bind_group(0, &renderer.camera_bind_group, &[]);
+            pass.set_bind_group(1, &renderer.water.bind_group, &[]);
             pass.set_vertex_buffer(0, renderer.scene_buffer.as_ref().unwrap().1.slice(..));
             if let Some(span) = &self.scene.road_span {
                 if span.start > 0 {
@@ -337,7 +341,8 @@ impl egui_wgpu::CallbackTrait for SceneCallback {
 }
 
 impl RenderResources {
-    fn new(device: &wgpu::Device, target_format: wgpu::TextureFormat) -> Self {
+    fn new(device: &wgpu::Device, queue: &wgpu::Queue, target_format: wgpu::TextureFormat) -> Self {
+        let water = water_gpu::WaterResources::new(device, queue);
         let scene_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("opencity scene shader"),
             source: wgpu::ShaderSource::Wgsl(SCENE_SHADER.into()),
@@ -350,7 +355,7 @@ impl RenderResources {
             label: Some("opencity camera layout"),
             entries: &[wgpu::BindGroupLayoutEntry {
                 binding: 2,
-                visibility: wgpu::ShaderStages::VERTEX,
+                visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
                 ty: wgpu::BindingType::Buffer {
                     ty: wgpu::BufferBindingType::Uniform,
                     has_dynamic_offset: false,
@@ -375,7 +380,7 @@ impl RenderResources {
         });
         let scene_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("opencity scene layout"),
-            bind_group_layouts: &[Some(&camera_layout)],
+            bind_group_layouts: &[Some(&camera_layout), Some(&water.layout)],
             immediate_size: 0,
         });
         let make_scene_pipeline = |samples| {
@@ -389,7 +394,7 @@ impl RenderResources {
                     buffers: &[Some(wgpu::VertexBufferLayout {
                         array_stride: std::mem::size_of::<GpuVertex>() as u64,
                         step_mode: wgpu::VertexStepMode::Vertex,
-                        attributes: &wgpu::vertex_attr_array![0 => Float32x4, 1 => Float32x4],
+                        attributes: &wgpu::vertex_attr_array![0 => Float32x4, 1 => Float32x4, 2 => Float32x4],
                     })],
                 },
                 primitive: wgpu::PrimitiveState {
@@ -491,6 +496,7 @@ impl RenderResources {
             ..Default::default()
         });
         Self {
+            water,
             scene_pipeline,
             close_zoom_pipeline,
             camera_buffer,

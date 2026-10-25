@@ -42,6 +42,7 @@ pub(crate) fn sample_editor() -> RoadEditor {
         camera_transition: None,
         render_format: eframe::wgpu::TextureFormat::Bgra8Unorm,
         projection_cache: None,
+        landscape_cache: None,
         scene_cache: None,
         #[cfg(target_arch = "wasm32")]
         web_scene_build: None,

@@ -224,6 +224,13 @@ fn default_intersection_is_authored_with_four_curved_sidewalks_and_stop_bars() {
     assert_eq!(parse(&program.to_road_source()).unwrap(), program);
     let geometry = network::default_four_way();
     assert_eq!(geometry.movements.len(), 12);
+    assert!(
+        geometry
+            .bands
+            .iter()
+            .all(|band| band.material != network::Material::Verge),
+        "the default junction must not paint decorative grass patches"
+    );
     let sidewalks: Vec<_> = geometry
         .bands
         .iter()

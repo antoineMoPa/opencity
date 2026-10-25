@@ -76,7 +76,7 @@ intersection default_four_way {
     allow vehicle W.in -> S.out via W_S;
 
     path junction_pavement { move (-1.6, 0); line (1.6, 0); }
-    surface junction_pavement along junction_pavement width 3.2;
+    surface junction_pavement along junction_pavement width 1.4;
 
     # Physical pavement has its own center paths.
     path pavement_ns { move (0, -2.6); line (0, 2.6); }
@@ -89,14 +89,15 @@ intersection default_four_way {
     path curb_NE { move (0.7, -2.6); line (0.7, -1.6); arc to (1.6, -0.7) radius 0.9 counterclockwise; line (2.6, -0.7); }
     path curb_SE { move (2.6, 0.7); line (1.6, 0.7); arc to (0.7, 1.6) radius 0.9 counterclockwise; line (0.7, 2.6); }
     path curb_SW { move (-0.7, 2.6); line (-0.7, 1.6); arc to (-1.6, 0.7) radius 0.9 counterclockwise; line (-2.6, 0.7); }
+    # Fill toward the carriageway, leaving the outside of each curb open.
+    surface corner_fill_NW along curb_NW width 0.6 side right;
+    surface corner_fill_NE along curb_NE width 0.6 side right;
+    surface corner_fill_SE along curb_SE width 0.6 side right;
+    surface corner_fill_SW along curb_SW width 0.6 side right;
     surface corner_road_NW along curb_NW width 0.3 side right;
     surface corner_road_NE along curb_NE width 0.3 side right;
     surface corner_road_SE along curb_SE width 0.3 side right;
     surface corner_road_SW along curb_SW width 0.3 side right;
-    surface ground_NW along curb_NW width 0.3 side left material verge;
-    surface ground_NE along curb_NE width 0.3 side left material verge;
-    surface ground_SE along curb_SE width 0.3 side left material verge;
-    surface ground_SW along curb_SW width 0.3 side left material verge;
     surface sidewalk_NW along curb_NW width 0.18 side left material sidewalk;
     surface sidewalk_NE along curb_NE width 0.18 side left material sidewalk;
     surface sidewalk_SE along curb_SE width 0.18 side left material sidewalk;

@@ -6,6 +6,9 @@ use opencity::{
 };
 use serde_json::json;
 
+#[path = "glb_buildings.rs"]
+mod buildings;
+
 struct Geometry {
     positions: Vec<[f32; 3]>,
     colors: Vec<[u8; 4]>,
@@ -153,6 +156,47 @@ pub fn export_with_base(program: &Program, base: Option<&std::path::Path>) -> Ve
         add_segment(&mut mesh, segment, road, &geometry, index);
     }
     for intersection in map::intersections(program, &projection) {
+        if let Some(instance) =
+            opencity::network::default_right_turn_instance(program, &projection, &intersection)
+        {
+            let mut seams = Vec::new();
+            for (index, segment) in projection.segments.iter().enumerate() {
+                for (reference, end) in [(&segment.start_ref, false), (&segment.end_ref, true)] {
+                    if reference.as_deref() != Some(intersection.point_ref.as_str())
+                        && !intersection
+                            .ports
+                            .iter()
+                            .any(|port| reference.as_deref() == Some(port.point_ref.as_str()))
+                    {
+                        continue;
+                    }
+                    let rows = geometry.cross_sections(index);
+                    if let Some(row) = if end { rows.last() } else { rows.first() } {
+                        if let (Some(a), Some(b)) = (row.boundaries.first(), row.boundaries.last())
+                        {
+                            seams.push((a.point, b.point, a.height));
+                        }
+                    }
+                }
+            }
+            for band in &instance.geometry.bands {
+                let rgb = band.material.rgb_for_theme(false);
+                for quad in instance.geometry.band_quads(band) {
+                    mesh.quad(
+                        quad.map(|point| {
+                            let p = instance.world_point(point);
+                            let world = WorldPoint { x: p.x, y: p.y };
+                            (
+                                world,
+                                super::scene3d::intersection_surface_height(world, &seams),
+                            )
+                        }),
+                        [rgb[0], rgb[1], rgb[2], 255],
+                    );
+                }
+            }
+            continue;
+        }
         let width = program
             .statements
             .iter()
@@ -220,7 +264,14 @@ pub fn export_with_base(program: &Program, base: Option<&std::path::Path>) -> Ve
             LandscapeKind::River => [52, 130, 167, 255],
             LandscapeKind::Vegetation => [53, 134, 68, 255],
             LandscapeKind::Terrain => [157, 132, 92, 255],
-            LandscapeKind::Building => [158, 166, 172, 255],
+            LandscapeKind::Building => {
+                let rgb = feature
+                    .building_style
+                    .unwrap_or_default()
+                    .material
+                    .roof_rgb();
+                [rgb[0], rgb[1], rgb[2], 255]
+            }
         };
         if feature.kind == LandscapeKind::River {
             for pair in feature.points.windows(2) {
@@ -294,20 +345,8 @@ pub fn export_with_base(program: &Program, base: Option<&std::path::Path>) -> Ve
                 mesh.indices
                     .extend_from_slice(&[start, start + 2, start + 1]);
             }
-            if let Some(height) = feature.height {
-                for index in 0..feature.points.len() {
-                    let a = feature.points[index];
-                    let b = feature.points[(index + 1) % feature.points.len()];
-                    mesh.quad(
-                        [
-                            (WorldPoint { x: a[0], y: a[1] }, feature.elevation),
-                            (WorldPoint { x: b[0], y: b[1] }, feature.elevation),
-                            (WorldPoint { x: b[0], y: b[1] }, feature.elevation + height),
-                            (WorldPoint { x: a[0], y: a[1] }, feature.elevation + height),
-                        ],
-                        color,
-                    );
-                }
+            if feature.kind == LandscapeKind::Building {
+                mesh.building_facades(feature);
             }
             if feature.kind == LandscapeKind::Terrain {
                 for wall in opencity::terrain_walls(feature, &features) {
@@ -477,6 +516,23 @@ mod tests {
         let json: serde_json::Value = serde_json::from_slice(&bytes[20..20 + json_length]).unwrap();
         assert!(json["accessors"][0]["count"].as_u64().unwrap() > 0);
         assert!(json["accessors"][2]["count"].as_u64().unwrap() > 0);
+    }
+
+    #[test]
+    fn two_way_export_contains_curved_profile_bands_instead_of_a_square() {
+        let program = opencity::parse("road street: sidewalk-carlane-carlane-sidewalk; end; c = map_point(0,0); n = map_point(0,0.2); e = map_point(0.2,0); intersection2(c,street,north,n,east,e);").unwrap();
+        let bytes = export(&program);
+        let mesh = super::super::model::parse_glb(&bytes).unwrap();
+        assert!(mesh.triangles.len() > 100);
+        assert!(mesh.triangles.iter().flatten().all(|v| {
+            v.position[0].is_finite() && v.position[1].is_finite() && v.position[2].is_finite()
+        }));
+        // The old square patch reached the unconnected southwest corner.
+        assert!(mesh
+            .triangles
+            .iter()
+            .flatten()
+            .all(|v| { v.position[0] > -0.19 || v.position[2] < 0.19 }));
     }
 
     #[test]

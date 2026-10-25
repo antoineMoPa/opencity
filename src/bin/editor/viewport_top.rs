@@ -72,7 +72,8 @@ impl RoadEditor {
             let annotation_block = self.annotation_input(ui, &response, rect);
             let box_block = self.box_select_input(ui, &response, rect, &before, false);
             let network_block = self.network_map_ui(ui, &response, rect, &before, false);
-            let point_block = network_block || self.point_options_ui(ui, &response, rect, &before, false);
+            let building_block = network_block || self.building_options_ui(ui, &response, rect, false);
+            let point_block = building_block || self.point_options_ui(ui, &response, rect, &before, false);
             let spatial_block = intersection_block || point_block || box_block || annotation_block || self.minimal.pointer_over_toolbar(ui.ctx()) || self.spatial_edit_ui(ui, rect, &before, false);
             let junctions = junction_candidates(&self.program, &before);
             let element_ends = element_end_candidates(&before, &self.program);
@@ -524,9 +525,13 @@ impl RoadEditor {
             let painter = ui.painter_at(rect);
             let projection = self.projected_map();
             let scene = self.scene_geometry(ui.ctx(), palette, &projection);
+            if scene.has_animated_water() {
+                ui.ctx().request_repaint_after(std::time::Duration::from_millis(33));
+            }
             painter.add(egui::Shape::Callback(eframe::egui_wgpu::Callback::new_paint_callback(
                 rect, scene3d::SceneCallback {
- transition: self.camera_transition_matrix(rect),
+                    time_seconds: ui.input(|input| (input.time % 4.0) as f32),
+                    transition: self.camera_transition_matrix(rect),
                     scene, rect, pan: self.map_pan, zoom: self.map_zoom,
                     target: self.orbit_target, angle: self.orbit_angle, elevation: self.orbit_elevation,
                     eye_height: 0.0,

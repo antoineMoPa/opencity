@@ -26,11 +26,14 @@ pub struct WorldVertex {
     // under terrain even when a land feature has a negative elevation.
     pub depth_bias: f32,
     pub color: Color32,
+    /// Surface kind, base elevation, floor height, material identifier.
+    pub surface: [f32; 4],
 }
 
 #[derive(Default)]
 pub struct Scene {
     pub vertices: Vec<WorldVertex>,
+    water_map: Option<Arc<opencity::heightmap::ElevationMap>>,
     road_span: Option<Range<u32>>,
     road_ranges: Vec<RoadDrawRange>,
     gpu_vertices: std::sync::OnceLock<Vec<GpuVertex>>,
@@ -45,6 +48,10 @@ struct RoadDrawRange {
 }
 
 impl Scene {
+    pub fn has_animated_water(&self) -> bool {
+        self.water_map.is_some()
+    }
+
     fn gpu_vertices(&self) -> &[GpuVertex] {
         self.gpu_vertices
             .get_or_init(|| self.vertices.iter().map(gpu_vertex_from_world).collect())
@@ -60,6 +67,7 @@ fn gpu_vertex_from_world(vertex: &WorldVertex) -> GpuVertex {
             vertex.height,
             vertex.depth_bias,
         ],
+        surface: vertex.surface,
         color: rgba.map(|channel| channel as f32 / 255.0),
     }
 }
@@ -110,6 +118,7 @@ pub fn loading_scene(palette: EditorPalette) -> Arc<Scene> {
 struct GpuVertex {
     world: [f32; 4],
     color: [f32; 4],
+    surface: [f32; 4],
 }
 
 #[repr(C)]
@@ -149,6 +158,7 @@ pub use builders::build_scene;
 pub use builders::build_scene_with_model_base;
 #[cfg(any(target_arch = "wasm32", test))]
 pub use builders::WebSceneBuild;
+pub(super) use geometry::intersection_surface_height;
 use geometry::*;
 use landscape::*;
 pub use renderer::SceneCallback;
@@ -156,3 +166,6 @@ pub use renderer::SceneCallback;
 #[cfg(test)]
 #[path = "scene3d/tests.rs"]
 mod tests;
+
+#[path = "scene3d/water_gpu.rs"]
+mod water_gpu;

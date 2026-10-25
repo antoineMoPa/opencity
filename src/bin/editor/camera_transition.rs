@@ -255,6 +255,7 @@ impl RoadEditor {
                 eframe::egui_wgpu::Callback::new_paint_callback(
                     rect,
                     scene3d::SceneCallback {
+                        time_seconds: ui.input(|input| (input.time % 4.0) as f32),
                         transition: self.camera_transition_matrix(rect),
                         scene,
                         rect,

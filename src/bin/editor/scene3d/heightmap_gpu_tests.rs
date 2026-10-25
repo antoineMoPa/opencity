@@ -38,6 +38,7 @@ fn roads_above_png_terrain_render_in_top_and_isometric_views() {
                 )
         };
         let callback = SceneCallback {
+            time_seconds: 0.0,
             transition: None,
             scene: Arc::clone(&scene),
             rect,
@@ -89,6 +90,7 @@ fn threshold_water_hides_lowlands_and_leaves_highlands_visible() {
     for (x, water) in [(-1.0, true), (1.0, false)] {
         let rect = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(128.0, 128.0));
         let callback = SceneCallback {
+            time_seconds: 0.0,
             transition: None,
             scene: Arc::clone(&scene),
             rect,
@@ -112,6 +114,89 @@ fn threshold_water_hides_lowlands_and_leaves_highlands_visible() {
             assert!(
                 p[0] < p[1],
                 "expected dry terrain above the threshold: {p:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn forest_and_concrete_ground_cover_show_above_png_terrain_below_roads() {
+    let fixture = super::super::super::super::elevation_map::tests::Fixture::new(|_, _| 255);
+    let palette = editor_palette(egui::Theme::Light);
+    for (declaration, expected) in [
+        (
+            "cover=vegetation(forest,-0.8,-0.8,0.8,-0.8,0.8,0.8,-0.8,0.8);",
+            [126, 191, 140],
+        ),
+        (
+            "cover=concrete(-0.8,-0.8,0.8,-0.8,0.8,0.8,-0.8,0.8);",
+            [190, 191, 184],
+        ),
+    ] {
+        let mut program = fixture.program();
+        program.statements.extend(parse(&format!("{declaration} elevation(cover,1.022); route=street(-1,0.35,1,0.35); elevation(route,1.005);")).unwrap().statements);
+        let scene = Arc::new(build_scene_with_model_base(
+            &program,
+            &map::project(&program),
+            palette,
+            &[],
+            None,
+            Some(&fixture.dir),
+        ));
+        for camera in [CameraView::Top, CameraView::Isometric] {
+            let rect = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(128.0, 128.0));
+            let target = WorldPoint { x: 0.0, y: 0.0 };
+            let pan = if camera == CameraView::Top {
+                egui::Vec2::ZERO
+            } else {
+                rect.center()
+                    - iso_screen(
+                        rect,
+                        egui::Vec2::ZERO,
+                        70.0,
+                        target,
+                        0.74,
+                        ISO_ELEVATION,
+                        target,
+                        1.002,
+                    )
+            };
+            let callback = SceneCallback {
+                time_seconds: 0.0,
+                transition: None,
+                scene: Arc::clone(&scene),
+                rect,
+                pan,
+                zoom: 70.0,
+                target,
+                angle: 0.74,
+                elevation: ISO_ELEVATION,
+                eye_height: 0.0,
+                camera,
+                background: palette.map_background,
+                target_format: wgpu::TextureFormat::Bgra8Unorm,
+            };
+            let Some(pixels) = render_test_callback(callback) else {
+                return;
+            };
+            let center = &pixels[(64 * 128 + 64) * 4..][..3];
+            assert!(
+                center
+                    .iter()
+                    .zip(expected)
+                    .all(|(channel, e)| (*channel as i32 - e).abs() < 4),
+                "ground cover must show above terrain: {center:?} vs {expected:?}"
+            );
+            let road = WorldPoint { x: 0.0, y: 0.35 };
+            let screen = if camera == CameraView::Top {
+                screen_of(rect, pan, 70.0, road)
+            } else {
+                iso_screen(rect, pan, 70.0, target, 0.74, ISO_ELEVATION, road, 1.010)
+            };
+            let p = &pixels[((screen.y as usize) * 128 + screen.x as usize) * 4..][..3];
+            assert!(
+                p[0] > p[1] + 10 && p[1] > p[2] + 10,
+                "road must stay over ground cover: {p:?}"
             );
         }
     }

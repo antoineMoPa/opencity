@@ -3,6 +3,7 @@ use super::*;
 use opencity::heightmap::ElevationMap;
 
 pub(super) fn append_heightmap(scene: &mut Scene, map: &ElevationMap, palette: EditorPalette) {
+    scene.water_map = map.spec.water_level.map(|_| Arc::new(map.clone()));
     let base = match palette.theme {
         egui::Theme::Dark => [113.0, 137.0, 70.0],
         egui::Theme::Light => [194.0, 186.0, 139.0],
@@ -43,6 +44,7 @@ pub(super) fn append_heightmap(scene: &mut Scene, map: &ElevationMap, palette: E
                 height: p[2],
                 depth_bias: 0.001,
                 color,
+                surface: [0.0; 4],
             });
         }
     });
@@ -57,6 +59,7 @@ pub(super) fn append_heightmap(scene: &mut Scene, map: &ElevationMap, palette: E
                 height,
                 depth_bias: 0.0,
                 color: water,
+                surface: [2.0, 0.0, 0.0, 0.0],
             });
         }
     });

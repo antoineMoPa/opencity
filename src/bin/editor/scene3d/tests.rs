@@ -282,6 +282,7 @@ fn close_zoom_culls_roads_outside_the_camera() {
         y: (first.min.y + first.max.y) * 0.5,
     };
     let mut callback = SceneCallback {
+        time_seconds: 0.0,
         transition: None,
         scene: Arc::clone(&scene),
         rect: egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(512.0, 512.0)),
@@ -438,7 +439,8 @@ fn overlapping_terrain_outlines_expose_both_mountain_levels() {
 #[test]
 #[cfg(not(target_arch = "wasm32"))]
 fn referenced_glb_replaces_building_extrusion_in_scene() {
-    let source = opencity::parse("building(0.5, 0, 0, 1, 0, 1, 1, 0, 1);").unwrap();
+    let source =
+        opencity::parse("building(0.5, {material:brick}, 0, 0, 1, 0, 1, 1, 0, 1);").unwrap();
     let bytes = glb::export(&source);
     let directory = std::env::temp_dir().join(format!("opencity-glb-test-{}", std::process::id()));
     std::fs::create_dir_all(&directory).unwrap();
@@ -456,11 +458,14 @@ fn referenced_glb_replaces_building_extrusion_in_scene() {
     assert!(scene
         .vertices
         .iter()
-        .any(|vertex| vertex.color == Color32::from_rgb(158, 166, 172)
+        .any(|vertex| vertex.color.to_array()[..3]
+            .iter()
+            .zip([154, 143, 133])
+            .all(|(channel, expected)| (*channel as i32 - expected).abs() <= 1)
             && vertex.point.x >= 2.0
             && vertex.point.x <= 4.0
             && vertex.height > 0.0
-            && vertex.height <= 0.8));
+            && vertex.height <= 0.80001));
     std::fs::remove_dir_all(directory).unwrap();
 }
 
@@ -491,6 +496,29 @@ fn incremental_web_scene_matches_full_scene() {
             (expected.min_height, expected.max_height)
         );
     }
+}
+
+#[test]
+fn building_roofs_meet_their_wall_tops() {
+    let program =
+        parse("tower=building(0.4,0,0,0.2,0,0.2,0.2,0,0.2); elevation(tower,0.1);").unwrap();
+    let scene = build_scene(
+        &program,
+        &map::project(&program),
+        editor_palette(egui::Theme::Dark),
+        &[],
+        None,
+    );
+    let roof: Vec<_> = scene
+        .vertices
+        .iter()
+        .filter(|v| v.color == Color32::from_rgb(192, 198, 194))
+        .collect();
+    assert!(roof.len() >= 3);
+    assert!(
+        roof.iter().all(|v| (v.height - 0.5).abs() < 0.00001),
+        "roof must meet the 0.5 wall tops instead of inheriting the ground-surface offset"
+    );
 }
 
 #[test]

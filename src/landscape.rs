@@ -7,7 +7,7 @@
 use std::fmt;
 
 use crate::elevation::{elevation_in_calls, elevation_of};
-use crate::{Argument, BlockDefinition, Call, Program, Statement};
+use crate::{Argument, BlockDefinition, BuildingStyle, Call, Program, Statement};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum LandscapeKind {
@@ -75,6 +75,8 @@ pub struct LandscapeFeature {
     pub elevation: f32,
     /// Building extrusion height above its footprint.
     pub height: Option<f32>,
+    /// Facade material and procedural floor spacing, present only on buildings.
+    pub building_style: Option<BuildingStyle>,
     /// Terrain patch height relative to its containing block.
     pub terrain_height: Option<f32>,
     /// Optional quoted GLB path attached to a building.
@@ -230,6 +232,7 @@ fn feature(
     let mut offset = 0;
     let mut height = None;
     let mut model = None;
+    let mut building_style = None;
     let mut vegetation_type = None;
     match kind {
         LandscapeKind::Building => {
@@ -251,6 +254,15 @@ fn feature(
                 model = Some(path.to_owned());
                 offset += 1;
             }
+            building_style = Some(
+                if let Some(Argument::Object(properties)) = call.args.get(offset) {
+                    offset += 1;
+                    BuildingStyle::parse_options(properties)
+                        .map_err(|message| error(call, message))?
+                } else {
+                    BuildingStyle::default()
+                },
+            );
         }
         LandscapeKind::Terrain => {
             let value = call
@@ -314,6 +326,7 @@ fn feature(
             None
         },
         model,
+        building_style,
         vegetation_type,
     })
 }

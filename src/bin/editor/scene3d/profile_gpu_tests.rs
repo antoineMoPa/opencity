@@ -24,6 +24,7 @@ fn callback(
             )
     };
     SceneCallback {
+        time_seconds: 0.0,
         transition: None,
         scene,
         rect,

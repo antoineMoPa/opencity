@@ -156,7 +156,7 @@ fn mixed_intersection_paints_narrow_local_arm_without_design_mismatch() {
 }
 
 #[test]
-fn right_turn_uses_adjacent_square_ports() {
+fn right_turn_uses_adjacent_ports_with_room_for_curved_sidewalks() {
     let program = parse(
         "road lane: sidewalk-carlane-sidewalk; end; \
         center = map_point(0, 0); west = map_point(-1, 0); north = map_point(0, 1); \
@@ -183,7 +183,8 @@ fn right_turn_uses_adjacent_square_ports() {
     assert_eq!(paint.closed, RoadElementKind::Sidewalk);
     let expected = 100.0
         * (2.0 * map::element_world_width(RoadElementKind::Sidewalk)
-            + map::element_world_width(RoadElementKind::CarLane));
+            + map::element_world_width(RoadElementKind::CarLane))
+        * opencity::network::default_four_way_footprint_factor();
     assert!((paint.square.width() - expected).abs() < 0.001);
 }
 

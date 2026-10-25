@@ -2,6 +2,19 @@
 use super::*;
 
 impl RoadEditor {
+    /// Picking, property controls, and selection strokes share one immutable
+    /// landscape projection. Camera/selection/water animation never invalidate it.
+    pub(super) fn projected_landscape(&mut self) -> Arc<opencity::LandscapeProjection> {
+        if let Some((program, projection)) = &self.landscape_cache {
+            if *program == self.program {
+                return Arc::clone(projection);
+            }
+        }
+        let projection = Arc::new(project_landscape_features(&self.program));
+        self.landscape_cache = Some((self.program.clone(), Arc::clone(&projection)));
+        projection
+    }
+
     pub(super) fn projected_map(&mut self) -> Arc<map::Projection> {
         if let Some((program, projection)) = &self.projection_cache {
             if *program == self.program {
@@ -23,7 +36,9 @@ impl RoadEditor {
         if let Some(receiver) = &self.scene_build {
             match receiver.try_recv() {
                 Ok(cache) => {
-                    self.scene_cache = Some(cache);
+                    if cache.program == self.program && cache.theme == palette.theme {
+                        self.scene_cache = Some(cache);
+                    }
                     self.scene_build = None;
                 }
                 Err(std::sync::mpsc::TryRecvError::Disconnected) => self.scene_build = None,
@@ -31,10 +46,7 @@ impl RoadEditor {
             }
         }
         if let Some(cache) = &self.scene_cache {
-            if cache.program == self.program
-                && cache.theme == palette.theme
-                && cache.selected_landscape == self.selected_landscape
-            {
+            if cache.program == self.program && cache.theme == palette.theme {
                 #[cfg(target_arch = "wasm32")]
                 {
                     self.web_scene_build = None;
@@ -57,7 +69,6 @@ impl RoadEditor {
                 let (sender, receiver) = std::sync::mpsc::channel();
                 let program = self.program.clone();
                 let projection = projection.clone();
-                let selected_landscape = self.selected_landscape.clone();
                 let model_base = self
                     .path
                     .as_ref()
@@ -70,13 +81,12 @@ impl RoadEditor {
                         &projection,
                         palette,
                         &[],
-                        selected_landscape.as_deref(),
+                        None,
                         model_base.as_deref(),
                     ));
                     let _ = sender.send(SceneCache {
                         program,
                         theme: palette.theme,
-                        selected_landscape,
                         scene,
                     });
                     ctx.request_repaint();
@@ -91,17 +101,16 @@ impl RoadEditor {
         }
         #[cfg(target_arch = "wasm32")]
         {
-            let needs_build = self.web_scene_build.as_ref().is_none_or(|build| {
-                build.program != self.program
-                    || build.theme != palette.theme
-                    || build.selected_landscape != self.selected_landscape
-            });
+            let needs_build = self
+                .web_scene_build
+                .as_ref()
+                .is_none_or(|build| build.program != self.program || build.theme != palette.theme);
             if needs_build {
                 self.web_scene_build = Some(scene3d::WebSceneBuild::new(
                     self.program.clone(),
                     projection.clone(),
                     palette,
-                    self.selected_landscape.clone(),
+                    None,
                 ));
             }
             if self
@@ -115,7 +124,6 @@ impl RoadEditor {
                 self.scene_cache = Some(SceneCache {
                     program: self.program.clone(),
                     theme: palette.theme,
-                    selected_landscape: self.selected_landscape.clone(),
                     scene: Arc::clone(&scene),
                 });
                 return scene;
@@ -178,7 +186,7 @@ impl RoadEditor {
     }
 
     pub(super) fn paint_selection_overlay(
-        &self,
+        &mut self,
         painter: &egui::Painter,
         rect: egui::Rect,
         projection: &map::Projection,
@@ -188,6 +196,7 @@ impl RoadEditor {
         if camera == CameraView::Vehicular {
             return;
         }
+        self.paint_landscape_selection(painter, rect, palette, camera);
         if self.selected_segment.is_none() && self.selected_segments.is_empty() {
             return;
         }

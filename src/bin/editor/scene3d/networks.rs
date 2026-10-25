@@ -38,6 +38,7 @@ pub(super) fn append_networks(scene: &mut Scene, program: &Program, theme: egui:
                             0.
                         },
                         color,
+                        surface: [0.0; 4],
                     }
                 });
                 for index in [0, 1, 2, 0, 2, 3] {

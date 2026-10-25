@@ -15,7 +15,6 @@ fn vehicular_w_moves_without_deadlocking_or_rebuilding_the_scene() {
         editor.scene_cache = Some(SceneCache {
             program: program.clone(),
             theme: egui::Theme::Dark,
-            selected_landscape: None,
             scene: Arc::clone(&scene),
         });
         let ctx = egui::Context::default();

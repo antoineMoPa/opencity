@@ -59,7 +59,10 @@ pub(super) fn assign(program: &Program, projection: &Projection, junctions: &mut
                             .max((p.position.y - j.position.y).abs())
                     })
                     .fold(*half, f32::max)
-            } else if j.kind == IntersectionKind::FourWay {
+            } else if matches!(
+                j.kind,
+                IntersectionKind::FourWay | IntersectionKind::RightTurn
+            ) {
                 half * factor
             } else {
                 *half

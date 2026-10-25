@@ -49,7 +49,9 @@ impl Viewer {
         intersection: map::Intersection,
     ) -> Option<Self> {
         if let Some(instance) =
-            network::default_four_way_instance(program, projection, &intersection)
+            network::default_four_way_instance(program, projection, &intersection).or_else(|| {
+                network::default_right_turn_instance(program, projection, &intersection)
+            })
         {
             return Some(Self::explicit(&instance));
         }
@@ -279,11 +281,15 @@ pub(super) fn draw_geometry(
 
 impl RoadEditor {
     pub(super) fn map_minimum_zoom(&self) -> f32 {
-        if self
-            .program
-            .statements
-            .iter()
-            .any(|s| matches!(s, Statement::Network(_)))
+        if opencity::heightmap::ElevationMapSpec::from_program(&self.program)
+            .ok()
+            .flatten()
+            .is_some()
+            || self
+                .program
+                .statements
+                .iter()
+                .any(|s| matches!(s, Statement::Network(_)))
         {
             MIN_COMPONENT_MAP_ZOOM
         } else {

@@ -54,13 +54,14 @@ pub fn default_four_way_footprint_factor() -> f32 {
         + geometry
             .bands
             .iter()
-            .find(|b| b.name == "ground_NW")
+            .find(|b| b.name == "corner_road_NW")
             .unwrap()
             .width;
     template_face() / profile_half
 }
 fn profile_corners(geometry: &mut Resolved, arms: &[ArmProfile], half: f32) {
     let face = template_face();
+    let mut pavement = Vec::new();
     for (name, vertical, horizontal, sx, sy) in [
         ("NW", ArmSide::North, ArmSide::West, -1., -1.),
         ("NE", ArmSide::North, ArmSide::East, 1., -1.),
@@ -90,23 +91,39 @@ fn profile_corners(geometry: &mut Resolved, arms: &[ArmProfile], half: f32) {
             z: 0.,
         };
         let inner: Vec<_> = arc.iter().map(|p| mapped(*p, 0., 0.)).collect();
-        let corner = Point {
+        let horizontal_face = Point {
             x: sx * half,
+            y: 0.,
+            z: 0.,
+        };
+        let vertical_face = Point {
+            x: 0.,
             y: sy * half,
             z: 0.,
         };
-        add_band(
-            geometry,
-            format!("ground_{name}"),
-            &path_name,
-            Material::Verge,
-            BandKind::Surface,
-            inner
-                .windows(2)
-                .map(|p| [p[0], p[1], corner, corner])
-                .collect(),
-            half,
-        );
+        let (first, last) = if matches!(name, "NW" | "SE") {
+            (horizontal_face, vertical_face)
+        } else {
+            (vertical_face, horizontal_face)
+        };
+        let boundary: Vec<_> = std::iter::once(first)
+            .chain(inner)
+            .chain(std::iter::once(last))
+            .collect();
+        // Fill inward from the curved curb, rather than covering the whole
+        // junction square and masking its outside corners with painted grass.
+        for pair in boundary.windows(2) {
+            pavement.push([
+                Point {
+                    x: 0.,
+                    y: 0.,
+                    z: 0.,
+                },
+                pair[0],
+                pair[1],
+                pair[1],
+            ]);
+        }
         let (mut x_offset, mut y_offset) = (0., 0.);
         for (index, (kind, x_width, y_width)) in pair_bands(&v.outer(sx > 0.), &h.outer(sy > 0.))
             .into_iter()
@@ -165,6 +182,15 @@ fn profile_corners(geometry: &mut Resolved, arms: &[ArmProfile], half: f32) {
                 .collect();
         }
     }
+    add_band(
+        geometry,
+        "junction_pavement".into(),
+        "junction_pavement",
+        Material::Asphalt,
+        BandKind::Surface,
+        pavement,
+        half * 2.,
+    );
 }
 fn profile_approaches(geometry: &mut Resolved, arms: &[ArmProfile], half: f32) {
     for arm in arms {
@@ -386,30 +412,6 @@ pub fn default_four_way_instance(
     }
     geometry.bands.clear();
     geometry.band_meshes.clear();
-    let base = default_four_way()
-        .bands
-        .iter()
-        .find(|band| band.name == "junction_pavement")
-        .unwrap();
-    let quads = default_four_way()
-        .band_quads(base)
-        .into_iter()
-        .map(|quad| {
-            quad.map(|mut p| {
-                scale(&mut p);
-                p
-            })
-        })
-        .collect();
-    add_band(
-        &mut geometry,
-        "junction_pavement".into(),
-        "junction_pavement",
-        Material::Asphalt,
-        BandKind::Surface,
-        quads,
-        half * 2.,
-    );
     approach_underlays(&mut geometry, &arms, half);
     profile_corners(&mut geometry, &arms, half);
     profile_approaches(&mut geometry, &arms, half);

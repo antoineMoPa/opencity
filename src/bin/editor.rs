@@ -19,6 +19,8 @@ use opencity::{
 
 #[path = "editor/annotations.rs"]
 mod annotations;
+#[path = "editor/building_options.rs"]
+mod building_options;
 #[cfg(not(target_arch = "wasm32"))]
 #[path = "editor/connection.rs"]
 mod connection;
@@ -110,7 +112,6 @@ struct CopiedSegment {
 struct SceneCache {
     program: Program,
     theme: egui::Theme,
-    selected_landscape: Option<String>,
     scene: Arc<scene3d::Scene>,
 }
 
@@ -217,6 +218,7 @@ struct RoadEditor {
     camera_transition: Option<camera_transition::CameraTransition>,
     render_format: eframe::wgpu::TextureFormat,
     projection_cache: Option<(Program, Arc<map::Projection>)>,
+    landscape_cache: Option<(Program, Arc<opencity::LandscapeProjection>)>,
     scene_cache: Option<SceneCache>,
     #[cfg(target_arch = "wasm32")]
     web_scene_build: Option<scene3d::WebSceneBuild>,

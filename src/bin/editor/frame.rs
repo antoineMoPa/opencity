@@ -197,7 +197,8 @@ impl RoadEditor {
         let dragging = ctx.input(|input| input.pointer.primary_down())
             && (self.dragging_endpoint.is_some()
                 || self.dragging_control.is_some()
-                || self.dragging_intersection.is_some());
+                || self.dragging_intersection.is_some()
+                || self.selected_landscape.is_some());
         self.record_history(before, dragging);
     }
 }

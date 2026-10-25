@@ -254,14 +254,20 @@ fn default_library_has_city_rural_and_interstate_profiles() {
 }
 
 #[test]
-fn default_boot_map_is_fresh_terrain_with_open_straits_and_buildable_plains() {
+fn default_boot_map_keeps_open_straits_and_buildable_plains() {
     let program = boot_program();
     let projection = map::project(&program);
     assert_eq!(projection.unresolved, 0);
-    assert!(projection.segments.is_empty());
-    assert!(map::intersections(&program, &projection).is_empty());
+    assert!(!projection.segments.is_empty());
+    assert!(!map::intersections(&program, &projection).is_empty());
     assert!(
-        project_landscape_features(&program).features.is_empty(),
+        project_landscape_features(&program)
+            .features
+            .iter()
+            .all(|f| matches!(
+                f.kind,
+                LandscapeKind::Building | LandscapeKind::Concrete | LandscapeKind::Vegetation
+            )),
         "the unplaced terrain recipe must not create terraced scene geometry"
     );
     let terrain = elevation_map::load(&program, None).unwrap().unwrap();
@@ -276,6 +282,7 @@ fn default_boot_map_is_fresh_terrain_with_open_straits_and_buildable_plains() {
         [-5.8, 1.28],
         [8.7, 4.9],
     ] {
+        let point = [point[0] * 3.0, point[1] * 3.0];
         assert!(
             terrain.height_at(point).unwrap() < 0.0,
             "expected water at {point:?}"
@@ -292,17 +299,18 @@ fn default_boot_map_is_fresh_terrain_with_open_straits_and_buildable_plains() {
         [-1.6, -2.5],
         [8.7, -5.05],
     ] {
+        let point = [point[0] * 3.0, point[1] * 3.0];
         assert!(
             terrain.height_at(point).unwrap() > 0.0,
             "expected land at {point:?}"
         );
         assert_eq!(terrain.height_at(point), external.height_at(point));
     }
-    for point in [[-7.5, 0.2], [6.0, 0.5]] {
+    for point in [[-22.5, 0.6], [18.0, 1.5]] {
         assert!((terrain.height_at(point).unwrap() - 0.10).abs() < 0.001);
     }
-    assert!(terrain.height_at([-6.0, 5.2]).unwrap() > 0.5);
-    assert!(terrain.height_at([7.7, 4.7]).unwrap() > 0.3);
+    assert!(terrain.height_at([-18.0, 15.6]).unwrap() > 0.5);
+    assert!(terrain.height_at([23.1, 14.1]).unwrap() > 0.3);
     // Ocean covers every edge, leaving no exposed green strips at the map boundary.
     for i in 0..1024 {
         for (x, y) in [(i, 0), (i, 1023), (0, i), (1023, i)] {

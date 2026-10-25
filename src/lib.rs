@@ -21,6 +21,7 @@
 
 mod ast;
 mod blocks;
+mod building;
 pub mod cli;
 mod design_rules;
 mod elevation;
@@ -48,6 +49,7 @@ pub use ast::{
     RoadDirection, RoadElement, RoadElementKind, RoadRole, Statement,
 };
 pub use blocks::BlockInstance;
+pub use building::{BuildingMaterial, BuildingStyle};
 pub use design_rules::{
     check_design_rules, check_design_rules_with_projection, check_vehicle_lane_continuity,
     check_vehicle_lane_intrusions, DesignIssue, DesignRule,

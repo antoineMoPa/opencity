@@ -322,7 +322,9 @@ pub(super) fn paint_intersection(
         return;
     };
     if let Some(instance) =
-        opencity::network::default_four_way_instance(program, projection, intersection)
+        opencity::network::default_four_way_instance(program, projection, intersection).or_else(
+            || opencity::network::default_right_turn_instance(program, projection, intersection),
+        )
     {
         let screen = |point| {
             let p = instance.world_point(point);
@@ -350,7 +352,7 @@ pub(super) fn paint_intersection(
     let center = paint.square.center();
     let half = paint.square.width() * 0.5;
     if paint.ports.len() == 3 && !paint.mixed {
-        paint_tee_surface(painter, &paint, zoom, palette);
+        paint_tee_surface(painter, &paint, palette);
         return;
     }
     if paint.ports.len() == 4 && !paint.mixed {
@@ -478,7 +480,6 @@ pub(super) fn tee_closed_bands(
 pub(super) fn paint_tee_surface(
     painter: &egui::Painter,
     paint: &IntersectionPaint,
-    zoom: f32,
     palette: EditorPalette,
 ) {
     let center = paint.square.center();
@@ -533,13 +534,6 @@ pub(super) fn paint_tee_surface(
             kind_color(kind, palette.theme),
         );
     }
-    // Match the ordinary road's inset outline instead of centering a pixel
-    // stroke outside the physical pavement boundary.
-    painter.rect_filled(
-        egui::Rect::from_two_pos(a, b - closed.direction() * (0.004 * zoom)),
-        0.0,
-        palette.map_outline,
-    );
 }
 
 pub(super) fn paint_rounded_corner(

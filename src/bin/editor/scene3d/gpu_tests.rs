@@ -39,6 +39,7 @@ fn profile_starter_camera_frames() {
         .expect("GPU device required for manual profile");
     let mut resources = egui_wgpu::CallbackResources::default();
     let mut callback = SceneCallback {
+        time_seconds: 0.0,
         transition: None,
         scene: Arc::clone(&scene),
         rect: egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1024.0, 768.0)),
@@ -113,8 +114,9 @@ fn render_test_callback(callback: SceneCallback) -> Option<Vec<u8>> {
         return None;
     };
     let scope = device.push_error_scope(wgpu::ErrorFilter::Validation);
-    let _resources = RenderResources::new(&device, wgpu::TextureFormat::Bgra8Unorm);
-    let _srgb_resources = RenderResources::new(&device, wgpu::TextureFormat::Bgra8UnormSrgb);
+    let _resources = RenderResources::new(&device, &queue, wgpu::TextureFormat::Bgra8Unorm);
+    let _srgb_resources =
+        RenderResources::new(&device, &queue, wgpu::TextureFormat::Bgra8UnormSrgb);
     let mut resources = egui_wgpu::CallbackResources::default();
     let mut encoder = device.create_command_encoder(&Default::default());
     callback.prepare(
@@ -217,6 +219,7 @@ fn render_test_callback(callback: SceneCallback) -> Option<Vec<u8>> {
 #[test]
 fn wgpu_scene_pipelines_validate_when_an_adapter_is_available() {
     let callback = SceneCallback {
+        time_seconds: 0.0,
         transition: None,
         scene: Arc::new(Scene {
             vertices: vec![
@@ -225,18 +228,21 @@ fn wgpu_scene_pipelines_validate_when_an_adapter_is_available() {
                     height: 0.0,
                     depth_bias: 0.0,
                     color: Color32::RED,
+                    surface: [0.0; 4],
                 },
                 WorldVertex {
                     point: WorldPoint { x: 1.0, y: -1.0 },
                     height: 0.0,
                     depth_bias: 0.0,
                     color: Color32::RED,
+                    surface: [0.0; 4],
                 },
                 WorldVertex {
                     point: WorldPoint { x: 0.0, y: 1.0 },
                     height: 0.0,
                     depth_bias: 0.0,
                     color: Color32::RED,
+                    surface: [0.0; 4],
                 },
             ],
             ..Default::default()
@@ -285,10 +291,12 @@ fn vehicular_layers_are_stable_without_hiding_nearer_geometry() {
                         height,
                         depth_bias: bias,
                         color,
+                        surface: [0.0; 4],
                     });
                 }
             }
             let callback = SceneCallback {
+                time_seconds: 0.0,
                 transition: None,
                 scene: Arc::new(Scene {
                     vertices,
@@ -364,6 +372,7 @@ fn merge_pavement_renders_over_parent_verge_in_top_and_isometric_views() {
                     )
             };
             let callback = SceneCallback {
+                time_seconds: 0.0,
                 transition: None,
                 scene: Arc::clone(&scene),
                 rect,
@@ -417,6 +426,11 @@ fn render_starter_scene_pngs() {
     let projection = map::project(&program);
     let palette = editor_palette(egui::Theme::Dark);
     let scene = Arc::new(build_scene(&program, &projection, palette, &[], None));
+    if qa_target {
+        let glb = super::super::super::glb::export(&program);
+        assert!(glb.starts_with(b"glTF"));
+        std::fs::write("/private/tmp/opencity-default-map.glb", glb).unwrap();
+    }
     let (mut min_x, mut min_y, mut max_x, mut max_y) = (
         f32::INFINITY,
         f32::INFINITY,
@@ -454,10 +468,7 @@ fn render_starter_scene_pngs() {
         ("iso-interchange", CameraView::Isometric, interchange, 115.0),
     ];
     if qa_target {
-        views = vec![
-            ("top-full", CameraView::Top, center, fit),
-            ("iso-full", CameraView::Isometric, center, fit),
-        ];
+        views = default_map_views::views(center, fit);
     }
     if qa_library {
         views = vec![
@@ -528,6 +539,7 @@ fn render_starter_scene_pngs() {
             egui::Vec2::ZERO
         };
         let callback = SceneCallback {
+            time_seconds: 0.0,
             transition: None,
             scene: Arc::clone(&scene),
             rect,
@@ -536,6 +548,8 @@ fn render_starter_scene_pngs() {
             target,
             angle: if camera == CameraView::Vehicular {
                 0.0
+            } else if name == "iso-cloverleaf-reverse" {
+                3.88
             } else {
                 0.74
             },
@@ -688,6 +702,7 @@ fn junction_interior_renders_once_without_approach_centerlines_in_both_views() {
     ));
     for camera in [CameraView::Top, CameraView::Isometric] {
         let callback = SceneCallback {
+            time_seconds: 0.0,
             transition: None,
             scene: Arc::clone(&scene),
             rect: egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(128., 128.)),
@@ -746,3 +761,9 @@ mod profile_gpu_tests;
 
 #[path = "heightmap_gpu_tests.rs"]
 mod heightmap_gpu_tests;
+
+#[path = "default_map_views.rs"]
+mod default_map_views;
+
+#[path = "surface_gpu_tests.rs"]
+mod surface_gpu_tests;

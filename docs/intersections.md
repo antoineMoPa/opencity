@@ -102,7 +102,7 @@ Bands follow the referenced path's geometry and elevation. `side` is `center` (d
 
 Open a `.road` file in the editor, click the intersection's body in Top or Isometric view, and choose **Open intersection viewer**. Existing profile-based intersections also offer this option.
 
-The isolated viewer provides layer toggles, ports and headings, path lengths, anchors, and a list of permitted movements. Select a movement to highlight its complete route, including shared path sections. Drag to pan, scroll to zoom, and use **Fit intersection** to reset framing. **Back** or Escape restores the map camera. Viewing and layer controls do not change the document or create undo entries. Four-way profile intersections use the shared default component, including its twelve movements. Three-way and right-angle profile intersections retain their existing appearance and ports without adding explicit movements.
+The isolated viewer provides layer toggles, ports and headings, path lengths, anchors, and a list of permitted movements. Select a movement to highlight its complete route, including shared path sections. Drag to pan, scroll to zoom, and use **Fit intersection** to reset framing. **Back** or Escape restores the map camera. Viewing and layer controls do not change the document or create undo entries. Four-way profile intersections use the shared default component, including its twelve movements. Two-way corners use their shared curved road profiles. Three-way profile intersections retain their appearance and ports without adding explicit movements.
 
 ## SVG and PNG command-line exports
 
@@ -130,7 +130,9 @@ SVGs retain machine-readable path, band, port, and movement attributes. PNGs ras
 
 ## Default map appearance and stop lines
 
-[default_four_way.road](../road_library/default_four_way.road) authors the default four-way appearance: four quarter-circle sidewalks with curved inner and outer edges, verge bands, and one white vehicle stop bar on each inbound approach. The twelve permitted movements are separate from this physical geometry. `marking stop_N along stop_N width 0.025 color white;` is a rendered paint band; it does not add traffic-signal or vehicle-stop simulation.
+Two-way `intersection2` corners carry each connected road profile around a smooth quarter turn. Sidewalks, lanes, medians, and other road bands follow the bend and meet the approach edges; differing profiles taper their unmatched bands. New corners reserve room for the inner curb radius, while explicit port positions keep their authored footprint. The map, isolated viewer, and GLB export share this curved geometry.
+
+[default_four_way.road](../road_library/default_four_way.road) authors the default four-way appearance: four quarter-circle sidewalks with curved inner and outer edges, and one white vehicle stop bar on each inbound approach. Pavement ends at the curved curbs; the outside corners remain open to the surrounding terrain instead of receiving decorative grass fills. Connected road profiles still supply their own edge bands. The twelve permitted movements are separate from this physical geometry. `marking stop_N along stop_N width 0.025 color white;` is a rendered paint band; it does not add traffic-signal or vehicle-stop simulation.
 
 Existing `intersection4` map junctions use this component automatically. The template includes approach stubs for isolated viewing and export; the map clips its artwork to the existing junction footprint so connected roads retain their profiles. Road pavement, outlines, center markings, and walls end at that footprint. Center-connected legacy source retains its logical junction references, while the compiled road rows stop at the physical ports; explicit port-connected roads already end there. Graded approaches keep the height evaluated at the actual port boundary. This avoids coplanar approach pavement and markings continuing across the intersection.
 

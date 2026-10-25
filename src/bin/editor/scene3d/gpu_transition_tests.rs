@@ -8,6 +8,7 @@ fn callback(
     transition: Option<camera_transition::ClipMatrix>,
 ) -> SceneCallback {
     SceneCallback {
+        time_seconds: 0.0,
         transition,
         scene,
         rect,
@@ -55,6 +56,7 @@ fn transition_shader_keeps_far_origin_focus_visible_and_matches_vehicle_endpoint
         height: point[2],
         depth_bias: 0.0,
         color: Color32::RED,
+        surface: [0.0; 4],
     })
     .collect();
     let scene = Arc::new(Scene {
@@ -106,6 +108,7 @@ fn transition_shader_keeps_far_origin_focus_visible_and_matches_vehicle_endpoint
         height: point[2],
         depth_bias: 0.005,
         color: Color32::RED,
+        surface: [0.0; 4],
     })
     .collect();
     let scene = Arc::new(Scene {

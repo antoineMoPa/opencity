@@ -4,7 +4,7 @@ use super::*;
 fn add_building_walls(
     scene: &mut Scene,
     feature: &opencity::LandscapeFeature,
-    palette: EditorPalette,
+    _palette: EditorPalette,
 ) {
     let Some(height) = feature.height else {
         return;
@@ -12,13 +12,12 @@ fn add_building_walls(
     if feature.kind != LandscapeKind::Building {
         return;
     }
-    let color = match palette.theme {
-        egui::Theme::Dark => Color32::from_rgb(130, 142, 143),
-        egui::Theme::Light => Color32::from_rgb(141, 151, 159),
-    };
+    let style = feature.building_style.unwrap_or_default();
     for index in 0..feature.points.len() {
         let a = feature.points[index];
         let b = feature.points[(index + 1) % feature.points.len()];
+        let rgb = style.material.wall_rgb_for_edge(a, b);
+        let color = Color32::from_rgb(rgb[0], rgb[1], rgb[2]);
         let corners = [
             (a, feature.elevation),
             (b, feature.elevation),
@@ -35,6 +34,12 @@ fn add_building_walls(
                 height,
                 depth_bias: -0.002,
                 color,
+                surface: [
+                    1.0,
+                    feature.elevation,
+                    style.floor_height,
+                    style.material.shader_id() as f32,
+                ],
             });
         }
     }
@@ -130,6 +135,7 @@ fn add_building_model(
                 },
                 height: feature.elevation + (position[1] - mesh.min[1]) * vertical,
                 depth_bias: -0.01,
+                surface: [0.0; 4],
                 color: Color32::from_rgba_unmultiplied(
                     (vertex.color[0].clamp(0.0, 1.0) * 255.0) as u8,
                     (vertex.color[1].clamp(0.0, 1.0) * 255.0) as u8,
@@ -165,6 +171,7 @@ pub(super) fn add_terrain_walls(
                 height,
                 depth_bias: -0.001,
                 color,
+                surface: [0.0; 4],
             });
         }
     }
@@ -209,8 +216,9 @@ pub(super) fn append_landscape_feature(
         LandscapeKind::Beach => 0.08,
         LandscapeKind::Land => 0.06,
         LandscapeKind::Lake | LandscapeKind::River => 0.04,
-        LandscapeKind::Vegetation => 0.02,
-        LandscapeKind::Concrete => 0.01,
+        // Keep ground cover ahead of PNG terrain's 0.001 bias as well as land.
+        LandscapeKind::Vegetation => 0.0004,
+        LandscapeKind::Concrete => 0.0002,
         LandscapeKind::Terrain | LandscapeKind::Building => 0.0,
     };
     let mesh = feature
@@ -238,7 +246,11 @@ pub(super) fn append_landscape_feature(
                 } else {
                     feature.height.unwrap_or(0.0)
                 }
-                - 0.02
+                - if feature.kind == LandscapeKind::Building {
+                    0.0
+                } else {
+                    0.02
+                }
         },
         scene,
     );

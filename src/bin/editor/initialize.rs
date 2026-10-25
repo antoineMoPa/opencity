@@ -45,6 +45,7 @@ impl RoadEditor {
                 .map(|state| state.target_format)
                 .unwrap_or(eframe::wgpu::TextureFormat::Bgra8Unorm),
             projection_cache: None,
+            landscape_cache: None,
             scene_cache: None,
             #[cfg(target_arch = "wasm32")]
             web_scene_build: None,

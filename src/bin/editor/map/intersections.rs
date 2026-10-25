@@ -88,7 +88,7 @@ pub struct IntersectionPort {
     pub direction: WorldPoint,
 }
 
-/// Existing placed ports define their footprint; center-connected four-ways
+/// Existing placed ports define their footprint; center-connected curved junctions
 /// reserve the turn radius authored by the shared component.
 pub fn intersection_footprint_half(intersection: &Intersection, road_half: f32) -> f32 {
     if intersection.footprint_half > 0. {
@@ -105,7 +105,10 @@ pub fn intersection_footprint_half(intersection: &Intersection, road_half: f32) 
             })
             .fold(road_half, f32::max);
     }
-    if intersection.kind == IntersectionKind::FourWay {
+    if matches!(
+        intersection.kind,
+        IntersectionKind::FourWay | IntersectionKind::RightTurn
+    ) {
         road_half * opencity::network::default_four_way_footprint_factor()
     } else {
         road_half
@@ -325,7 +328,10 @@ pub fn place_intersection(
         .map(|element| element_world_width(element.kind))
         .sum::<f32>()
         * 0.5;
-    let half = if kind == IntersectionKind::FourWay {
+    let half = if matches!(
+        kind,
+        IntersectionKind::FourWay | IntersectionKind::RightTurn
+    ) {
         road_half * opencity::network::default_four_way_footprint_factor()
     } else {
         road_half

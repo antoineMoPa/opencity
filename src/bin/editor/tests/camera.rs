@@ -16,6 +16,10 @@ fn terrain_only_default_fits_top_and_isometric_viewports() {
         for camera in [CameraView::Top, CameraView::Isometric] {
             editor.camera_view = camera;
             assert!(editor.fit_elevation_scene(rect));
+            assert!(
+                editor.map_minimum_zoom() <= editor.map_zoom,
+                "scrolling must preserve access to the fitted large-map overview"
+            );
             for x in [spec.origin[0], spec.origin[0] + spec.size[0]] {
                 for y in [spec.origin[1], spec.origin[1] + spec.size[1]] {
                     for height in spec.heights {
