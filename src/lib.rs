@@ -25,6 +25,7 @@ pub mod cli;
 mod design_rules;
 mod elevation;
 mod error;
+pub mod heightmap;
 mod landscape;
 mod lexer;
 pub mod network;

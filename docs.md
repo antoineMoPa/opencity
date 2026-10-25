@@ -46,6 +46,24 @@ The shared [road pattern library](road_library/README.md) can be placed directly
 
 `vegetation(type, x, y, ...)` defines a closed area; `forest` is a useful type. It currently draws an area without generating trees. `terrain(height, x, y, ...)` defines an elevated map patch. Overlapping outlines at increasing heights form a terraced mountain; the viewport and GLB export draw the exposed sides between levels. `building(height, x, y, ...)` defines a footprint extruded to that height. A building may include a quoted GLB path after its height, for example `building(0.4, "assets/hall.glb", 0, 0, 1, 0, 1, 1)`. The native editor reads that GLB relative to the `.road` file; building assets must already be available to the runtime. The viewport fits embedded triangle meshes within the footprint and specified height, using material base colors and vertex colors. Texture images and animation are not drawn yet. GLB export currently retains the model reference as metadata and exports the building extrusion.
 
+For continuous terrain, declare one top-level **1024×1024 elevation map**:
+
+```text
+elevation_map("assets/elevation.png", -10, -10, 20, 20, 0, 2);
+```
+
+The arguments are PNG path, minimum X/Y, world width/depth, and black/white heights in map units. Width and depth must be positive; white height must be at least black height. Use an 8-bit or 16-bit grayscale PNG without alpha; RGB, palette images, and other dimensions are rejected. Heights use the PNG's numeric samples directly, without stretching to the image's observed minimum/maximum. Negative heights are supported. Pixel `(0, 0)` maps to the minimum X/Y corner; columns increase X and rows increase Y. Paths resolve relative to the `.road` file. Keep the PNG beside the map when sharing it.
+
+On desktop, **Import elevation map…** in the command palette validates and adds or replaces the declaration. Its initial bounds are `(-10, -10)` through `(10, 10)`, with heights `0–2`; edit the declaration for other bounds. Import is undoable. Opening a map reports missing/invalid elevation assets. The browser editor cannot load external elevation PNG assets yet.
+
+Add `water_level(0.35);` to flood all terrain below that world elevation. The water surface is horizontal and bounded by the elevation map; depth testing reveals the coastline where it intersects the terrain, retaining the original underwater heights. Higher terrain remains dry. Picking, new-road heights, and full-width clearance use the higher of terrain and water, so roads clear the sea as well as the island. The water plane also exports to GLB. Omit the declaration for dry terrain; one finite water level is allowed, and it requires an elevation map.
+
+The bundled example is an island with six scales of deterministic noise, a sea level of `0.35`, and black lowlands on all four PNG edges. Rebuild its 16-bit image with `cargo run --example generate_island`; its Rust generator only produces the raster asset, while the map and water declaration remain in `.road` source.
+
+Top, Isometric, and Vehicular render the same triangulated elevation surface, with slope shading. Coplanar regions merge while individual pixel peaks remain. GLB export includes the surface. See [elevation_map.road](examples/elevation_map.road) and its bundled 16-bit [elevation.png](examples/elevation.png).
+
+New roads placed in Top/Isometric sample this surface at both endpoints and receive a saved `grade`. Clearance checks cell maxima across their complete compiled width, including peaks between endpoints, and adds `0.002` map units above PNG terrain. Free roads retain their initial slope and may rise above lower terrain; connected endpoints retain their existing grade and obstructed placements reject atomically. Existing road grades remain authoritative when opening a map or replacing its elevation image. Standalone ground-level intersections still reject raised terrain. SVG export does not include elevation-map imagery.
+
 Construct terrain, water, buildings and reusable blocks in `.road` source or through the Rust API. The minimal editor displays them alongside editable roads.
 
 ```text

@@ -401,6 +401,9 @@ impl RoadEditor {
                 Ok(
                     json!({"source":self.program.to_road_source(),"segments":segments,
                     "intersections":intersections,"landscape":features,
+                    "elevation_map_error":super::elevation_map::load(&self.program,self.path.as_deref().and_then(std::path::Path::parent)).err(),
+                    "elevation_map":opencity::heightmap::ElevationMapSpec::from_program(&self.program).ok().flatten().map(|map|
+                        json!({"path":map.path,"origin":map.origin,"size":map.size,"heights":map.heights,"water_level":map.water_level,"resolution":[1024,1024]})),
                     "landscape_errors":landscape.errors.iter().map(ToString::to_string).collect::<Vec<_>>(),
                     "dirty":self.program != self.saved_program}),
                 )
@@ -598,6 +601,22 @@ impl RoadEditor {
                         self.program = before;
                         return Err(format!("Segment name is already in use: {name}"));
                     }
+                }
+                let base = self.path.as_deref().and_then(std::path::Path::parent);
+                let start_height =
+                    super::terrain_placement::height_with_base(&self.program, base, start);
+                let end_height =
+                    super::terrain_placement::height_with_base(&self.program, base, end);
+                if let Err(error) = super::terrain_placement::apply_with_base(
+                    &mut self.program,
+                    base,
+                    SegmentSource::TopLevel(index),
+                    start_height,
+                    end_height,
+                    (start_ref.is_some(), end_ref.is_some()),
+                ) {
+                    self.program = before;
+                    return Err(error.into());
                 }
                 self.view = View::Map;
                 Ok(json!({"segment_index":index}))

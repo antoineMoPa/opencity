@@ -762,3 +762,6 @@ fn junction_interior_renders_once_without_approach_centerlines_in_both_views() {
 
 #[path = "profile_gpu_tests.rs"]
 mod profile_gpu_tests;
+
+#[path = "heightmap_gpu_tests.rs"]
+mod heightmap_gpu_tests;

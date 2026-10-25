@@ -1,0 +1,11 @@
+# Deterministic six-scale noise island, with black lowlands around every edge.
+# Rebuild its 16-bit PNG with: cargo run --example generate_island
+# Pixel row zero is minimum world Y. Black is zero; white is 4 map units.
+elevation_map("elevation.png", -10, -10, 20, 20, 0, 4);
+water_level(0.35);
+
+road street:
+    sidewalk carlane carlane sidewalk;
+end
+
+# Place roads in the editor to sample the island and clear terrain or water.

@@ -31,14 +31,21 @@ pub fn build_scene_with_model_base(
     #[cfg(test)]
     let started = std::time::Instant::now();
     let mut scene = Scene::default();
+    let heightmap = super::super::elevation_map::load(program, model_base)
+        .ok()
+        .flatten();
+    if let Some(map) = &heightmap {
+        heightmap::append_heightmap(&mut scene, &map, palette);
+    }
     networks::append_networks(&mut scene, program, palette.theme);
     let ctx = egui::Context::default();
     let profiles = paint_profiles(program, projection);
     let geometry = opencity::road_geometry::RoadGeometry::compile(program, projection);
     let mut features = project_landscape_features(program).features;
-    if !features
-        .iter()
-        .any(|feature| matches!(feature.kind, LandscapeKind::Land | LandscapeKind::Beach))
+    if heightmap.is_none()
+        && !features
+            .iter()
+            .any(|feature| matches!(feature.kind, LandscapeKind::Land | LandscapeKind::Beach))
     {
         scene.vertices.extend_from_slice(grid_vertices(palette));
     }

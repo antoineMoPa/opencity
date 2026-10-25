@@ -5,6 +5,10 @@ impl RoadEditor {
     pub(super) fn open_path(&mut self, path: PathBuf) {
         match parse_road_file(&path) {
             Ok(program) => {
+                if let Err(error) = elevation_map::load(&program, path.parent()) {
+                    self.status = format!("Could not open {}: {error}", path.display());
+                    return;
+                }
                 self.load_program(program, Some(path.clone()));
                 self.status = format!("Opened {}", path.display());
             }
@@ -205,7 +209,8 @@ impl RoadEditor {
 
     #[cfg(not(target_arch = "wasm32"))]
     pub(super) fn export_glb(&mut self) {
-        let bytes = glb::export(&self.program);
+        let bytes =
+            glb::export_with_base(&self.program, self.path.as_deref().and_then(Path::parent));
         if bytes.is_empty() {
             self.status = "Nothing to export: place a road or landscape feature first".into();
             return;
@@ -288,7 +293,8 @@ impl RoadEditor {
 
     #[cfg(target_arch = "wasm32")]
     pub(super) fn export_glb(&mut self) {
-        let bytes = glb::export(&self.program);
+        let bytes =
+            glb::export_with_base(&self.program, self.path.as_deref().and_then(Path::parent));
         if bytes.is_empty() {
             self.status = "Nothing to export: place a road or landscape feature first".into();
             return;

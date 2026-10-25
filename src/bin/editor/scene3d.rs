@@ -134,6 +134,9 @@ fn bytes_of<T>(values: &[T]) -> &[u8] {
 mod builders;
 #[path = "scene3d/geometry.rs"]
 mod geometry;
+#[cfg(any(not(target_arch = "wasm32"), test))]
+#[path = "scene3d/heightmap.rs"]
+mod heightmap;
 #[path = "scene3d/landscape.rs"]
 mod landscape;
 #[path = "scene3d/networks.rs"]

@@ -422,3 +422,143 @@ fn terrain_clear_pending_draft_cancel_keeps_preview_confirm_never_restores_old_c
     assert!(e.restore_history(true));
     assert_eq!(e.program, original);
 }
+
+#[test]
+fn elevation_png_root_top_and_iso_placement_clears_surface_and_undoes() {
+    let fixture = super::super::elevation_map::tests::Fixture::new(|_, _| 255);
+    for camera in [CameraView::Top, CameraView::Isometric] {
+        let mut e = editor("elevation_map(\"height.png\",-2,-2,4,4,0,1);", camera);
+        e.path = Some(fixture.dir.join("map.road"));
+        let ctx = egui::Context::default();
+        frame(&mut e, &ctx, vec![]);
+        palette_road(&mut e, &ctx, "Add road: street");
+        let original = e.program.clone();
+        let a = WorldPoint { x: -1.0, y: 0.0 };
+        let b = WorldPoint { x: 1.0, y: 0.0 };
+        let sa = screen(&e, a, 1.0);
+        let sb = screen(&e, b, 1.0);
+        click(&mut e, &ctx, sa);
+        close(e.map_start.unwrap().x, a.x);
+        close(e.map_start.unwrap().y, a.y);
+        assert_eq!(e.program, original);
+        if camera == CameraView::Isometric {
+            let preview = e
+                .terrain_draw_preview(&map::project(&e.program), e.map_rect.unwrap(), sb)
+                .unwrap();
+            assert!(preview.start_z >= 1.002 && preview.end_z >= 1.002);
+        }
+        click(&mut e, &ctx, sb);
+        let placed = map::project(&e.program).segments.pop().unwrap();
+        close(placed.start.x, a.x);
+        close(placed.end.x, b.x);
+        assert!(placed.start_z >= 1.002 && placed.end_z >= 1.002);
+        assert_eq!(parse(&e.program.to_road_source()).unwrap(), e.program);
+        assert!(e.restore_history(true));
+        assert_eq!(e.program, original);
+    }
+}
+
+#[test]
+fn elevation_png_single_pixel_midspan_peak_lifts_free_road_and_rejects_anchor() {
+    let fixture = super::super::elevation_map::tests::Fixture::new(|x, y| {
+        if x == 540 && y == 512 {
+            255
+        } else {
+            0
+        }
+    });
+    let mut program = fixture.program();
+    let index = free_road(&mut program, -1.0, 1.0);
+    apply_with_base(
+        &mut program,
+        Some(&fixture.dir),
+        SegmentSource::TopLevel(index),
+        0.0,
+        0.0,
+        (false, false),
+    )
+    .unwrap();
+    let road = segment(&program, index);
+    assert!(road.start_z >= 1.002 && road.end_z >= 1.002);
+    let mut anchored = fixture.program();
+    let index = free_road(&mut anchored, -1.0, 1.0);
+    assert!(apply_with_base(
+        &mut anchored,
+        Some(&fixture.dir),
+        SegmentSource::TopLevel(index),
+        0.0,
+        0.0,
+        (true, false)
+    )
+    .is_err());
+}
+
+#[test]
+fn elevation_png_road_placement_fails_when_asset_is_missing() {
+    let mut program = program("elevation_map(\"missing-height.png\",-2,-2,4,4,0,1);");
+    let index = free_road(&mut program, -1.0, 1.0);
+    assert!(apply(
+        &mut program,
+        SegmentSource::TopLevel(index),
+        0.0,
+        0.0,
+        (false, false)
+    )
+    .unwrap_err()
+    .contains("could not be loaded"));
+}
+
+#[test]
+fn elevation_png_mcp_routes_clear_terrain_and_failed_connections_roll_back() {
+    let fixture = super::super::elevation_map::tests::Fixture::new(|_, _| 255);
+    let mut e = editor(
+        "elevation_map(\"height.png\",-2,-2,4,4,0,1); a=map_point(-1,0);",
+        CameraView::Top,
+    );
+    e.path = Some(fixture.dir.join("map.road"));
+    let before = e.program.clone();
+    let args = serde_json::json!({"road_type":"street","start_x":-1,"start_y":0,"end_x":1,"end_y":0,"start_ref":"a"});
+    assert!(e.call_mcp("add_road", &args).is_err());
+    assert_eq!(e.program, before);
+    let args = serde_json::json!({"road_type":"street","name":"scenic","start_x":-1,"start_y":0,"end_x":1,"end_y":0});
+    e.call_mcp("add_road", &args).unwrap();
+    let road = map::project(&e.program).segments.pop().unwrap();
+    assert_eq!(road.name.as_deref(), Some("scenic"));
+    assert!(road.start_z >= 1.002 && road.end_z >= 1.002);
+}
+
+#[test]
+fn water_surface_controls_picking_roads_and_intersection_clearance() {
+    let fixture =
+        super::super::elevation_map::tests::Fixture::new(|x, _| if x >= 512 { 255 } else { 0 });
+    let mut program = fixture.program();
+    program
+        .statements
+        .extend(parse("water_level(0.35);").unwrap().statements);
+    let base = Some(fixture.dir.as_path());
+    let water = WorldPoint { x: -1.0, y: 0.0 };
+    close(height_with_base(&program, base, water), 0.35);
+    assert!(intersection_obstructed_with_base(
+        &program, base, water, 0.1
+    ));
+    let (_, height) = iso_pick_with_base(&program, base, |_| water);
+    close(height, 0.35);
+    // A mountain ahead of a water hit along the same ray must occlude water.
+    let (_, height) = iso_pick_with_base(&program, base, |z| WorldPoint {
+        x: 2.0 * z - 1.3,
+        y: 0.0,
+    });
+    close(height, 1.0);
+    let index = free_road(&mut program, -1.5, -0.5);
+    apply_with_base(
+        &mut program,
+        base,
+        SegmentSource::TopLevel(index),
+        0.35,
+        0.35,
+        (false, false),
+    )
+    .unwrap();
+    let road = segment(&program, index);
+    assert!(road.start_z >= 0.352 && road.end_z >= 0.352);
+}

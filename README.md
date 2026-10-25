@@ -34,3 +34,5 @@ cargo run --bin opencity -- intersection-svg examples/intersections.road --name 
 cargo run --bin opencity -- intersection-png examples/intersections.road --name crossroads --output /tmp/crossroads.png
 cargo run --bin opencity -- --help
 ```
+
+Desktop maps support [1024×1024 elevation PNGs](docs.md#land-water-elevation-and-reusable-crossings), with automatic terrain clearance for newly placed roads and a configurable water level. Try the multi-scale noise island in [elevation_map.road](examples/elevation_map.road), or choose **Import elevation map…** in the command palette.

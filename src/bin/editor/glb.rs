@@ -115,10 +115,33 @@ fn pad(bytes: &mut Vec<u8>, multiple: usize, fill: u8) {
     }
 }
 
+#[cfg(test)]
 pub fn export(program: &Program) -> Vec<u8> {
+    export_with_base(program, None)
+}
+
+pub fn export_with_base(program: &Program, base: Option<&std::path::Path>) -> Vec<u8> {
     let projection = map::project(program);
     let geometry = opencity::road_geometry::RoadGeometry::compile(program, &projection);
     let mut mesh = Geometry::new();
+    if let Ok(Some(map)) = super::elevation_map::load(program, base) {
+        map.for_each_triangle(|triangle| {
+            let first = mesh.positions.len() as u32;
+            for [x, y, z] in triangle {
+                mesh.vertex(WorldPoint { x, y }, z, [147, 150, 98, 255]);
+            }
+            mesh.indices
+                .extend_from_slice(&[first, first + 2, first + 1]);
+        });
+        map.for_each_water_triangle(|triangle| {
+            let first = mesh.positions.len() as u32;
+            for [x, y, z] in triangle {
+                mesh.vertex(WorldPoint { x, y }, z, [15, 99, 155, 255]);
+            }
+            mesh.indices
+                .extend_from_slice(&[first, first + 2, first + 1]);
+        });
+    }
     for (index, segment) in projection.segments.iter().enumerate() {
         let road = program
             .statements

@@ -57,16 +57,28 @@ pub(super) fn overlaps(a: &[[f32; 2]], b: &[[f32; 2]]) -> bool {
         })
 }
 
-pub(super) fn height(program: &Program, point: WorldPoint) -> f32 {
+pub(super) fn height_with_base(program: &Program, base: Option<&Path>, point: WorldPoint) -> f32 {
     terrain(program)
         .iter()
         .filter(|f| inside([point.x, point.y], &f.points))
         .map(|f| f.elevation)
-        .fold(0.0, f32::max)
+        .fold(
+            elevation_map::load(program, base)
+                .ok()
+                .flatten()
+                .and_then(|map| map.surface_height_at([point.x, point.y]))
+                .unwrap_or(0.0),
+            f32::max,
+        )
 }
 
 /// Native standalone junctions have ground-level surfaces and ports.
-pub(super) fn intersection_obstructed(program: &Program, point: WorldPoint, half: f32) -> bool {
+pub(super) fn intersection_obstructed_with_base(
+    program: &Program,
+    base: Option<&Path>,
+    point: WorldPoint,
+    half: f32,
+) -> bool {
     let square = [
         [point.x - half, point.y - half],
         [point.x + half, point.y - half],
@@ -76,14 +88,24 @@ pub(super) fn intersection_obstructed(program: &Program, point: WorldPoint, half
     terrain(program)
         .iter()
         .any(|f| f.elevation > 0.0 && overlaps(&square, &f.points))
+        || elevation_map::load(program, base)
+            .ok()
+            .flatten()
+            .and_then(|map| map.surface_maximum_in(square[0], square[2]))
+            .is_some_and(|z| z > 0.0)
 }
 
-pub(super) fn iso_pick(
+pub(super) fn iso_pick_with_base(
     program: &Program,
+    base: Option<&Path>,
     at_height: impl Fn(f32) -> WorldPoint,
 ) -> (WorldPoint, f32) {
     // Along an orthographic downward ray the highest intersected top is first.
-    let mut picked = (at_height(0.0), 0.0);
+    let mut picked = elevation_map::load(program, base)
+        .ok()
+        .flatten()
+        .and_then(|map| elevation_map::pick(&map, &at_height))
+        .unwrap_or((at_height(0.0), 0.0));
     for f in terrain(program) {
         let p = at_height(f.elevation);
         if f.elevation > picked.1 && inside([p.x, p.y], &f.points) {
@@ -96,8 +118,9 @@ pub(super) fn iso_pick(
 /// Preserve anchored endpoints. For a free road preserve the initial slope and
 /// raise both ends conservatively above all terrain intersecting its complete
 /// compiled surface. Polygon intersections detect even patches between rows.
-pub(super) fn apply(
+pub(super) fn apply_with_base(
     program: &mut Program,
+    base: Option<&Path>,
     source: SegmentSource,
     start: f32,
     end: f32,
@@ -112,8 +135,10 @@ pub(super) fn apply(
     };
     let segment = &projection.segments[index];
     let features = terrain(program);
+    let heightmap = elevation_map::load(program, base)
+        .map_err(|_| "Elevation map could not be loaded; check its path and PNG format")?;
     // Keep the established connection/grade behavior when there is no terrain.
-    if features.is_empty() {
+    if features.is_empty() && heightmap.is_none() {
         return Ok(());
     }
     let points = [
@@ -184,6 +209,20 @@ pub(super) fn apply(
                     .iter()
                     .map(|v| v.height)
                     .fold(f32::INFINITY, f32::min);
+                if let Some(map) = &heightmap {
+                    let min =
+                        [0, 1].map(|i| polygon.iter().map(|p| p[i]).fold(f32::INFINITY, f32::min));
+                    let max = [0, 1].map(|i| {
+                        polygon
+                            .iter()
+                            .map(|p| p[i])
+                            .fold(f32::NEG_INFINITY, f32::max)
+                    });
+                    if let Some(top) = map.surface_maximum_in(min, max) {
+                        // Cell maxima also cover peaks between compiled road rows.
+                        lift = lift.max(top + 0.002 - low);
+                    }
+                }
                 for feature in &features {
                     if feature.elevation > low && overlaps(&polygon, &feature.points) {
                         lift = lift.max(feature.elevation - low);
@@ -225,18 +264,22 @@ impl RoadEditor {
         {
             program.statements.push(Statement::Road(road.clone()));
         }
-        let (mut point, _) = iso_pick(&program, |height| {
-            iso_world_at_height(
-                rect,
-                self.map_pan,
-                self.map_zoom,
-                self.orbit_target,
-                self.orbit_angle,
-                self.orbit_elevation,
-                pointer,
-                height,
-            )
-        });
+        let (mut point, _) = iso_pick_with_base(
+            &program,
+            self.path.as_deref().and_then(Path::parent),
+            |height| {
+                iso_world_at_height(
+                    rect,
+                    self.map_pan,
+                    self.map_zoom,
+                    self.orbit_target,
+                    self.orbit_angle,
+                    self.orbit_elevation,
+                    pointer,
+                    height,
+                )
+            },
+        );
         let mut reference = None;
         if let Some((source, end)) = self.draw_endpoint_near(projection, rect, pointer, true) {
             if let Some((p, r)) = map::link_endpoint(&mut program, source, end) {
@@ -274,14 +317,16 @@ impl RoadEditor {
             point,
             reference.as_deref(),
         );
-        let start_height = self
-            .map_start_height
-            .unwrap_or_else(|| height(&program, start));
-        let end_height = height(&program, point);
+        let start_height = self.map_start_height.unwrap_or_else(|| {
+            height_with_base(&program, self.path.as_deref().and_then(Path::parent), start)
+        });
+        let end_height =
+            height_with_base(&program, self.path.as_deref().and_then(Path::parent), point);
         // An invalid anchored preview stays at its anchored grade; clicking it
         // reports why it cannot be committed without moving existing roads.
-        let _ = apply(
+        let _ = apply_with_base(
             &mut program,
+            self.path.as_deref().and_then(Path::parent),
             SegmentSource::TopLevel(index),
             start_height,
             end_height,
@@ -305,21 +350,29 @@ impl RoadEditor {
                 point,
                 z,
             );
-            iso_pick(&self.program, |height| {
-                iso_world_at_height(
-                    rect,
-                    self.map_pan,
-                    self.map_zoom,
-                    self.orbit_target,
-                    self.orbit_angle,
-                    self.orbit_elevation,
-                    screen,
-                    height,
-                )
-            })
+            iso_pick_with_base(
+                &self.program,
+                self.path.as_deref().and_then(Path::parent),
+                |height| {
+                    iso_world_at_height(
+                        rect,
+                        self.map_pan,
+                        self.map_zoom,
+                        self.orbit_target,
+                        self.orbit_angle,
+                        self.orbit_elevation,
+                        screen,
+                        height,
+                    )
+                },
+            )
             .1
         } else {
-            height(&self.program, point)
+            height_with_base(
+                &self.program,
+                self.path.as_deref().and_then(Path::parent),
+                point,
+            )
         };
         z + 1e-5 >= surface
     }
@@ -451,11 +504,19 @@ impl RoadEditor {
         before_click: Program,
     ) -> bool {
         let start = self.map_start.unwrap();
-        let start_height = self
-            .map_start_height
-            .unwrap_or_else(|| height(&self.program, start));
-        let end_height = height(&self.program, point);
-        let result = apply(&mut self.program, SegmentSource::TopLevel(index),
+        let start_height = self.map_start_height.unwrap_or_else(|| {
+            height_with_base(
+                &self.program,
+                self.path.as_deref().and_then(Path::parent),
+                start,
+            )
+        });
+        let end_height = height_with_base(
+            &self.program,
+            self.path.as_deref().and_then(Path::parent),
+            point,
+        );
+        let result = apply_with_base(&mut self.program, self.path.as_deref().and_then(Path::parent), SegmentSource::TopLevel(index),
             start_height, end_height,
             (self.map_start_ref.is_some(), point_ref.is_some())).and_then(|()| {
                 // A branch can add an entry and a remaining through segment.
@@ -465,7 +526,7 @@ impl RoadEditor {
                     matches!(s.source, SegmentSource::TopLevel(i) if i >= before_click.statements.len() && i != index))
                     .collect();
                 for segment in additional {
-                    apply(&mut self.program,segment.source,segment.start_z,segment.end_z,(true,true))?;
+                    apply_with_base(&mut self.program, self.path.as_deref().and_then(Path::parent),segment.source,segment.start_z,segment.end_z,(true,true))?;
                 }
                 Ok(())
             });
@@ -496,3 +557,26 @@ impl RoadEditor {
 #[cfg(test)]
 #[path = "terrain_placement/tests.rs"]
 mod tests;
+
+#[cfg(test)]
+pub(super) fn height(program: &Program, point: WorldPoint) -> f32 {
+    height_with_base(program, None, point)
+}
+#[cfg(test)]
+fn iso_pick(program: &Program, at_height: impl Fn(f32) -> WorldPoint) -> (WorldPoint, f32) {
+    iso_pick_with_base(program, None, at_height)
+}
+#[cfg(test)]
+fn apply(
+    program: &mut Program,
+    source: SegmentSource,
+    start: f32,
+    end: f32,
+    anchors: (bool, bool),
+) -> Result<(), &'static str> {
+    apply_with_base(program, None, source, start, end, anchors)
+}
+#[cfg(test)]
+pub(super) fn intersection_obstructed(program: &Program, point: WorldPoint, half: f32) -> bool {
+    intersection_obstructed_with_base(program, None, point, half)
+}

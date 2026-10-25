@@ -31,18 +31,22 @@ impl RoadEditor {
         if self.camera_view == CameraView::Top {
             world_of(rect, self.map_pan, self.map_zoom, pointer)
         } else {
-            terrain_placement::iso_pick(&self.program, |height| {
-                iso_world_at_height(
-                    rect,
-                    self.map_pan,
-                    self.map_zoom,
-                    self.orbit_target,
-                    self.orbit_angle,
-                    self.orbit_elevation,
-                    pointer,
-                    height,
-                )
-            })
+            terrain_placement::iso_pick_with_base(
+                &self.program,
+                self.path.as_deref().and_then(Path::parent),
+                |height| {
+                    iso_world_at_height(
+                        rect,
+                        self.map_pan,
+                        self.map_zoom,
+                        self.orbit_target,
+                        self.orbit_angle,
+                        self.orbit_elevation,
+                        pointer,
+                        height,
+                    )
+                },
+            )
             .0
         }
     }
@@ -73,7 +77,12 @@ impl RoadEditor {
             .map(|e| map::element_world_width(e.kind))
             .sum::<f32>()
             * 0.5;
-        let blocked = if terrain_placement::intersection_obstructed(&self.program, position, half) {
+        let blocked = if terrain_placement::intersection_obstructed_with_base(
+            &self.program,
+            self.path.as_deref().and_then(Path::parent),
+            position,
+            half,
+        ) {
             Some("Intersections need ground level; choose a place clear of raised terrain")
         } else if intersection_site_occupied(&self.program, position, half) {
             Some("Choose an empty site; connect roads to the new intersection ports")
@@ -174,7 +183,11 @@ impl RoadEditor {
                     self.orbit_elevation,
                     point,
                     if blocked.is_some() {
-                        terrain_placement::height(&self.program, position)
+                        terrain_placement::height_with_base(
+                            &self.program,
+                            self.path.as_deref().and_then(Path::parent),
+                            position,
+                        )
                     } else {
                         0.0
                     },

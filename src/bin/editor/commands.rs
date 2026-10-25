@@ -86,6 +86,13 @@ impl RoadEditor {
             shortcut: shortcut.into(),
         })
         .collect();
+        #[cfg(not(target_arch = "wasm32"))]
+        commands.push(PaletteCommand {
+            id: "import-elevation-map".into(),
+            title: "Import elevation map…".into(),
+            description: "1024×1024 grayscale PNG terrain".into(),
+            shortcut: String::new(),
+        });
         for statement in &self.program.statements {
             if let Statement::Road(road) = statement {
                 if Self::canonical_road_names().contains(&road.name.as_str()) {
@@ -257,6 +264,8 @@ impl RoadEditor {
             "open" => self.file_action(FileAction::Open),
             "save" => self.file_action(FileAction::Save),
             "save-as" => self.file_action(FileAction::SaveAs),
+            #[cfg(not(target_arch = "wasm32"))]
+            "import-elevation-map" => self.import_elevation_map(),
             "export-glb" => self.export_glb(),
             "export-svg" => self.export_svg(),
             "undo" => {

@@ -4,7 +4,11 @@ use opencity::road_profiles::{
 };
 #[cfg(not(target_arch = "wasm32"))]
 use opencity::road_profiles::{road_joins, straight_join};
-use std::{collections::HashMap, path::PathBuf, sync::Arc};
+use std::{
+    collections::HashMap,
+    path::{Path, PathBuf},
+    sync::Arc,
+};
 
 use eframe::egui::{self, Color32, RichText};
 use egui_command_palette::{Command as PaletteCommand, CommandPalette};
@@ -18,6 +22,8 @@ mod annotations;
 #[cfg(not(target_arch = "wasm32"))]
 #[path = "editor/connection.rs"]
 mod connection;
+#[path = "editor/elevation_map.rs"]
+mod elevation_map;
 #[path = "editor/glb.rs"]
 mod glb;
 #[cfg(not(target_arch = "wasm32"))]

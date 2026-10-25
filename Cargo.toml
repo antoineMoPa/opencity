@@ -13,7 +13,7 @@ crate-type = ["rlib", "cdylib"]
 [features]
 default = ["editor", "intersection-export"]
 intersection-export = ["dep:resvg"]
-editor = ["dep:eframe", "dep:egui_extras", "dep:egui_command_palette", "dep:moon_toggle_switch", "dep:rfd", "dep:muda", "dep:serde_json", "dep:base64", "dep:png"]
+editor = ["dep:eframe", "dep:egui_extras", "dep:egui_command_palette", "dep:moon_toggle_switch", "dep:rfd", "dep:muda", "dep:serde_json", "dep:base64"]
 
 [[bin]]
 name = "editor"
@@ -34,7 +34,7 @@ moon_toggle_switch = { path = "crates/moon_toggle_switch", optional = true }
 rfd = { version = "0.17", optional = true }
 serde_json = { version = "=1.0.151", optional = true }
 base64 = { version = "0.22", optional = true }
-png = { version = "0.17", optional = true }
+png = "0.17"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 muda = { version = "0.19", default-features = false, optional = true }

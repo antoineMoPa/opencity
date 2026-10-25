@@ -267,7 +267,7 @@ impl RoadEditor {
                     let Some(placement_click_before) = self.begin_road_click() else { return; };
                     let matched_port = port_hit.as_ref().filter(|(point, _, road_name)|
                         self.road().is_some_and(|road| road.name == *road_name)
-                        && terrain_placement::height(&self.program, *point) <= 0.0);
+                        && terrain_placement::height_with_base(&self.program, self.path.as_deref().and_then(Path::parent), *point) <= 0.0);
                     let target_endpoint = self.draw_endpoint_near(&before, rect, pointer, false);
                     let element_end = if target_endpoint.is_none() {
                         element_end_near(&self.draw_element_ends(&before, rect, false), rect, self.map_pan, self.map_zoom, pointer)
@@ -278,7 +278,7 @@ impl RoadEditor {
                             .map(|(point, reference)| (point, Some(reference)))))
                         .or_else(|| element_end.map(|candidate| (candidate.position, None)))
                         .or_else(|| junction_near(&junctions, rect, self.map_pan, self.map_zoom, pointer)
-                            .filter(|(point, _)| terrain_placement::height(&self.program, *point) <= 0.0));
+                            .filter(|(point, _)| terrain_placement::height_with_base(&self.program, self.path.as_deref().and_then(Path::parent), *point) <= 0.0));
                     let (point, mut point_ref) = picked.unwrap_or((free_point, None));
                     if self.map_start != Some(point) {
                         if let Some(candidate) = element_end {
@@ -371,7 +371,7 @@ impl RoadEditor {
                     } else {
                         self.map_start = Some(point);
                         self.map_start_ref = point_ref;
-                        self.map_start_height = Some(terrain_placement::height(&self.program, point));
+                        self.map_start_height = Some(terrain_placement::height_with_base(&self.program, self.path.as_deref().and_then(Path::parent), point));
                     }
                     self.hold_road_draft();
                 }

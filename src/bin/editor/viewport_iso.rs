@@ -298,7 +298,7 @@ impl RoadEditor {
                     }
                     MapTool::Draw => {
                         let Some(placement_click_before) = self.begin_road_click() else { return; };
-                        let (free_point, _) = terrain_placement::iso_pick(&self.program, |height|
+                        let (free_point, _) = terrain_placement::iso_pick_with_base(&self.program, self.path.as_deref().and_then(Path::parent), |height|
                             iso_world_at_height(rect, self.map_pan, self.map_zoom,
                                 self.orbit_target, self.orbit_angle, self.orbit_elevation, pointer, height));
                         let target_endpoint = self.draw_endpoint_near(&projection, rect, pointer, true);
@@ -314,7 +314,7 @@ impl RoadEditor {
                                 port.position, 0.0)) <= 10.0);
                         let picked_port = port.as_ref().filter(|(port, road_name)|
                             !map::port_in_use(&projection, &port.point_ref)
-                            && terrain_placement::height(&self.program, port.position) <= 0.0
+                            && terrain_placement::height_with_base(&self.program, self.path.as_deref().and_then(Path::parent), port.position) <= 0.0
                             && self.road().is_some_and(|road| road.name == *road_name))
                             .map(|(port, _)| (port.position, Some(port.point_ref.clone())));
                         let mut picked = picked_port.or_else(|| target_endpoint.and_then(|(source, is_end)|
@@ -400,7 +400,7 @@ impl RoadEditor {
                         } else {
                             self.map_start = Some(point);
                             self.map_start_ref = point_ref;
-                            self.map_start_height = Some(terrain_placement::height(&self.program, point));
+                            self.map_start_height = Some(terrain_placement::height_with_base(&self.program, self.path.as_deref().and_then(Path::parent), point));
                         }
                         self.hold_road_draft();
                     }
