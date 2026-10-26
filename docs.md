@@ -186,3 +186,7 @@ Road placement in Top/Isometric uses visible terrain surfaces and checks the com
 The [intersection language guide](docs/intersections.md) covers reusable `intersection`, `interchange`, and `road_segment` definitions with ports, line/arc/cubic paths, named anchors, explicit permitted movements, surfaces, and markings. See [intersections.road](examples/intersections.road) for the proposal's three complete examples. Click an intersection in the map and choose **Open intersection viewer** to inspect it independently without editing the document.
 
 Use `opencity intersection-svg INPUT.road --name NAME --output OUTPUT.svg` or `opencity intersection-png INPUT.road --name NAME --output OUTPUT.png` for headless exports. Both commands also work through `editor`, and are listed in each executable's `--help`. The guide documents all export options and the lightweight CLI build.
+
+## Game runtime integration
+
+Enable `game-runtime` with default features disabled to query structured roads, directions, paths, buildings and landscape, sample physical driving surfaces, and generate procedural meshes and nearby street details. Optional editor/game WGSL exports let consumers reuse the visual style. See [the game integration guide](docs/game-runtime.md) and the winit/wgpu prototype in `../mtl_jobines`.

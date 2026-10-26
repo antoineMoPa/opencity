@@ -65,3 +65,7 @@ pub use landscape::{
 };
 pub use lexer::{tokenize, Span, Token, TokenKind};
 pub use parser::{parse, parse_road_file};
+
+/// Spatial game queries, procedural meshes and optional renderer shaders.
+#[cfg(feature = "game-runtime")]
+pub mod runtime;
