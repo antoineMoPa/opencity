@@ -145,6 +145,13 @@ impl City {
     }
     /// `base` resolves elevation PNGs relative to the authored map, not process CWD.
     pub fn from_program(program: &Program, base: Option<&Path>) -> Result<Self, String> {
+        Self::from_program_with_elevation_loader(program, |spec| spec.load(base))
+    }
+    /// Compile with a caller-supplied elevation loader, including embedded/browser assets.
+    pub fn from_program_with_elevation_loader(
+        program: &Program,
+        load: impl FnOnce(&ElevationMapSpec) -> Result<ElevationMap, String>,
+    ) -> Result<Self, String> {
         let projection = map::project(program);
         if projection.unresolved > 0 {
             return Err(format!(
@@ -153,7 +160,7 @@ impl City {
             ));
         }
         let elevation = ElevationMapSpec::from_program(program)?
-            .map(|s| s.load(base))
+            .map(|s| load(&s))
             .transpose()?;
         let landscape = crate::project_landscape_features(program);
         if !landscape.errors.is_empty() {
