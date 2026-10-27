@@ -607,5 +607,26 @@ pub(super) fn compile(
             }
         }
     }
+    // Build after the support index so piers can avoid the lower road network.
+    // Props participate in rendering only; deck driving surfaces stay unchanged.
+    for triangle in super::bridges::mesh(city, &geometry).vertices.chunks_exact(3) {
+        let i = city.triangles.len();
+        let points = std::array::from_fn(|j| triangle[j].position);
+        let b = bounds(points.map(|p| [p[0], p[1]]));
+        let a = cell([b[0], b[1]]);
+        let z = cell([b[2], b[3]]);
+        for x in a.0..=z.0 {
+            for y in a.1..=z.1 {
+                city.cells.entry((x, y)).or_default().push(i);
+            }
+        }
+        city.triangles.push(Triangle {
+            points,
+            kind: SurfaceKind::Prop,
+            road: None,
+            color: triangle[0].color,
+            data: [0.; 3],
+        });
+    }
     Ok(())
 }

@@ -2,6 +2,7 @@
 //! A map unit is deliberately not assigned a physical length; consumers choose a scale.
 //! Load once, query borrowed structured records, and request camera-local triangle meshes.
 mod geometry;
+mod bridges;
 mod junction_mesh;
 mod mesh;
 mod svg;
