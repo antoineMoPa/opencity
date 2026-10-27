@@ -153,6 +153,9 @@ pub struct Projection {
     pub segments: Vec<Segment>,
     pub points: Vec<MapPoint>,
     pub unresolved: usize,
+    // Intersection geometry belongs to the same immutable document projection.
+    // Picking and painting must not expand component templates every frame.
+    pub(super) intersections: Vec<Intersection>,
 }
 
 #[derive(Clone, Debug)]

@@ -246,7 +246,7 @@ impl RoadEditor {
     }
 
     pub(super) fn focus_orbit_on_selection(&mut self) {
-        let projection = map::project(&self.program);
+        let projection = self.projected_map();
         if let Some(segment) = projection
             .segments
             .iter()
@@ -261,11 +261,12 @@ impl RoadEditor {
             })
         {
             self.orbit_target = intersection.position;
-        } else if let Some(feature) = self.selected_landscape.as_ref().and_then(|name| {
-            project_landscape_features(&self.program)
+        } else if let Some(feature) = self.selected_landscape.clone().and_then(|name| {
+            self.projected_landscape()
                 .features
-                .into_iter()
-                .find(|feature| feature.name.as_ref() == Some(name))
+                .iter()
+                .find(|feature| feature.name.as_ref() == Some(&name))
+                .cloned()
         }) {
             if !feature.points.is_empty() {
                 let (x, y) = feature

@@ -59,7 +59,17 @@ pub fn to_svg_with_options(
                 escape(&band.path)
             );
             let quads = network.band_quads(band);
-            if let Some(last) = quads.last() {
+            if !quads
+                .windows(2)
+                .all(|pair| pair[0][1] == pair[1][0] && pair[0][2] == pair[1][3])
+            {
+                // Fan meshes and disconnected patches cannot share a ribbon outline.
+                let _ = write!(out, r#"<path fill="{color}" d=""#);
+                for quad in &quads {
+                    let _ = write!(out, "{} Z ", path_data(quad));
+                }
+                out.push_str("\"/>");
+            } else if let Some(last) = quads.last() {
                 // One outline avoids antialias seams between adjacent quads.
                 let outline: Vec<_> = quads
                     .iter()

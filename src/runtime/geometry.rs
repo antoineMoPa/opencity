@@ -318,6 +318,7 @@ pub(super) fn compile(
     }
     for j in &city.junctions.clone() {
         if let Some(mut instance) = network::default_four_way_instance(program, projection, j)
+            .or_else(|| network::default_three_way_instance(program, projection, j))
             .or_else(|| network::default_right_turn_instance(program, projection, j))
         {
             // Native templates live at zero; use connected road heights at the seam.

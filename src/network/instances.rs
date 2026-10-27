@@ -7,16 +7,22 @@ pub struct NetworkInstance {
     pub name: String,
     pub definition: usize,
     pub origin: Point,
+    pub rotation: f32,
     pub geometry: Resolved,
 }
 impl NetworkInstance {
     /// The proposal uses local +Y south; the existing city uses world +Y north.
     pub fn world_point(&self, point: Point) -> Point {
+        let [x, y] = crate::blocks::rotate_vector([point.x, -point.y], self.rotation);
         Point {
-            x: self.origin.x + point.x,
-            y: self.origin.y - point.y,
+            x: self.origin.x + x,
+            y: self.origin.y + y,
             z: self.origin.z + point.z,
         }
+    }
+    pub fn world_direction(&self, heading: Heading) -> [f32; 2] {
+        let [x, y] = heading.vector();
+        crate::blocks::rotate_vector([x, -y], self.rotation)
     }
 }
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -25,31 +31,44 @@ pub struct NetworkProjection {
     pub errors: Vec<String>,
 }
 
-fn number(argument: &Argument) -> Option<f32> {
-    match argument {
-        Argument::Number(text) => text.parse::<f32>().ok().filter(|n| n.is_finite()),
-        _ => None,
-    }
-}
-fn placement(args: &[Argument]) -> Result<Point, String> {
-    if !matches!(args.len(), 2 | 3) {
-        return Err("component placement needs x, y, and optional elevation".into());
-    }
-    Ok(Point {
-        x: number(&args[0]).ok_or("component x must be finite")?,
-        y: number(&args[1]).ok_or("component y must be finite")?,
-        z: if args.len() == 3 {
-            number(&args[2]).ok_or("component elevation must be finite")?
-        } else {
-            0.
-        },
-    })
+fn instantiate<'a>(
+    definition: &Definition,
+    args: &'a [Argument],
+) -> Result<(Resolved, crate::blocks::Placement<'a>), String> {
+    let bound = crate::blocks::bind_placement(
+        definition
+            .template
+            .as_ref()
+            .map(|t| t.parameters.as_slice()),
+        args,
+        crate::blocks::PlacementKind::Component,
+        definition.name.as_deref().unwrap_or_default(),
+    )?;
+    let geometry = if let Some(ComponentTemplate {
+        body: ComponentTemplateBody::Network(body),
+        ..
+    }) = &definition.template
+    {
+        let source = format!(
+            "{} {} {{ {} }}",
+            definition.kind.keyword(),
+            definition.name.as_deref().unwrap_or_default(),
+            body
+        );
+        let concrete = crate::parser::parse_bound_component(&source, bound.bindings.to_vec())
+            .map_err(|e| e.to_string())?;
+        resolve(&concrete)?
+    } else {
+        resolve(definition)?
+    };
+    Ok((geometry, bound))
 }
 fn visit(
     program: &Program,
     call: &Call,
     calls: &[&Call],
     origin: Point,
+    rotation: f32,
     id: String,
     namespace: &str,
     stack: &mut Vec<String>,
@@ -75,19 +94,32 @@ fn visit(
                 _ => None,
             })
     {
+        if matches!(
+            &definition.template,
+            Some(ComponentTemplate {
+                body: ComponentTemplateBody::Junction(_),
+                ..
+            })
+        ) {
+            return;
+        }
         let built: Result<NetworkInstance, String> = (|| {
-            let local = placement(&call.args)?;
+            let (geometry, bound) = instantiate(definition, &call.args)?;
+            let [x, y] = crate::blocks::rotate_vector(bound.origin, rotation);
             let named = call
                 .assigns
                 .first()
                 .and_then(|name| crate::elevation_in_calls(calls, name))
                 .unwrap_or(0.);
             let origin = Point {
-                x: origin.x + local.x,
-                y: origin.y + local.y,
-                z: origin.z + local.z + named,
+                x: origin.x + x,
+                y: origin.y + y,
+                z: origin.z + bound.elevation + named,
             };
-            if ![origin.x, origin.y, origin.z].iter().all(|n| n.is_finite()) {
+            if ![origin.x, origin.y, origin.z, rotation + bound.rotation]
+                .iter()
+                .all(|n| n.is_finite())
+            {
                 return Err("component placement overflow".into());
             }
             Ok(NetworkInstance {
@@ -95,7 +127,8 @@ fn visit(
                 name: qualified.clone(),
                 definition: index,
                 origin,
-                geometry: resolve(definition)?,
+                rotation: rotation + bound.rotation,
+                geometry,
             })
         })();
         match built {
@@ -124,11 +157,21 @@ fn visit(
             .first()
             .and_then(|name| crate::elevation_in_calls(calls, name))
             .unwrap_or(0.);
+        let [x, y] = crate::blocks::rotate_vector(bound.origin, rotation);
         let next = Point {
-            x: origin.x + bound.origin[0],
-            y: origin.y + bound.origin[1],
+            x: origin.x + x,
+            y: origin.y + y,
             z: origin.z + bound.elevation + named,
         };
+        if ![next.x, next.y, next.z, rotation + bound.rotation]
+            .iter()
+            .all(|n| n.is_finite())
+        {
+            result
+                .errors
+                .push(format!("{}: block placement overflow", block.name));
+            return;
+        }
         let calls: Vec<_> = bound.calls.iter().collect();
         stack.push(block.name.clone());
         for (i, inner) in bound.calls.iter().enumerate() {
@@ -137,6 +180,7 @@ fn visit(
                 inner,
                 &calls,
                 next,
+                rotation + bound.rotation,
                 format!("{id}/{i}"),
                 &qualified,
                 stack,
@@ -175,6 +219,7 @@ pub fn project(program: &Program) -> NetworkProjection {
                             .unwrap_or_else(|| format!("{}_{index}", definition.kind.keyword())),
                         definition: index,
                         origin: definition.origin.unwrap(),
+                        rotation: 0.,
                         geometry,
                     }),
                     Err(error) => result.errors.push(error),
@@ -189,6 +234,7 @@ pub fn project(program: &Program) -> NetworkProjection {
                     y: 0.,
                     z: 0.,
                 },
+                0.,
                 format!("network:{index}"),
                 "",
                 &mut vec![],

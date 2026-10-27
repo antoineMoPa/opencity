@@ -14,6 +14,7 @@ mod network;
 struct Parser {
     tokens: Vec<Token>,
     position: usize,
+    bindings: Vec<(String, Argument)>,
 }
 
 impl Parser {
@@ -359,6 +360,7 @@ pub(crate) fn parse_raw(source: &str) -> Result<Program, SyntaxError> {
     Parser {
         tokens: tokenize(source)?,
         position: 0,
+        bindings: Vec::new(),
     }
     .program()
 }
@@ -366,4 +368,17 @@ pub(crate) fn parse_raw(source: &str) -> Result<Program, SyntaxError> {
 /// Read and parse a `.road` file.
 pub fn parse_road_file(path: impl AsRef<Path>) -> Result<Program, Error> {
     Ok(parse(&fs::read_to_string(path)?)?)
+}
+
+/// Parse a component body with lexical bindings only in value positions.
+pub(crate) fn parse_bound_component(
+    source: &str,
+    bindings: Vec<(String, Argument)>,
+) -> Result<crate::network::Definition, SyntaxError> {
+    Parser {
+        tokens: tokenize(source)?,
+        position: 0,
+        bindings,
+    }
+    .network()
 }

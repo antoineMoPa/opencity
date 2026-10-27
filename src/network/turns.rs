@@ -19,7 +19,10 @@ fn arm_side(direction: map::WorldPoint) -> ArmSide {
     }
 }
 
-fn connected_sides(projection: &map::Projection, intersection: &map::Intersection) -> Vec<ArmSide> {
+pub(super) fn connected_sides(
+    projection: &map::Projection,
+    intersection: &map::Intersection,
+) -> Vec<ArmSide> {
     if !intersection.ports.is_empty() {
         return intersection
             .ports
@@ -248,6 +251,7 @@ pub fn default_right_turn_instance(
     }
     ports_and_movements(&mut geometry, &bend, &vertical, &horizontal);
     Some(NetworkInstance {
+        rotation: 0.,
         id: format!("profile:{}", intersection.point_ref),
         name: intersection.point_ref.clone(),
         definition: usize::MAX,

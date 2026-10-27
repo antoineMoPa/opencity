@@ -35,8 +35,8 @@ mod attachments;
 use attachments::element_direction;
 pub use attachments::{
     anchored_reference, create_lane_point, create_lane_split, create_two_segment_split,
-    element_position, element_world_width, lane_attachment, lane_splits, set_lane_attachment,
-    set_split_mode, update_lane_attachments,
+    element_position, element_world_width, lane_attachment, lane_splits,
+    lane_splits_with_projection, set_lane_attachment, set_split_mode, update_lane_attachments,
 };
 
 #[path = "map/placement.rs"]

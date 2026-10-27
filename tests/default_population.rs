@@ -46,7 +46,8 @@ fn every_enclosed_city_block_has_nine_lots_and_a_taller_center() {
             .iter()
             .filter(|p| {
                 p.name
-                    .strip_prefix(&prefix)
+                    .strip_suffix(".center")
+                    .and_then(|name| name.strip_prefix(&prefix))
                     .is_some_and(|s| s.parse::<usize>().is_ok())
             })
             .map(|p| [p.position.x, p.position.y])

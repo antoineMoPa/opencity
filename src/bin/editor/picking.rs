@@ -164,6 +164,7 @@ pub(super) fn placed_intersection_at(
 #[derive(Clone, Copy)]
 pub(super) struct ElementEndCandidate {
     pub(super) position: WorldPoint,
+    pub(super) height: f32,
     pub(super) source: SegmentSource,
     pub(super) element_index: usize,
     pub(super) t: f32,
@@ -195,6 +196,7 @@ pub(super) fn element_end_candidates(
                 if let Some(position) = map::element_position(segment, road, element_index, t) {
                     candidates.push(ElementEndCandidate {
                         position,
+                        height: segment.height_at(t),
                         source: segment.source,
                         element_index,
                         t,

@@ -87,6 +87,9 @@ impl Resolver<'_> {
 /// Resolve forward references and explicit movement chains. Physical crossings
 /// do not create connections. Heading mismatches are advisory for draft geometry.
 pub fn resolve(definition: &Definition) -> Result<Resolved, String> {
+    if definition.template.is_some() {
+        return Err("parameterized component needs placement arguments".into());
+    }
     let mut names = HashSet::new();
     for name in definition
         .paths

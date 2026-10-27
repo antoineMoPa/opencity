@@ -15,6 +15,7 @@ pub(super) fn existing_design_checks_are_clear(issues: &[DesignIssue]) -> bool {
 
 pub(crate) fn sample_editor() -> RoadEditor {
     RoadEditor {
+        launch_action: Ok(None),
         minimal: minimal::MinimalEditor::default(),
         connection_id: None,
         connection_member: None,
@@ -42,6 +43,7 @@ pub(crate) fn sample_editor() -> RoadEditor {
         camera_transition: None,
         render_format: eframe::wgpu::TextureFormat::Bgra8Unorm,
         projection_cache: None,
+        interaction_cache: None,
         landscape_cache: None,
         scene_cache: None,
         #[cfg(target_arch = "wasm32")]

@@ -40,6 +40,14 @@ impl RoadEditor {
         {
             let roof = self.building_screen_points(feature, rect, iso, true);
             let base = self.building_screen_points(feature, rect, iso, false);
+            // Every wall and roof triangle lies inside these projected bounds.
+            // Reject distant buildings before allocating/triangulating faces.
+            if !egui::Rect::from_points(&roof)
+                .union(egui::Rect::from_points(&base))
+                .contains(pointer)
+            {
+                continue;
+            }
             let depth = |index: usize, top: bool| {
                 let p = feature.points[index];
                 let z = feature.elevation

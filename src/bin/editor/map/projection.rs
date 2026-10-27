@@ -27,7 +27,7 @@ fn component_ports(program: &Program) -> Vec<(MapPoint, f32)> {
                 .iter()
                 .map(|port| {
                     let point = instance.world_point(port.position);
-                    let heading = port.heading.vector();
+                    let heading = instance.world_direction(port.heading);
                     (
                         MapPoint {
                             name: format!(
@@ -44,7 +44,7 @@ fn component_ports(program: &Program) -> Vec<(MapPoint, f32)> {
                             base_direction: None,
                             direction: Some(WorldPoint {
                                 x: heading[0],
-                                y: -heading[1],
+                                y: heading[1],
                             }),
                         },
                         point.z,
@@ -122,6 +122,13 @@ fn segment_points(
 }
 
 pub fn project(program: &Program) -> Projection {
+    let (expanded, errors) = opencity::junction_layouts::expand(program);
+    let mut result = project_layout(&expanded);
+    result.unresolved += errors.len();
+    result
+}
+
+fn project_layout(program: &Program) -> Projection {
     let mut points: Vec<MapPoint> = program
         .statements
         .iter()
@@ -226,12 +233,13 @@ pub fn project(program: &Program) -> Projection {
         Statement::Call(call) if IntersectionKind::from_call_name(&call.name).is_some())
         })
         .count();
-    projection.unresolved += defined - intersections(program, &projection).len();
+    projection.intersections = super::intersections::from_layout(program, &projection);
+    projection.unresolved += defined - projection.intersections.len();
     projection
 }
 
 fn project_with_points(program: &Program, points: &[MapPoint]) -> Projection {
-    let port_heights: HashMap<_, _> = component_ports(program)
+    let mut port_heights: HashMap<_, _> = component_ports(program)
         .into_iter()
         .map(|(point, z)| (point.name, z))
         .collect();
@@ -267,6 +275,11 @@ fn project_with_points(program: &Program, points: &[MapPoint]) -> Projection {
                 }
             }
             _ => {}
+        }
+    }
+    for point in points {
+        if let Some(height) = elevations.get(point.name.as_str()) {
+            port_heights.entry(point.name.clone()).or_insert(*height);
         }
     }
     let roads: HashMap<&str, RoadDirection> = program
@@ -358,6 +371,7 @@ fn project_with_points(program: &Program, points: &[MapPoint]) -> Projection {
             &top_calls,
             WorldPoint { x: 0.0, y: 0.0 },
             0.0,
+            0.0,
             &mut stack,
             &mut next_nested_call,
             &mut segments,
@@ -368,6 +382,7 @@ fn project_with_points(program: &Program, points: &[MapPoint]) -> Projection {
         segments,
         points: points.to_vec(),
         unresolved,
+        intersections: Vec::new(),
     }
 }
 
@@ -382,6 +397,7 @@ fn project_block_road_calls(
     parent_calls: &[&Call],
     parent_origin: WorldPoint,
     parent_elevation: f32,
+    parent_rotation: f32,
     stack: &mut Vec<usize>,
     next_nested_call: &mut usize,
     segments: &mut Vec<Segment>,
@@ -407,9 +423,15 @@ fn project_block_road_calls(
         *unresolved += 1;
         return;
     };
+    let rotated_origin = opencity::blocks::rotate_vector(bound.origin, parent_rotation);
+    let rotation = parent_rotation + bound.rotation;
+    let transform = |point: WorldPoint| {
+        let [x, y] = opencity::blocks::rotate_vector([point.x, point.y], rotation);
+        WorldPoint { x, y }
+    };
     let local_origin = WorldPoint {
-        x: bound.origin[0],
-        y: bound.origin[1],
+        x: rotated_origin[0],
+        y: rotated_origin[1],
     };
     let origin = parent_origin.translated(local_origin);
     let elevation = parent_elevation
@@ -419,7 +441,11 @@ fn project_block_road_calls(
             .first()
             .and_then(|name| opencity::elevation_in_calls(parent_calls, name))
             .unwrap_or(0.0);
-    if !origin.x.is_finite() || !origin.y.is_finite() || !elevation.is_finite() {
+    if !origin.x.is_finite()
+        || !origin.y.is_finite()
+        || !elevation.is_finite()
+        || !rotation.is_finite()
+    {
         *unresolved += 1;
         return;
     }
@@ -437,7 +463,33 @@ fn project_block_road_calls(
             .chain(bound.calls.iter().cloned().map(Statement::Call))
             .collect(),
     };
-    let local_ports = component_ports(&local_program);
+    let mut local_ports = component_ports(&local_program);
+    let (local_layout, _) = opencity::junction_layouts::expand(&local_program);
+    let layout_calls: Vec<_> = local_layout
+        .statements
+        .iter()
+        .filter_map(|s| match s {
+            Statement::Call(c) => Some(c),
+            _ => None,
+        })
+        .collect();
+    for call in &layout_calls {
+        if call.name != "map_point" {
+            continue;
+        }
+        if let (Some(name), Some(position)) = (call.assigns.first(), point_args(call, 0)) {
+            local_ports.push((
+                MapPoint {
+                    name: name.clone(),
+                    position,
+                    base: None,
+                    base_direction: None,
+                    direction: None,
+                },
+                opencity::elevation_in_calls(&layout_calls, name).unwrap_or(0.),
+            ));
+        }
+    }
     let local_points: HashMap<_, _> = local_ports
         .iter()
         .map(|(point, _)| (point.name.as_str(), point))
@@ -491,11 +543,11 @@ fn project_block_road_calls(
                     name: inner.assigns.first().cloned(),
                     road_name: inner.name.clone(),
                     direction,
-                    start: start.translated(origin),
-                    end: end.translated(origin),
+                    start: transform(start).translated(origin),
+                    end: transform(end).translated(origin),
                     controls: [
-                        controls[0].translated(origin),
-                        controls[1].translated(origin),
+                        transform(controls[0]).translated(origin),
+                        transform(controls[1]).translated(origin),
                     ],
                     start_ref: start_ref.map(|name| format!("{qualified}.{name}")),
                     end_ref: end_ref.map(|name| format!("{qualified}.{name}")),
@@ -517,6 +569,7 @@ fn project_block_road_calls(
                 &local_calls,
                 origin,
                 elevation,
+                rotation,
                 stack,
                 next_nested_call,
                 segments,

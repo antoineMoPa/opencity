@@ -3,7 +3,7 @@ use super::*;
 
 impl RoadEditor {
     pub(super) fn copy_selection(&mut self) {
-        let projection = map::project(&self.program);
+        let projection = self.projected_map();
         let sources: Vec<_> = if self.selected_segments.is_empty() {
             self.selected_segment.into_iter().collect()
         } else {

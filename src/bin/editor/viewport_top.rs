@@ -20,6 +20,7 @@ impl RoadEditor {
             let (rect, response) =
                 ui.allocate_exact_size(ui.available_size(), egui::Sense::click_and_drag());
             self.map_rect = Some(rect);
+            self.map_context_menu(ui, &response, rect);
             let before = self.projected_map();
             if self.fit_scene_once {
                 self.fit_scene_once = false;
@@ -75,8 +76,9 @@ impl RoadEditor {
             let building_block = network_block || self.building_options_ui(ui, &response, rect, false);
             let point_block = building_block || self.point_options_ui(ui, &response, rect, &before, false);
             let spatial_block = intersection_block || point_block || box_block || annotation_block || self.minimal.pointer_over_toolbar(ui.ctx()) || self.spatial_edit_ui(ui, rect, &before, false);
-            let junctions = junction_candidates(&self.program, &before);
-            let element_ends = element_end_candidates(&before, &self.program);
+            let interaction = self.interaction_geometry();
+            let junctions = &interaction.junctions;
+            let element_ends = &interaction.element_ends;
             if !spatial_block && response.drag_started_by(egui::PointerButton::Primary) {
                 let origin = ui
                     .input(|input| input.pointer.press_origin())
@@ -627,14 +629,18 @@ impl RoadEditor {
                     .pointer_hover_pos()
                     .filter(|point| rect.contains(*point))
                 {
-                    let element_ends: Vec<_> = element_end_candidates(&projection, &self.program)
-                        .into_iter().filter(|candidate| !intersection_squares.iter().any(|square|
-                            square.contains(screen_of(rect, self.map_pan, self.map_zoom,
-                                candidate.position)))).collect();
-                    let junctions: Vec<_> = junction_candidates(&self.program, &projection)
-                        .into_iter().filter(|(point, _)| !intersection_squares.iter().any(|square|
-                            square.contains(screen_of(rect, self.map_pan, self.map_zoom, *point))))
-                        .collect();
+                    let interaction = self.interaction_geometry();
+                    let element_ends: Vec<_> = interaction.element_ends
+                        .iter().copied().filter(|candidate| {
+                            let screen = screen_of(rect, self.map_pan, self.map_zoom, candidate.position);
+                            rect.contains(screen) && !intersection_squares.iter().any(|square| square.contains(screen))
+                        }).collect();
+                    let junctions: Vec<_> = interaction.junctions
+                        .iter().filter(|(point, _)| {
+                            let screen = screen_of(rect, self.map_pan, self.map_zoom, *point);
+                            rect.contains(screen) && !intersection_squares.iter().any(|square| square.contains(screen))
+                        })
+                        .cloned().collect();
                     let nearby = nearest_visible_points(
                         element_ends.iter().enumerate().map(|(index, candidate)|
                             (HoverPoint::Element(index), screen_of(rect, self.map_pan,

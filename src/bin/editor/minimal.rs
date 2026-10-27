@@ -3,6 +3,8 @@ use super::*;
 
 #[derive(Default)]
 pub(super) struct MinimalEditor {
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(super) launch_feedback: Option<external_launch::LaunchFeedback>,
     pub(super) intersection_viewer: Option<network_ui::Viewer>,
     pub(super) network_options: Option<network_ui::NetworkOptions>,
     pub(super) networks_cache: Option<(Program, Arc<opencity::network::NetworkProjection>)>,

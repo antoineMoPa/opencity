@@ -56,3 +56,35 @@ fn junction_and_approach_meshes_have_no_coplanar_double_surfaces() {
         }
     }
 }
+
+#[test]
+fn three_way_runtime_and_minimap_use_curved_profile_components() {
+    let source = include_str!("../examples/default_intersection.road")
+        .lines()
+        .filter(|line| !line.starts_with("south_approach"))
+        .collect::<Vec<_>>()
+        .join("\n")
+        .replace(
+            "intersection4(center, street);",
+            "intersection3(center, street);",
+        );
+    let city = City::from_program(&parse(&source).unwrap(), None).unwrap();
+    assert_eq!(city.junctions.len(), 1);
+    let component = city
+        .components
+        .iter()
+        .find(|c| c.id == "profile:center")
+        .unwrap();
+    assert_eq!(
+        component
+            .geometry
+            .bands
+            .iter()
+            .filter(|b| b.path.starts_with("curb_"))
+            .count(),
+        2
+    );
+    let svg = city.minimap_svg().unwrap();
+    assert!(svg.contains("<path fill=\"#a7afa1\""));
+    assert!(city.surface_at([0.001, 0.001], 0.01).is_some());
+}

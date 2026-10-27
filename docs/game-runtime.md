@@ -12,7 +12,7 @@ git submodule update --init --recursive
 opencity = { path = "opencity", default-features = false, features = ["game-runtime"] }
 ```
 
-This feature adds polygon tessellation but brings in no editor, windowing, GUI or graphics runtime. Application behavior belongs in your Rust game; map construction remains in `.road` files. `../mtl_jobines` is the first winit/wgpu consumer.
+This feature adds polygon tessellation but brings in no editor, windowing, GUI or graphics runtime. Application behavior belongs in your Rust game; map construction remains in `.road` files.
 
 ```rust,no_run
 use opencity::runtime::{City, Region};
@@ -33,7 +33,7 @@ let furniture = city.detail_mesh(Region::radius([-24.0, 3.0], 0.8)?);
 # Ok::<(), String>(())
 ```
 
-Coordinates are **X east, Y north, Z up**, in authored map units. The library assigns no physical length. MTL Jobines explicitly chooses 100 meters per unit, making the standard car lane 4.5 meters wide. Radius queries are horizontal circles in the map's XY plane, including objects at every elevation. Use surface ceilings or inspect feature heights when selecting a particular deck.
+Coordinates are **X east, Y north, Z up**, in authored map units. The library assigns no physical length; each application chooses its own conversion from map units to meters. Radius queries are horizontal circles in the map's XY plane, including objects at every elevation. Use surface ceilings or inspect feature heights when selecting a particular deck.
 
 `City::load` resolves the elevation PNG relative to the `.road` file. `City::from_program` accepts an optional asset base directory. Compilation rejects unresolved road placements, invalid landscape and network projections and failed geometry subdivision. A compiled City is a snapshot; reload it after source edits. Collection indices are IDs valid for that snapshot. Treat published records as read-only: the compiled spatial index and meshes are not rebuilt after direct collection changes.
 
@@ -51,7 +51,7 @@ Physical road heights follow authored grades. Unlike the editor's rendering-only
 
 Exported shader strings are optional; the library creates no GPU resources. `runtime::EDITOR_SHADER` is the original editor shader, including its camera, coast elevation texture and facade metadata contract. See `src/bin/editor/shaders/scene.wgsl` and `scene3d/renderer.rs` for its bindings. It uses editor-specific depth bias and camera conventions; it is not interchangeable with the game shader.
 
-`runtime::GAME_SHADER` is the standalone Z-up shader used by MTL Jobines. Its vertex stride is 52 bytes, with the following float attributes:
+`runtime::GAME_SHADER` is a standalone Z-up shader for consuming applications. Its vertex stride is 52 bytes, with the following float attributes:
 
 | Location | Field | Format |
 |---|---|---|

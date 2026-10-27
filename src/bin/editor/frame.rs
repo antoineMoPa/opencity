@@ -14,6 +14,8 @@ impl eframe::App for RoadEditor {
 impl RoadEditor {
     pub(super) fn editor_frame_ui(&mut self, root: &mut egui::Ui) {
         let ctx = root.ctx().clone();
+        #[cfg(not(target_arch = "wasm32"))]
+        self.launch_feedback_ui(&ctx);
         #[cfg(target_arch = "wasm32")]
         while let Ok(event) = self.web_events.try_recv() {
             match event {

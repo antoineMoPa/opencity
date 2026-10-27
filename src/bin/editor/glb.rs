@@ -158,6 +158,13 @@ pub fn export_with_base(program: &Program, base: Option<&std::path::Path>) -> Ve
     for intersection in map::intersections(program, &projection) {
         if let Some(instance) =
             opencity::network::default_right_turn_instance(program, &projection, &intersection)
+                .or_else(|| {
+                    opencity::network::default_three_way_instance(
+                        program,
+                        &projection,
+                        &intersection,
+                    )
+                })
         {
             let mut seams = Vec::new();
             for (index, segment) in projection.segments.iter().enumerate() {

@@ -1,0 +1,23 @@
+# Dimensions are local to each instance; rotation is counterclockwise in world space.
+intersection crossing({ length, width }: { length: number, width: number }) {
+    port west.in at (0, 0) heading east width width;
+    port east.out at (length, 0) heading east width width;
+    path through {
+        from west.in;
+        line to east.out;
+    }
+    allow vehicle west.in -> east.out via through;
+    surface pavement along through width width material asphalt;
+}
+
+road approach: sidewalk carlane sidewalk; end
+
+block junction_pair({ length }: { length: number }):
+    first = crossing(0, 0, 0, 0, { length, width: 0.2 });
+    second = crossing(2, 0, 0, 90, { length, width: 0.3 });
+    plaza = concrete(0, -1, 3, -1, 3, 1, 0, 1);
+end
+
+straight = crossing(0, 0, { length: 1, width: 0.2 });
+rotated = crossing(4, 0, 0, 45, { length: 2, width: 0.3 });
+group = junction_pair(0, 4, 0, 90, { length: 1 });

@@ -74,10 +74,16 @@ fn check_seams(source: &str) {
     let profiles = road_profiles::road_profiles(&program, &projection);
     for junction in map::intersections(&program, &projection)
         .into_iter()
-        .filter(|junction| junction.kind == map::IntersectionKind::FourWay)
+        .filter(|junction| {
+            matches!(
+                junction.kind,
+                map::IntersectionKind::FourWay | map::IntersectionKind::ThreeWay
+            )
+        })
     {
-        let instance =
-            network::default_four_way_instance(&program, &projection, &junction).unwrap();
+        let instance = network::default_four_way_instance(&program, &projection, &junction)
+            .or_else(|| network::default_three_way_instance(&program, &projection, &junction))
+            .unwrap();
         for (index, end) in map::intersection_arms(&projection, &junction.point_ref) {
             let segment = &projection.segments[index];
             let road = road_profiles::road_for_segment(&program, segment).unwrap();
@@ -201,4 +207,108 @@ fn stop_bars_span_incoming_vehicle_lanes_instead_of_sidewalk_or_parking() {
             assert_eq!(stop.material, Material::White);
         }
     }
+}
+
+#[test]
+fn tees_share_four_way_curves_and_match_every_approach_band() {
+    let sides = [
+        ("north", 0., 1.),
+        ("east", 1., 0.),
+        ("south", 0., -1.),
+        ("west", -1., 0.),
+    ];
+    for missing in 0..4 {
+        for mixed in [false, true] {
+            for reverse in [false, true] {
+                let mut source = String::from("road street: sidewalk carlane middle carlane sidewalk; end road wide: buildingedge sidewalk parkinglane carlane buslane middle carlane bikelane sidewalk; end c=map_point(0,0);");
+                let mut ports = String::new();
+                for (index, (side, x, y)) in sides.iter().enumerate() {
+                    if index == missing {
+                        continue;
+                    }
+                    source += &format!(
+                        "p{index}=map_point({},{}); e{index}=map_point({x},{y});",
+                        x * 0.3,
+                        y * 0.3
+                    );
+                    let road = if mixed && index % 2 == 0 {
+                        "wide"
+                    } else {
+                        "street"
+                    };
+                    let (from, to, a, b) = if reverse {
+                        (format!("e{index}"), format!("p{index}"), 0.8, 0.5)
+                    } else {
+                        (format!("p{index}"), format!("e{index}"), 0.5, 0.8)
+                    };
+                    source += &format!(
+                        "r{index}={road}({from},{},{},{},{},{to});",
+                        x * a,
+                        y * a,
+                        x * b,
+                        y * b
+                    );
+                    ports += &format!(",{side},p{index}");
+                }
+                source += &format!("intersection3(c,street{ports});");
+                check_seams(&source);
+                let program = parse(&source).unwrap();
+                let projection = map::project(&program);
+                let junction = map::intersections(&program, &projection).remove(0);
+                let tee =
+                    network::default_three_way_instance(&program, &projection, &junction).unwrap();
+                let mut four = junction.clone();
+                four.kind = map::IntersectionKind::FourWay;
+                let four =
+                    network::default_four_way_instance(&program, &projection, &four).unwrap();
+                let curved: Vec<_> = tee
+                    .geometry
+                    .bands
+                    .iter()
+                    .filter(|band| band.path.starts_with("curb_"))
+                    .collect();
+                assert!(!curved.is_empty());
+                let corners: std::collections::HashSet<_> =
+                    curved.iter().map(|band| &band.path).collect();
+                assert_eq!(corners.len(), 2);
+                for band in curved {
+                    let reference = four
+                        .geometry
+                        .bands
+                        .iter()
+                        .find(|b| b.name == band.name)
+                        .unwrap();
+                    assert_eq!(
+                        tee.geometry.band_quads(band),
+                        four.geometry.band_quads(reference)
+                    );
+                    assert!(tee.geometry.band_quads(band).len() > 10);
+                }
+                assert!(tee
+                    .geometry
+                    .bands
+                    .iter()
+                    .any(|b| b.name.starts_with("closed_")
+                        && b.material == Material::RoadElement(K::Sidewalk)));
+                assert!(tee
+                    .geometry
+                    .ports
+                    .iter()
+                    .all(|p| p.name != ["N", "E", "S", "W"][missing]));
+                assert_eq!(
+                    tee.geometry
+                        .bands
+                        .iter()
+                        .filter(|b| b.kind == BandKind::Marking)
+                        .count(),
+                    3
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn default_city_three_way_profiles_match_their_connected_roads() {
+    check_seams(include_str!("../examples/default_map.road"));
 }

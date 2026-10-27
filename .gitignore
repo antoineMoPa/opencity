@@ -1,2 +1,6 @@
 /target/
 /web/dist/
+
+# Temporary maps and embedded terrain exported for external launches.
+.opencity-play-*.road
+.opencity-play-*.png

@@ -45,8 +45,8 @@ fn lane_at_pointer(
 }
 
 impl RoadEditor {
-    pub(super) fn endpoint_attached(&self, source: SegmentSource, is_end: bool) -> bool {
-        map::project(&self.program)
+    pub(super) fn endpoint_attached(&mut self, source: SegmentSource, is_end: bool) -> bool {
+        self.projected_map()
             .segments
             .iter()
             .find(|s| s.source == source)

@@ -241,3 +241,32 @@ fn profile_target_geometry_edit() {
         eprintln!("background scene ready after {:?}", start.elapsed());
     }
 }
+
+#[test]
+fn interaction_geometry_survives_selection_and_refreshes_after_edit_and_undo() {
+    let mut editor = sample_editor();
+    editor.program = parse("road street: carlane-sidewalk; end; main=street(0,0,2,0);").unwrap();
+    let original = editor.program.clone();
+    let projection = editor.projected_map();
+    let geometry = editor.interaction_geometry();
+    let source = projection.segments[0].source;
+    let point = geometry.element_ends[0].position;
+    editor.selected_segment = Some(source);
+    editor.map_zoom *= 2.0;
+    editor.camera_view = CameraView::Isometric;
+    assert!(Arc::ptr_eq(&geometry, &editor.interaction_geometry()));
+    assert!(map::set_control(
+        &mut editor.program,
+        source,
+        false,
+        WorldPoint { x: 0.5, y: 1.0 }
+    ));
+    let changed = editor.interaction_geometry();
+    assert!(!Arc::ptr_eq(&geometry, &changed));
+    assert_ne!(point, changed.element_ends[0].position);
+    assert_eq!(changed.profiles.len(), projection.segments.len());
+    editor.program = original;
+    let restored = editor.interaction_geometry();
+    assert!(!Arc::ptr_eq(&changed, &restored));
+    assert_eq!(point, restored.element_ends[0].position);
+}

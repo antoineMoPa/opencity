@@ -190,7 +190,8 @@ impl RoadEditor {
                         )) <= 9.0
                     })
             });
-        let candidates = element_end_candidates(projection, &self.program);
+        let interaction = self.interaction_geometry();
+        let candidates = &interaction.element_ends;
         let lane = if iso {
             iso_element_end_near(
                 &candidates,

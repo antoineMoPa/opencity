@@ -10,6 +10,7 @@ mod landscape;
 mod merge_paint;
 mod picking;
 mod selection;
+mod selection_cache;
 mod vehicle;
 
 pub(crate) use fixtures::sample_editor;

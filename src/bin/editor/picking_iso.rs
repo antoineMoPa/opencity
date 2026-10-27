@@ -27,19 +27,22 @@ pub(super) fn iso_endpoint_near(
                 (true, segment.end, segment.end_z, segment.end_ref.as_deref()),
             ]
             .into_iter()
-            .filter_map(move |(is_end, point, height, reference)| {
-                (!reference.is_some_and(|name| {
-                    map::anchored_reference(program, name)
-                        && map::lane_attachment(program, name).is_none()
-                }))
-                .then_some((segment.source, is_end, point, height))
+            .map(move |(is_end, point, height, reference)| {
+                (segment.source, is_end, point, height, reference)
             })
         })
-        .filter_map(|(source, is_end, point, height)| {
+        .filter_map(|(source, is_end, point, height, reference)| {
             let distance = pointer.distance_sq(iso_screen(
                 rect, pan, zoom, target, angle, elevation, point, height,
             ));
-            (distance <= 12.0 * 12.0).then_some((source, is_end, distance))
+            // Template port lookup is needed only for endpoints close enough
+            // to pick, never for every road end in the document.
+            (distance <= 12.0 * 12.0
+                && !reference.is_some_and(|name| {
+                    map::anchored_reference(program, name)
+                        && map::lane_attachment(program, name).is_none()
+                }))
+            .then_some((source, is_end, distance))
         })
         .min_by(|a, b| a.2.total_cmp(&b.2))
         .map(|(source, is_end, _)| (source, is_end))
@@ -79,7 +82,7 @@ pub(super) fn iso_control_near(
 
 pub(super) fn iso_element_end_near(
     candidates: &[ElementEndCandidate],
-    projection: &map::Projection,
+    _projection: &map::Projection,
     rect: egui::Rect,
     pan: egui::Vec2,
     zoom: f32,
@@ -92,11 +95,6 @@ pub(super) fn iso_element_end_near(
         .iter()
         .copied()
         .filter_map(|candidate| {
-            let segment = projection
-                .segments
-                .iter()
-                .find(|segment| segment.source == candidate.source)?;
-            let height = segment.height_at(candidate.t);
             let distance = pointer.distance_sq(iso_screen(
                 rect,
                 pan,
@@ -105,7 +103,7 @@ pub(super) fn iso_element_end_near(
                 angle,
                 elevation,
                 candidate.position,
-                height,
+                candidate.height,
             ));
             (distance <= 12.0 * 12.0).then_some((candidate, distance))
         })

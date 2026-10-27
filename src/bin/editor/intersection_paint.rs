@@ -322,9 +322,13 @@ pub(super) fn paint_intersection(
         return;
     };
     if let Some(instance) =
-        opencity::network::default_four_way_instance(program, projection, intersection).or_else(
-            || opencity::network::default_right_turn_instance(program, projection, intersection),
-        )
+        opencity::network::default_four_way_instance(program, projection, intersection)
+            .or_else(|| {
+                opencity::network::default_three_way_instance(program, projection, intersection)
+            })
+            .or_else(|| {
+                opencity::network::default_right_turn_instance(program, projection, intersection)
+            })
     {
         let screen = |point| {
             let p = instance.world_point(point);

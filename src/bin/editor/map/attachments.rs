@@ -96,6 +96,11 @@ pub fn lane_attachment(program: &Program, name: &str) -> Option<(String, usize, 
 
 pub fn lane_splits(program: &Program) -> Vec<LaneSplit> {
     let projection = project(program);
+    lane_splits_with_projection(program, &projection)
+}
+
+/// Resolve attachments using the caller's current document geometry.
+pub fn lane_splits_with_projection(program: &Program, projection: &Projection) -> Vec<LaneSplit> {
     let mut splits: Vec<_> = program
         .statements
         .iter()

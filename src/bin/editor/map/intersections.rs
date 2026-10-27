@@ -179,7 +179,13 @@ pub fn intersection_arms(projection: &Projection, point_ref: &str) -> Vec<(usize
         .collect()
 }
 
-pub fn intersections(program: &Program, projection: &Projection) -> Vec<Intersection> {
+/// Return intersections from this document's projection, just like its segments
+/// and points. Callers must project again after editing the source program.
+pub fn intersections(_program: &Program, projection: &Projection) -> Vec<Intersection> {
+    projection.intersections.clone()
+}
+
+pub(super) fn from_layout(program: &Program, projection: &Projection) -> Vec<Intersection> {
     let mut points = HashMap::with_capacity(projection.points.len());
     for point in &projection.points {
         points.entry(point.name.as_str()).or_insert(point);
@@ -368,24 +374,31 @@ pub fn place_intersection(
 }
 
 pub fn intersection_port_direction(program: &Program, point_ref: &str) -> Option<WorldPoint> {
-    program.statements.iter().find_map(|statement| {
-        let Statement::Call(call) = statement else {
-            return None;
-        };
-        let kind = IntersectionKind::from_call_name(&call.name)?;
-        if call.args.len() != kind.arm_count() * 2 + 2 {
-            return None;
-        }
-        call.args[2..].chunks_exact(2).find_map(|pair| {
-            let (Argument::Identifier(side), Argument::Identifier(name)) = (&pair[0], &pair[1])
-            else {
+    program
+        .statements
+        .iter()
+        .find_map(|statement| {
+            let Statement::Call(call) = statement else {
                 return None;
             };
-            (name == point_ref)
-                .then(|| port_direction_from_name(side))
-                .flatten()
+            let kind = IntersectionKind::from_call_name(&call.name)?;
+            if call.args.len() != kind.arm_count() * 2 + 2 {
+                return None;
+            }
+            call.args[2..].chunks_exact(2).find_map(|pair| {
+                let (Argument::Identifier(side), Argument::Identifier(name)) = (&pair[0], &pair[1])
+                else {
+                    return None;
+                };
+                (name == point_ref)
+                    .then(|| port_direction_from_name(side))
+                    .flatten()
+            })
         })
-    })
+        .or_else(|| {
+            opencity::junction_layouts::port_direction(program, point_ref)
+                .map(|[x, y]| WorldPoint { x, y })
+        })
 }
 
 pub fn port_in_use(projection: &Projection, point_ref: &str) -> bool {
@@ -410,7 +423,51 @@ pub fn port_faces_road(program: &Program, point_ref: &str, other: WorldPoint) ->
     (other.x - position.x) * direction.x + (other.y - position.y) * direction.y > 0.001
 }
 
+fn layout_placement(program: &Program, center_ref: &str) -> Option<usize> {
+    program
+        .statements
+        .iter()
+        .enumerate()
+        .find_map(|(index, statement)| {
+            let Statement::Call(call) = statement else {
+                return None;
+            };
+            let instance = call.assigns.first().unwrap_or(&call.name);
+            if !center_ref
+                .strip_prefix(instance)
+                .is_some_and(|suffix| suffix.starts_with('.'))
+            {
+                return None;
+            }
+            program.statements.iter().find_map(|s| {
+                let Statement::Network(d) = s else {
+                    return None;
+                };
+                if d.name.as_deref() != Some(&call.name) {
+                    return None;
+                }
+                let template = d.template.as_ref()?;
+                let opencity::network::ComponentTemplateBody::Junction(calls) = &template.body
+                else {
+                    return None;
+                };
+                let center = calls
+                    .iter()
+                    .find(|c| IntersectionKind::from_call_name(&c.name).is_some())?
+                    .args
+                    .first()?;
+                let Argument::Identifier(center) = center else {
+                    return None;
+                };
+                (format!("{}.{}", call.assigns.first().unwrap_or(&call.name), center) == center_ref)
+                    .then_some(index)
+            })
+        })
+}
+
 pub fn translate_intersection(program: &mut Program, point_ref: &str, offset: WorldPoint) -> bool {
+    let placement = layout_placement(program, point_ref);
+    if placement.is_none() && !program.statements.iter().any(|s| matches!(s, Statement::Call(c) if c.name == "map_point" && c.assigns.first().is_some_and(|name| name == point_ref))) { return false; }
     let projection = project(program);
     let Some(intersection) = intersections(program, &projection)
         .into_iter()
@@ -450,6 +507,15 @@ pub fn translate_intersection(program: &mut Program, point_ref: &str, offset: Wo
             call.args[4] = number_arg(segment.controls[1].y + offset.y);
         }
     }
+    if let Some(index) = placement {
+        let Statement::Call(call) = &mut program.statements[index] else {
+            unreachable!()
+        };
+        let point = point_args(call, 0).unwrap();
+        call.args[0] = number_arg(point.x + offset.x);
+        call.args[1] = number_arg(point.y + offset.y);
+        return true;
+    }
     let mut refs = port_refs;
     refs.insert(point_ref);
     for statement in &mut program.statements {
@@ -475,6 +541,8 @@ pub fn translate_intersection(program: &mut Program, point_ref: &str, offset: Wo
 }
 
 pub fn rotate_intersection(program: &mut Program, point_ref: &str) -> bool {
+    let placement = layout_placement(program, point_ref);
+    if placement.is_none() && !program.statements.iter().any(|s| matches!(s, Statement::Call(c) if c.name == "map_point" && c.assigns.first().is_some_and(|name| name == point_ref))) { return false; }
     let projection = project(program);
     let Some(intersection) = intersections(program, &projection)
         .into_iter()
@@ -535,10 +603,34 @@ pub fn rotate_intersection(program: &mut Program, point_ref: &str) -> bool {
             }
         }
     }
+    if let Some(index) = placement {
+        let Statement::Call(call) = &mut program.statements[index] else {
+            unreachable!()
+        };
+        let origin = point_args(call, 0).unwrap();
+        let relative = [
+            origin.x - intersection.position.x,
+            origin.y - intersection.position.y,
+        ];
+        let [x, y] = opencity::blocks::rotate_vector(relative, -90.);
+        call.args[0] = number_arg(intersection.position.x + x);
+        call.args[1] = number_arg(intersection.position.y + y);
+        let placement_len = call.args.len() - 1;
+        if placement_len == 2 {
+            call.args.insert(2, number_arg(0.));
+        }
+        if call.args.len() == 4 {
+            call.args.insert(3, number_arg(0.));
+        }
+        let rotation = number(&call.args[3]).unwrap();
+        call.args[3] = number_arg(rotation - 90.);
+    }
     true
 }
 
 pub fn remove_placed_intersection(program: &mut Program, point_ref: &str) -> bool {
+    let placement = layout_placement(program, point_ref);
+    if placement.is_none() && !program.statements.iter().any(|s| matches!(s, Statement::Call(c) if c.name == "map_point" && c.assigns.first().is_some_and(|name| name == point_ref))) { return false; }
     let projection = project(program);
     let Some(intersection) = intersections(program, &projection)
         .into_iter()
@@ -557,6 +649,13 @@ pub fn remove_placed_intersection(program: &mut Program, point_ref: &str) -> boo
         })
         .map(|port| port.point_ref.as_str())
         .collect();
+    if let Some(index) = placement {
+        if unused.len() != intersection.ports.len() {
+            return false;
+        }
+        program.statements.remove(index);
+        return true;
+    }
     program.statements.retain(|statement| match statement {
         Statement::Call(call) if IntersectionKind::from_call_name(&call.name).is_some() => {
             !matches!(call.args.first(), Some(Argument::Identifier(name)) if name == point_ref)

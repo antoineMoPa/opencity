@@ -26,6 +26,34 @@ pub(crate) fn write_definition(out: &mut String, definition: &Definition) {
     if let Some(name) = &definition.name {
         let _ = write!(out, " {name}");
     }
+    if let Some(template) = &definition.template {
+        let names = template
+            .parameters
+            .iter()
+            .map(|p| p.name.as_str())
+            .collect::<Vec<_>>()
+            .join(", ");
+        let types = template
+            .parameters
+            .iter()
+            .map(|p| format!("{}: {}", p.name, p.kind.keyword()))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let _ = writeln!(out, "({{ {names} }}: {{ {types} }}) {{");
+        match &template.body {
+            ComponentTemplateBody::Network(body) => {
+                let _ = writeln!(out, "    {body}");
+            }
+            ComponentTemplateBody::Junction(calls) => {
+                for call in calls {
+                    out.push_str("    ");
+                    crate::writer::write_call(out, call);
+                }
+            }
+        }
+        out.push_str("}\n");
+        return;
+    }
     if let Some(origin) = definition.origin {
         let _ = write!(out, " {}", point(origin));
     }

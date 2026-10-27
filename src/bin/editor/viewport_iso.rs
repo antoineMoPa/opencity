@@ -6,6 +6,7 @@ impl RoadEditor {
         egui::Frame::NONE.show(root, |ui| {
             let (rect, response) = ui.allocate_exact_size(ui.available_size(), egui::Sense::click_and_drag());
             self.map_rect = Some(rect);
+            self.map_context_menu(ui, &response, rect);
             let palette = editor_palette(ui.ctx().theme());
             let projection = self.projected_map();
             if self.fit_scene_once {
@@ -482,14 +483,13 @@ impl RoadEditor {
             self.paint_intersection_preview(ui, rect);
             if self.point_options.is_none() && matches!(self.map_tool, MapTool::Draw | MapTool::Select) {
                 if let Some(pointer) = ui.ctx().pointer_hover_pos().filter(|point| rect.contains(*point)) {
-                    let candidates = element_end_candidates(&projection, &self.program);
+                    let interaction = self.interaction_geometry();
+                    let candidates = &interaction.element_ends;
                     let nearby = nearest_visible_points(
-                        candidates.iter().enumerate().filter_map(|(index, candidate)| {
-                            let segment = projection.segments.iter()
-                                .find(|segment| segment.source == candidate.source)?;
-                            Some((index, iso_screen(rect, self.map_pan, self.map_zoom,
+                        candidates.iter().enumerate().map(|(index, candidate)| {
+                            (index, iso_screen(rect, self.map_pan, self.map_zoom,
                                 self.orbit_target, self.orbit_angle, self.orbit_elevation,
-                                candidate.position, segment.height_at(candidate.t))))
+                                candidate.position, candidate.height))
                         }), rect, pointer);
                     let hovered = iso_element_end_near(&candidates, &projection, rect,
                         self.map_pan, self.map_zoom, self.orbit_target, self.orbit_angle, self.orbit_elevation, pointer)
@@ -501,11 +501,9 @@ impl RoadEditor {
                         }));
                     for index in nearby {
                         let candidate = candidates[index];
-                        let Some(segment) = projection.segments.iter()
-                            .find(|segment| segment.source == candidate.source) else { continue };
                         let screen = iso_screen(rect, self.map_pan, self.map_zoom,
                             self.orbit_target, self.orbit_angle, self.orbit_elevation, candidate.position,
-                            segment.height_at(candidate.t));
+                            candidate.height);
                         let active = hovered.is_some_and(|item| item.source == candidate.source
                             && item.element_index == candidate.element_index && item.t == candidate.t);
                         painter.circle_stroke(screen, if active { 6.0 } else { 3.5 },
@@ -515,8 +513,7 @@ impl RoadEditor {
                         ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
                         let screen = iso_screen(rect, self.map_pan, self.map_zoom,
                             self.orbit_target, self.orbit_angle, self.orbit_elevation, candidate.position,
-                            projection.segments.iter().find(|segment| segment.source == candidate.source)
-                                .map(|segment| segment.height_at(candidate.t)).unwrap_or(0.0));
+                            candidate.height);
                         painter.text(screen + egui::vec2(11.0, -12.0),
                             egui::Align2::LEFT_BOTTOM,
                             format!("{} {} end{}", kind_label(candidate.kind), candidate.element_index + 1, if self.map_tool == MapTool::Select { " | click for options" } else { "" }),

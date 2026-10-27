@@ -11,14 +11,6 @@ pub(super) enum ArmSide {
 }
 impl ArmSide {
     pub const ALL: [Self; 4] = [Self::North, Self::East, Self::South, Self::West];
-    pub fn index(self) -> usize {
-        match self {
-            Self::North => 0,
-            Self::East => 1,
-            Self::South => 2,
-            Self::West => 3,
-        }
-    }
     pub fn name(self) -> &'static str {
         match self {
             Self::North => "N",

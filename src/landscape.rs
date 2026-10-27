@@ -222,6 +222,7 @@ fn feature(
     kind: LandscapeKind,
     origin: [f32; 2],
     elevation: f32,
+    rotation: f32,
 ) -> Result<LandscapeFeature, LandscapeError> {
     if call.assigns.len() > 1 {
         return Err(error(
@@ -298,6 +299,7 @@ fn feature(
             number(&pair[0]).ok_or_else(|| error(call, "coordinates must be finite numbers"))?;
         let y =
             number(&pair[1]).ok_or_else(|| error(call, "coordinates must be finite numbers"))?;
+        let [x, y] = crate::blocks::rotate_vector([x, y], rotation);
         let point = [x + origin[0], y + origin[1]];
         if !point[0].is_finite() || !point[1].is_finite() {
             return Err(error(call, "translated coordinates must be finite numbers"));
@@ -338,6 +340,7 @@ fn visit_call(
     local_calls: &[&Call],
     origin: [f32; 2],
     elevation: f32,
+    rotation: f32,
     stack: &mut Vec<String>,
     result: &mut LandscapeProjection,
 ) {
@@ -349,7 +352,7 @@ fn visit_call(
                 elevation_in_calls(local_calls, name).or_else(|| elevation_of(program, name))
             })
             .unwrap_or(0.0);
-        match feature(call, kind, origin, elevation + feature_elevation) {
+        match feature(call, kind, origin, elevation + feature_elevation, rotation) {
             Ok(feature) => result.features.push(feature),
             Err(error) => result.errors.push(error),
         }
@@ -369,8 +372,9 @@ fn visit_call(
             return;
         }
     };
-    let origin = [origin[0] + bound.origin[0], origin[1] + bound.origin[1]];
-    if !origin.iter().all(|value| value.is_finite()) {
+    let local = crate::blocks::rotate_vector(bound.origin, rotation);
+    let origin = [origin[0] + local[0], origin[1] + local[1]];
+    if !origin.iter().all(|value| value.is_finite()) || !(rotation + bound.rotation).is_finite() {
         result.errors.push(error(
             call,
             "translated block coordinates must be finite numbers",
@@ -394,6 +398,7 @@ fn visit_call(
             &block_calls,
             origin,
             elevation + bound.elevation + named_elevation,
+            rotation + bound.rotation,
             stack,
             result,
         );
@@ -421,6 +426,7 @@ pub fn project_landscape_features(program: &Program) -> LandscapeProjection {
                 &blocks,
                 &[],
                 [0.0, 0.0],
+                0.0,
                 0.0,
                 &mut Vec::new(),
                 &mut result,

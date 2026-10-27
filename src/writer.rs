@@ -82,7 +82,7 @@ impl Program {
     }
 }
 
-fn write_call(source: &mut String, call: &Call) {
+pub(crate) fn write_call(source: &mut String, call: &Call) {
     if !call.assigns.is_empty() {
         source.push_str(&call.assigns.join(", "));
         source.push_str(" = ");

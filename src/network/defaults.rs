@@ -68,8 +68,12 @@ fn profile_corners(geometry: &mut Resolved, arms: &[ArmProfile], half: f32) {
         ("SE", ArmSide::South, ArmSide::East, 1., 1.),
         ("SW", ArmSide::South, ArmSide::West, -1., 1.),
     ] {
-        let v = &arms[vertical.index()];
-        let h = &arms[horizontal.index()];
+        let Some(v) = arms.iter().find(|arm| arm.side == vertical) else {
+            continue;
+        };
+        let Some(h) = arms.iter().find(|arm| arm.side == horizontal) else {
+            continue;
+        };
         let path_name = format!("curb_{name}");
         let raw = default_four_way().path(&path_name).unwrap();
         let arc: Vec<_> = raw
@@ -191,6 +195,66 @@ fn profile_corners(geometry: &mut Resolved, arms: &[ArmProfile], half: f32) {
         pavement,
         half * 2.,
     );
+}
+/// Connect the outer bands of the two through arms across the closed side.
+fn profile_closed_side(geometry: &mut Resolved, arms: &[ArmProfile], half: f32) {
+    let Some(side) = ArmSide::ALL
+        .into_iter()
+        .find(|side| !arms.iter().any(|arm| arm.side == *side))
+    else {
+        return;
+    };
+    let (a, b, positive) = match side {
+        ArmSide::North => (ArmSide::West, ArmSide::East, false),
+        ArmSide::South => (ArmSide::West, ArmSide::East, true),
+        ArmSide::East => (ArmSide::North, ArmSide::South, true),
+        ArmSide::West => (ArmSide::North, ArmSide::South, false),
+    };
+    let a = arms.iter().find(|arm| arm.side == a).unwrap();
+    let b = arms.iter().find(|arm| arm.side == b).unwrap();
+    let distance = |arm: &ArmProfile| {
+        if positive {
+            arm.drive_high
+        } else {
+            -arm.drive_low
+        }
+    };
+    let (mut da, mut db) = (distance(a), distance(b));
+    add_band(
+        geometry,
+        "closed_pavement".into(),
+        "closed_side",
+        Material::Asphalt,
+        BandKind::Surface,
+        vec![[
+            side.position(-half, 0.),
+            side.position(-half, da),
+            side.position(half, db),
+            side.position(half, 0.),
+        ]],
+        half * 2.,
+    );
+    for (index, (kind, wa, wb)) in pair_bands(&a.outer(positive), &b.outer(positive))
+        .into_iter()
+        .enumerate()
+    {
+        add_band(
+            geometry,
+            format!("closed_{index}_{}", kind.keyword()),
+            "closed_side",
+            Material::RoadElement(kind),
+            BandKind::Surface,
+            vec![[
+                side.position(-half, da),
+                side.position(half, db),
+                side.position(half, db + wb),
+                side.position(-half, da + wa),
+            ]],
+            wa.max(wb),
+        );
+        da += wa;
+        db += wb;
+    }
 }
 fn profile_approaches(geometry: &mut Resolved, arms: &[ArmProfile], half: f32) {
     for arm in arms {
@@ -379,8 +443,32 @@ pub fn default_four_way_instance(
     if intersection.kind != crate::map::IntersectionKind::FourWay {
         return None;
     }
+    profile_junction_instance(program, projection, intersection)
+}
+
+/// Three-arm junctions share the four-way curves at their two open corners.
+pub fn default_three_way_instance(
+    program: &Program,
+    projection: &crate::map::Projection,
+    intersection: &crate::map::Intersection,
+) -> Option<NetworkInstance> {
+    if intersection.kind != crate::map::IntersectionKind::ThreeWay {
+        return None;
+    }
+    profile_junction_instance(program, projection, intersection)
+}
+
+fn profile_junction_instance(
+    program: &Program,
+    projection: &crate::map::Projection,
+    intersection: &crate::map::Intersection,
+) -> Option<NetworkInstance> {
+    let connected = super::turns::connected_sides(projection, intersection);
     let arms: Vec<_> = ArmSide::ALL
         .into_iter()
+        .filter(|side| {
+            intersection.kind == crate::map::IntersectionKind::FourWay || connected.contains(side)
+        })
         .map(|side| ArmProfile::bind(program, projection, intersection, side))
         .collect::<Option<_>>()?;
     let half = crate::map::intersection_footprint_half(
@@ -414,9 +502,16 @@ pub fn default_four_way_instance(
     geometry.band_meshes.clear();
     approach_underlays(&mut geometry, &arms, half);
     profile_corners(&mut geometry, &arms, half);
+    if intersection.kind == crate::map::IntersectionKind::ThreeWay {
+        if arms.len() != 3 {
+            return None;
+        }
+        profile_closed_side(&mut geometry, &arms, half);
+    }
     profile_approaches(&mut geometry, &arms, half);
     profile_ports(&mut geometry, &arms, half);
     Some(NetworkInstance {
+        rotation: 0.,
         id: format!("profile:{}", intersection.point_ref),
         name: intersection.point_ref.clone(),
         definition: usize::MAX,

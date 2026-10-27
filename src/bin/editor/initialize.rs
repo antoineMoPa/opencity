@@ -12,6 +12,8 @@ impl RoadEditor {
             .set_visuals_of(egui::Theme::Light, editor_visuals(egui::Theme::Light));
         cc.egui_ctx.set_theme(egui::ThemePreference::Dark);
         let mut app = Self {
+            #[cfg(not(target_arch = "wasm32"))]
+            launch_action: external_launch::LaunchAction::from_environment(),
             minimal: minimal::MinimalEditor::default(),
             #[cfg(not(target_arch = "wasm32"))]
             connection_id: None,
@@ -45,6 +47,7 @@ impl RoadEditor {
                 .map(|state| state.target_format)
                 .unwrap_or(eframe::wgpu::TextureFormat::Bgra8Unorm),
             projection_cache: None,
+            interaction_cache: None,
             landscape_cache: None,
             scene_cache: None,
             #[cfg(target_arch = "wasm32")]

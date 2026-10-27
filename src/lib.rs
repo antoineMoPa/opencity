@@ -20,13 +20,15 @@
 //! ```
 
 mod ast;
-mod blocks;
+pub mod blocks;
 mod building;
 pub mod cli;
 mod design_rules;
 mod elevation;
 mod error;
 pub mod heightmap;
+#[doc(hidden)]
+pub mod junction_layouts;
 mod landscape;
 mod lexer;
 pub mod network;

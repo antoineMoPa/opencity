@@ -1,7 +1,19 @@
 //! Scene cache for the city editor.
 use super::*;
 
+pub(super) struct InteractionGeometry {
+    pub(super) junctions: Vec<(WorldPoint, Option<String>)>,
+    pub(super) element_ends: Vec<ElementEndCandidate>,
+    pub(super) profiles: Vec<PaintProfile>,
+}
+
 impl RoadEditor {
+    pub(super) fn interaction_geometry(&mut self) -> Arc<InteractionGeometry> {
+        // Map projection constructs these together, so selection and popup
+        // changes never rebuild geometry or pay for a first-selection build.
+        self.projected_map();
+        Arc::clone(self.interaction_cache.as_ref().unwrap())
+    }
     /// Picking, property controls, and selection strokes share one immutable
     /// landscape projection. Camera/selection/water animation never invalidate it.
     pub(super) fn projected_landscape(&mut self) -> Arc<opencity::LandscapeProjection> {
@@ -22,6 +34,11 @@ impl RoadEditor {
             }
         }
         let projection = Arc::new(map::project(&self.program));
+        self.interaction_cache = Some(Arc::new(InteractionGeometry {
+            junctions: junction_candidates(&self.program, &projection),
+            element_ends: element_end_candidates(&projection, &self.program),
+            profiles: paint_profiles(&self.program, &projection),
+        }));
         self.projection_cache = Some((self.program.clone(), Arc::clone(&projection)));
         projection
     }
@@ -200,7 +217,8 @@ impl RoadEditor {
         if self.selected_segment.is_none() && self.selected_segments.is_empty() {
             return;
         }
-        let profiles = paint_profiles(&self.program, projection);
+        let geometry = self.interaction_geometry();
+        let profiles = &geometry.profiles;
         for (index, segment) in projection.segments.iter().enumerate() {
             if self.selected_segment != Some(segment.source)
                 && !self.selected_segments.contains(&segment.source)

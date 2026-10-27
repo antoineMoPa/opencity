@@ -8,6 +8,7 @@ pub use turns::default_right_turn_instance;
 mod geometry;
 pub use defaults::{
     default_four_way, default_four_way_footprint_factor, default_four_way_instance,
+    default_three_way_instance,
 };
 mod instances;
 mod resolve;
@@ -255,7 +256,21 @@ pub struct Band {
     pub material: Material,
 }
 #[derive(Clone, Debug, PartialEq)]
+pub enum ComponentTemplateBody {
+    Network(String),
+    Junction(Vec<crate::Call>),
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct ComponentTemplate {
+    pub parameters: Vec<crate::BlockParameter>,
+    /// Explicit path source or a typed road-profile junction layout.
+    pub body: ComponentTemplateBody,
+}
+
+#[derive(Clone, Debug, PartialEq)]
 pub struct Definition {
+    pub template: Option<ComponentTemplate>,
     pub kind: ComponentKind,
     pub name: Option<String>,
     /// An inline placement; absent for a reusable named definition.

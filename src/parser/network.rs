@@ -27,7 +27,36 @@ impl Parser {
             Err(self.error(format!("expected '{expected}'")))
         }
     }
+    fn bound_word<'a>(&'a self, token: &'a crate::Token) -> Result<&'a str, SyntaxError> {
+        match self.bindings.iter().find(|(name, _)| name == &token.text) {
+            Some((_, crate::Argument::Identifier(text))) => Ok(text),
+            Some(_) => Err(SyntaxError {
+                span: token.span.clone(),
+                message: format!(
+                    "parameter '{}' must be an identifier in this position",
+                    token.text
+                ),
+            }),
+            None => Ok(&token.text),
+        }
+    }
     fn scalar(&mut self) -> Result<f32, SyntaxError> {
+        if self.at(TokenKind::Identifier) {
+            let token = self.bump();
+            return self
+                .bindings
+                .iter()
+                .find(|(name, _)| name == &token.text)
+                .and_then(|(_, value)| match value {
+                    crate::Argument::Number(text) => text.parse::<f32>().ok(),
+                    _ => None,
+                })
+                .filter(|value| value.is_finite())
+                .ok_or(SyntaxError {
+                    span: token.span,
+                    message: format!("unknown numeric parameter '{}'", token.text),
+                });
+        }
         let token = self.expect(TokenKind::Number)?;
         token
             .text
@@ -92,7 +121,7 @@ impl Parser {
         let position = self.network_point()?;
         self.word("heading")?;
         let token = self.expect(TokenKind::Identifier)?;
-        let heading = Heading::from_keyword(&token.text).ok_or(SyntaxError {
+        let heading = Heading::from_keyword(self.bound_word(&token)?).ok_or(SyntaxError {
             span: token.span,
             message: "expected north, east, south, or west heading".into(),
         })?;
@@ -184,7 +213,12 @@ impl Parser {
         })
     }
     fn range_bound(&mut self) -> Result<Bound, SyntaxError> {
-        if self.at(TokenKind::Number) {
+        if self.at(TokenKind::Number)
+            || self
+                .bindings
+                .iter()
+                .any(|(name, _)| name == &self.current().text)
+        {
             return Ok(Bound::Distance(self.scalar()?));
         }
         match self.current().text.as_str() {
@@ -221,6 +255,19 @@ impl Parser {
         } else {
             None
         };
+        let template_parameters = if self.at(TokenKind::OpenParen)
+            && self
+                .tokens
+                .get(self.position + 1)
+                .is_some_and(|token| token.kind == TokenKind::OpenBrace)
+        {
+            if name.is_none() {
+                return Err(self.error("parameterized component needs a name".into()));
+            }
+            Some(self.block_parameters()?)
+        } else {
+            None
+        };
         let origin = if self.at(TokenKind::OpenParen) {
             Some(self.network_point()?)
         } else {
@@ -230,7 +277,88 @@ impl Parser {
             return Err(self.error("component needs a name or inline placement coordinates".into()));
         }
         self.expect(TokenKind::OpenBrace)?;
+        if let Some(parameters) = template_parameters {
+            if origin.is_some() {
+                return Err(
+                    self.error("parameterized components must be placed by a separate call".into())
+                );
+            }
+            if self.at(TokenKind::Identifier)
+                && self.tokens.get(self.position + 1).is_some_and(|token| {
+                    matches!(
+                        token.kind,
+                        TokenKind::Equals | TokenKind::OpenParen | TokenKind::Comma
+                    )
+                })
+            {
+                let mut calls = vec![];
+                while !self.at(TokenKind::CloseBrace) {
+                    calls.push(self.call()?);
+                }
+                self.bump();
+                if self.at(TokenKind::Semicolon) {
+                    self.bump();
+                }
+                crate::junction_layouts::validate(&calls).map_err(|message| SyntaxError {
+                    span: span.clone(),
+                    message,
+                })?;
+                return Ok(Definition {
+                    kind,
+                    name,
+                    origin,
+                    template: Some(ComponentTemplate {
+                        parameters,
+                        body: ComponentTemplateBody::Junction(calls),
+                    }),
+                    ports: vec![],
+                    paths: vec![],
+                    anchors: vec![],
+                    movements: vec![],
+                    bands: vec![],
+                });
+            }
+            let start = self.position;
+            let mut depth = 1;
+            while depth > 0 {
+                match self.current().kind {
+                    TokenKind::OpenBrace => depth += 1,
+                    TokenKind::CloseBrace => depth -= 1,
+                    TokenKind::Eof => {
+                        return Err(self.error("expected closing component brace".into()))
+                    }
+                    _ => {}
+                }
+                if depth > 0 {
+                    self.bump();
+                }
+            }
+            let body = self.tokens[start..self.position]
+                .iter()
+                .map(|token| token.text.as_str())
+                .collect::<Vec<_>>()
+                .join(" ");
+            self.bump();
+            if self.at(TokenKind::Semicolon) {
+                self.bump();
+            }
+            return Ok(Definition {
+                kind,
+                name,
+                origin,
+                template: Some(ComponentTemplate {
+                    parameters,
+                    body: ComponentTemplateBody::Network(body),
+                }),
+                ports: vec![],
+                paths: vec![],
+                anchors: vec![],
+                movements: vec![],
+                bands: vec![],
+            });
+        }
         let mut definition = Definition {
+            template: None,
             kind,
             name,
             origin,
@@ -325,11 +453,12 @@ impl Parser {
                                 self.bump();
                                 seen_material = true;
                                 let token = self.expect(TokenKind::Identifier)?;
-                                material =
-                                    Material::from_keyword(&token.text).ok_or(SyntaxError {
+                                material = Material::from_keyword(self.bound_word(&token)?).ok_or(
+                                    SyntaxError {
                                         span: token.span,
                                         message: "unknown surface material or marking color".into(),
-                                    })?;
+                                    },
+                                )?;
                             }
                             _ => {
                                 return Err(self.error("unknown or duplicate band property".into()))

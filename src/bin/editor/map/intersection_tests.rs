@@ -384,3 +384,43 @@ fn rotating_an_endpoint_preserves_handle_length_and_connected_tangent() {
     assert!((incoming.y - outgoing.y).abs() < 0.0001);
     assert!((incoming.x.powi(2) + incoming.y.powi(2) - (2.0 / 3.0_f32).powi(2)).abs() < 0.0001);
 }
+
+#[test]
+fn projected_intersections_refresh_after_translation_rotation_and_restore() {
+    let mut program = parse(
+        r#"
+        road street: sidewalk-carlane-sidewalk; end;
+        intersection tee({ profile, min, max }: { profile: identifier, min: number, max: number }) {
+            center=map_point(0,0); north=map_point(0,max);
+            east=map_point(max,0); west=map_point(min,0);
+            intersection3(center,profile,north,north,east,east,west,west);
+        }
+        a=tee(1,2,0,90,{profile:street,min:-0.2,max:0.2});
+    "#,
+    )
+    .unwrap();
+    let original = program.clone();
+    let projection = project(&program);
+    let before = intersections(&program, &projection);
+    let (expanded, errors) = opencity::junction_layouts::expand(&program);
+    assert!(errors.is_empty());
+    assert_eq!(
+        before,
+        super::intersections::from_layout(&expanded, &projection)
+    );
+    let junction = before.iter().find(|j| !j.ports.is_empty()).unwrap();
+    assert!(translate_intersection(
+        &mut program,
+        &junction.point_ref,
+        WorldPoint { x: 2.0, y: -1.0 }
+    ));
+    assert!(rotate_intersection(&mut program, &junction.point_ref));
+    let edited = project(&program);
+    let (expanded, _) = opencity::junction_layouts::expand(&program);
+    assert_eq!(
+        intersections(&program, &edited),
+        super::intersections::from_layout(&expanded, &edited)
+    );
+    assert_ne!(before, intersections(&program, &edited));
+    assert_eq!(before, intersections(&original, &project(&original)));
+}

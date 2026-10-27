@@ -112,3 +112,37 @@ fn default_appearance_export_has_stop_paint_sidewalks_and_an_opaque_background()
     assert!(white > 100, "missing vehicle stop paint");
     assert!(sidewalk > 1000, "missing curved sidewalks");
 }
+
+#[test]
+fn three_way_export_fills_pavement_between_the_two_curved_corners() {
+    let source = include_str!("../examples/default_intersection.road")
+        .lines()
+        .filter(|line| !line.starts_with("south_approach"))
+        .collect::<Vec<_>>()
+        .join("\n")
+        .replace(
+            "intersection4(center, street);",
+            "intersection3(center, street);",
+        );
+    let program = opencity::parse(&source).unwrap();
+    let projection = opencity::map::project(&program);
+    let junction = opencity::map::intersections(&program, &projection).remove(0);
+    let instance =
+        opencity::network::default_three_way_instance(&program, &projection, &junction).unwrap();
+    let bounds = instance.geometry.bounds();
+    let extent = (bounds[2] - bounds[0]).max(bounds[3] - bounds[1]) * 1.16;
+    let svg = opencity::network::to_svg_with_options(&instance.geometry, "tee", 512, false, false);
+    let png = opencity::cli::render_png(&svg).unwrap();
+    let image = resvg::tiny_skia::Pixmap::decode_png(&png).unwrap();
+    for sign in [-1., 1.] {
+        let x = sign * junction.footprint_half * 0.7;
+        let y = -junction.footprint_half * 0.1;
+        let px = ((x - (bounds[0] + bounds[2] - extent) / 2.) / extent * 512.) as u32;
+        let py = ((y - (bounds[1] + bounds[3] - extent) / 2.) / extent * 512.) as u32;
+        let pixel = image.pixel(px, py).unwrap();
+        assert_eq!(
+            [pixel.red(), pixel.green(), pixel.blue()],
+            opencity::network::road_color(opencity::RoadElementKind::CarLane, false)
+        );
+    }
+}

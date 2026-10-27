@@ -123,6 +123,7 @@ fn export(args: &[OsString]) -> Result<(), String> {
                 .find(|intersection| &intersection.point_ref == name);
             if let Some(instance) = intersection.as_ref().and_then(|intersection| {
                 network::default_four_way_instance(&program, &map, intersection)
+                    .or_else(|| network::default_three_way_instance(&program, &map, intersection))
             }) {
                 (name.clone(), instance.geometry)
             } else {

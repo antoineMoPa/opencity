@@ -189,6 +189,8 @@ fn iso_primary_drag(modifiers: egui::Modifiers, b_down: bool) -> IsoPrimaryDrag 
 }
 
 struct RoadEditor {
+    #[cfg(not(target_arch = "wasm32"))]
+    launch_action: Result<Option<external_launch::LaunchAction>, String>,
     minimal: minimal::MinimalEditor,
     #[cfg(not(target_arch = "wasm32"))]
     connection_id: Option<String>,
@@ -218,6 +220,7 @@ struct RoadEditor {
     camera_transition: Option<camera_transition::CameraTransition>,
     render_format: eframe::wgpu::TextureFormat,
     projection_cache: Option<(Program, Arc<map::Projection>)>,
+    interaction_cache: Option<Arc<scene_cache::InteractionGeometry>>,
     landscape_cache: Option<(Program, Arc<opencity::LandscapeProjection>)>,
     scene_cache: Option<SceneCache>,
     #[cfg(target_arch = "wasm32")]
@@ -314,6 +317,9 @@ mod viewport_iso;
 
 #[path = "editor/viewport_top.rs"]
 mod viewport_top;
+
+#[path = "editor/external_launch.rs"]
+mod external_launch;
 
 #[path = "editor/viewport_vehicle.rs"]
 mod viewport_vehicle;

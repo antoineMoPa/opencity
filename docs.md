@@ -169,11 +169,49 @@ short = span(10, 20, { length: 5, height: 0.5 });
 long = span(20, 20, 1, { height: 1, length: 8 });
 ```
 
-Placement arguments are `x, y, { values }`, or `x, y, elevation, { values }`. Coordinates inside the block are local to each placement, and heights add to the placement's elevation. Object property order does not matter. Every declared parameter is required; unknown properties and values of the wrong type invalidate the placement. Parameter names cannot be reused for call results inside the block.
+Placement arguments are `x, y, { values }`, `x, y, elevation, { values }`, or `x, y, elevation, rotation_degrees, { values }`. Coordinates inside the block are local to each placement, and heights add to the placement's elevation. Object property order does not matter. Every declared parameter is required; unknown properties and values of the wrong type invalidate the placement. Parameter names cannot be reused for call results inside the block.
 
-Supported types are `number` (a finite number), `string` (a quoted literal), and `identifier` (a symbolic name, such as a road profile). An `identifier` parameter may also be called: `profile(0, 0, length, 0);`. Parameters work in road calls, landscape calls, elevation and grade calls, and nested block placements. Forward a parameter with `{ length: length }` or the shorthand `{ length }`. Each instance binds its own values without changing the definition or other instances. Blocks without a parameter declaration keep their existing `name(x, y)` or `name(x, y, elevation)` syntax.
+Supported types are `number` (a finite number), `string` (a quoted literal), and `identifier` (a symbolic name, such as a road profile). An `identifier` parameter may also be called: `profile(0, 0, length, 0);`. Parameters work in road calls, landscape calls, elevation and grade calls, and nested block placements. Forward a parameter with `{ length: length }` or the shorthand `{ length }`. Each instance binds its own values without changing the definition or other instances. Blocks without a parameter declaration also accept `name(x, y, elevation, rotation_degrees)`. Rotation is counterclockwise about the placement origin in world coordinates (+X east, +Y north). Nested block origins rotate with their parent; angles add. Roads, component ports and headings, buildings, terrain, and other landscape footprints rotate together. Elevations and grades still add independently of rotation.
 
 See [parameterized_blocks.road](examples/parameterized_blocks.road) for a complete example.
+
+### Parameterized and rotated intersections
+
+Named `intersection`, `interchange`, and `road_segment` definitions accept the same typed parameter object syntax as blocks:
+
+```road
+intersection link({ length, width }: { length: number, width: number }) {
+    path lane { move (0, 0); line to (length, 0); }
+    surface pavement along lane width width material asphalt;
+}
+a = link(10, 20, { length: 2, width: 0.2 });
+b = link(10, 24, 1, 90, { length: 4, width: 0.3 });
+```
+
+Placement arguments are `x, y`, optional elevation, optional rotation in degrees, and finally the parameter object when declared. Supply elevation `0` to rotate a ground-level instance. Definitions without parameters can also be rotated, for example `node(10, 20, 0, -45)`.
+
+Numeric parameters work in coordinates, elevations, widths, radii, anchor distances, and numeric traversal bounds. Identifier parameters work in port headings and band materials/colors. Binding changes values only; it preserves port, path, anchor, and band names. Forward block parameters to component instances with `{ length, width }`. Each placement validates its own bindings and resolved geometry; a bad placement reports an error through `network::project` without hiding valid instances. Template bodies are parsed and resolved when instantiated. Templates survive `.road` save/load without acquiring any instance's values.
+
+Component-local +Y points south, as before; rotation is applied after converting to the world's +Y-north coordinates. Rotated ports remain usable as `instance.port.in` and `instance.port.out` road endpoints. See [parameterized_intersections.road](examples/parameterized_intersections.road) for repeated components and a rotated containing block.
+
+Road-profile junction templates can instead contain local `map_point` declarations and one `intersection2`, `intersection3`, or `intersection4` call. These preserve the editor's profile-aware pavement, sidewalks, mixed approaches, clipping, and game surfaces:
+
+```road
+intersection tee({ profile, min, max }: { profile: identifier, min: number, max: number }) {
+    center = map_point(0, 0);
+    north = map_point(0, max);
+    east = map_point(max, 0);
+    west = map_point(min, 0);
+    intersection3(center, profile, north, north, east, east, west, west);
+}
+junction = tee(10, 20, 0, 90, { profile: town_street, min: -0.0895, max: 0.0895 });
+```
+
+Road-profile layouts use the ordinary map's +Y-north coordinates and accept multiples of 90 degrees. Their named points stay local to the instance (`junction.center`, `junction.north`, etc.); rotating changes each port's world position and direction while preserving its name. The canonical T opens north/east/west; rotations 90/180/270 move its closed side to east/north/west. Placement elevation and containing block transforms apply to every port. Template declarations validate their layout structure; placements validate bindings and coordinates. `map::project` reports invalid placements as unresolved, and `junction_layouts::expand` supplies detailed errors. Top-level instances remain movable and rotatable in the editor.
+
+The default map now uses three shared junction templates for all 268 junctions: nine corners, 93 three-way junctions, and 166 four-way junctions. Each placement supplies its road profile and signed footprint offsets; the three-way and corner placements select their orientation by rotation. Mixed-profile freeway terminals reuse the same T with larger offsets. Road endpoints refer to the placed template's local point names. Junctions and derived ports are projected without expanding the saved map into repeated definitions.
+
+
 
 The palette starts with Add road, Add highway, Add interstate, Add terrain and Add concrete. These road commands map explicitly to neighborhood_street, divided_highway and interstate_three_lane. Existing definitions with those names take precedence; missing bundled profiles are added only when placement commits. Cancel leaves no extra definitions or geometry. Custom map profiles remain searchable. Clear appears after the construction commands, removes all placements while retaining road and block definitions, and defaults to Cancel. One undo restores the map.
 
@@ -189,4 +227,20 @@ Use `opencity intersection-svg INPUT.road --name NAME --output OUTPUT.svg` or `o
 
 ## Game runtime integration
 
-Enable `game-runtime` with default features disabled to query structured roads, directions, paths, buildings and landscape, sample physical driving surfaces, and generate procedural meshes and nearby street details. Optional editor/game WGSL exports let consumers reuse the visual style. See [the game integration guide](docs/game-runtime.md) and the winit/wgpu prototype in the parent `mtl_jobines` checkout (`..`).
+Enable `game-runtime` with default features disabled to query structured roads, directions, paths, buildings and landscape, sample physical driving surfaces, and generate procedural meshes and nearby street details. Optional editor/game WGSL exports let consumers reuse the visual style. See [the game integration guide](docs/game-runtime.md).
+
+The editor keeps intersection geometry, endpoint candidates and cross-section profiles with the document projection. Hovering, selecting, copying and opening menus reuse that snapshot; edits and undo refresh it. This avoids rebuilding the city while handling pointer events. The full default-map interaction regression can be run with `cargo test --bin editor default_map_first_click_menus_reuse_document_geometry -- --nocapture`. It checks the first road/building/context menus in Top and Isometric views against the actual 592-road, 268-junction, 1,863-building map.
+
+### External launch action
+
+In Top or Isometric view, right-click any map position to **Copy coordinates** as `x,y` in authored map units. The native editor can also show one external launch action when explicitly configured. Set `OPENCITY_LAUNCH_ACTION` to a JSON file before starting the editor; no configuration is searched for automatically. Configuration is loaded once at startup. Missing or invalid files show an error in the context menu, while coordinate copying remains available.
+
+```json
+{
+  "label": "Inspect here",
+  "program": "external-map-viewer",
+  "args": ["--map", "{map}", "--position", "{x},{y}", "--assets", "{config_dir}/assets"]
+}
+```
+
+`label`, `program` and the string array `args` are required. Optional `ready_message` is a nonempty stderr marker: the centered launch spinner disappears when that text is emitted. Without a marker it remains until the process exits. Failures appear in a centered error dialog; successful exits close launch feedback. The four supported tokens are `{map}` (absolute saved map path), `{x}`, `{y}` and `{config_dir}` (absolute directory containing the configuration). A relative configuration path resolves against the editor's startup working directory. Tokens may appear inside an argument; expansion happens once and inserted values remain literal. The executable and arguments are passed directly to the operating system without a shell, preserving spaces and shell metacharacters. Relative executable paths resolve against the editor's working directory; use `{config_dir}` for configuration-relative executables. Launching includes current unsaved edits. When needed, `{map}` points to a temporary snapshot beside the original map, or in the startup directory for a new document; relative assets keep the same base directory. For the unsaved default city, its embedded elevation PNG is exported alongside the snapshot. The original file and editor save state remain untouched, and the snapshot is removed after the external process exits. The launch window reports process creation errors and unsuccessful exits with recent stderr output. The browser editor provides coordinate copying only.

@@ -167,7 +167,7 @@ pub fn road_profiles(program: &Program, projection: &map::Projection) -> Vec<Roa
         .iter()
         .map(|_| RoadProfile::default())
         .collect();
-    for split in map::lane_splits(program) {
+    for split in map::lane_splits_with_projection(program, projection) {
         let Some((parent_index, parent)) = projection
             .segments
             .iter()

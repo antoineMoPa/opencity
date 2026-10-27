@@ -49,9 +49,11 @@ impl Viewer {
         intersection: map::Intersection,
     ) -> Option<Self> {
         if let Some(instance) =
-            network::default_four_way_instance(program, projection, &intersection).or_else(|| {
-                network::default_right_turn_instance(program, projection, &intersection)
-            })
+            network::default_four_way_instance(program, projection, &intersection)
+                .or_else(|| network::default_three_way_instance(program, projection, &intersection))
+                .or_else(|| {
+                    network::default_right_turn_instance(program, projection, &intersection)
+                })
         {
             return Some(Self::explicit(&instance));
         }
