@@ -6,6 +6,11 @@ fn material_keywords_and_shared_colors_are_explicit() {
         (BuildingMaterial::Concrete, "concrete", 2),
         (BuildingMaterial::Glass, "glass", 1),
         (BuildingMaterial::Brick, "brick", 3),
+        (BuildingMaterial::RedBrick, "red_brick", 11),
+        (BuildingMaterial::BrownBrick, "brown_brick", 12),
+        (BuildingMaterial::BuffBrick, "buff_brick", 13),
+        (BuildingMaterial::PaleBrick, "pale_brick", 14),
+        (BuildingMaterial::Limestone, "limestone", 15),
     ] {
         assert_eq!(BuildingMaterial::from_keyword(keyword), Some(material));
         assert_eq!(material.keyword(), keyword);

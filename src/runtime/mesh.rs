@@ -2,6 +2,7 @@ use super::*;
 use std::collections::HashSet;
 /// Packed f32-only layout: position(0), normal(1), linear color(2), surface(3).
 /// `surface` = [SurfaceKind as f32, base elevation, floor spacing, facade material ID].
+/// Fence planes use [Fence, horizontal pattern units, vertical fraction 0..1, FencePattern].
 #[derive(Clone, Copy, Debug)]
 #[repr(C)]
 pub struct Vertex {
@@ -332,7 +333,17 @@ impl City {
     }
     pub fn detail_mesh(&self, region: Region) -> Mesh {
         let mut mesh = Mesh::default();
+        for object in self.detail_objects(region) {
+            mesh.vertices.extend(object.vertices);
+        }
+        mesh
+    }
+
+    /// Individual street furniture and trees, suitable for collision and removal.
+    pub fn detail_objects(&self, region: Region) -> Vec<Mesh> {
+        let mut objects = Vec::new();
         for f in self.street_features(region) {
+            let mut mesh = Mesh::default();
             let p = f.position;
             let start = mesh.vertices.len();
             match f.kind {
@@ -348,7 +359,7 @@ impl City {
                         [p[0] + 0.005, p[1] - 0.002, p[2] + 0.072],
                         [p[0] + 0.013, p[1] + 0.002, p[2] + 0.074],
                         [0.8, 0.73, 0.45],
-                        SurfaceKind::Marking,
+                        SurfaceKind::Light,
                     );
                 }
                 StreetFeatureKind::Bench => {
@@ -394,7 +405,8 @@ impl City {
                 let n = v.normal;
                 v.normal = [n[0] * cos - n[1] * sin, n[0] * sin + n[1] * cos, n[2]];
             }
+            objects.push(mesh);
         }
-        mesh
+        objects
     }
 }

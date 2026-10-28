@@ -196,6 +196,11 @@ impl RoadEditor {
                                     BuildingMaterial::Concrete,
                                     BuildingMaterial::Glass,
                                     BuildingMaterial::Brick,
+                                    BuildingMaterial::RedBrick,
+                                    BuildingMaterial::BrownBrick,
+                                    BuildingMaterial::BuffBrick,
+                                    BuildingMaterial::PaleBrick,
+                                    BuildingMaterial::Limestone,
                                 ] {
                                     changed |= ui
                                         .selectable_value(

@@ -8,6 +8,11 @@ pub enum BuildingMaterial {
     Concrete,
     Glass,
     Brick,
+    RedBrick,
+    BrownBrick,
+    BuffBrick,
+    PaleBrick,
+    Limestone,
 }
 
 impl BuildingMaterial {
@@ -16,6 +21,11 @@ impl BuildingMaterial {
             "concrete" => Some(Self::Concrete),
             "glass" => Some(Self::Glass),
             "brick" => Some(Self::Brick),
+            "red_brick" => Some(Self::RedBrick),
+            "brown_brick" => Some(Self::BrownBrick),
+            "buff_brick" => Some(Self::BuffBrick),
+            "pale_brick" => Some(Self::PaleBrick),
+            "limestone" => Some(Self::Limestone),
             _ => None,
         }
     }
@@ -25,6 +35,11 @@ impl BuildingMaterial {
             Self::Concrete => "concrete",
             Self::Glass => "glass",
             Self::Brick => "brick",
+            Self::RedBrick => "red_brick",
+            Self::BrownBrick => "brown_brick",
+            Self::BuffBrick => "buff_brick",
+            Self::PaleBrick => "pale_brick",
+            Self::Limestone => "limestone",
         }
     }
 
@@ -34,6 +49,11 @@ impl BuildingMaterial {
             Self::Concrete => 2,
             Self::Glass => 1,
             Self::Brick => 3,
+            Self::RedBrick => 11,
+            Self::BrownBrick => 12,
+            Self::BuffBrick => 13,
+            Self::PaleBrick => 14,
+            Self::Limestone => 15,
         }
     }
 
@@ -42,6 +62,11 @@ impl BuildingMaterial {
             Self::Concrete => [174, 180, 176],
             Self::Glass => [112, 157, 174],
             Self::Brick => [164, 109, 91],
+            Self::RedBrick => [151, 83, 62],
+            Self::BrownBrick => [119, 91, 71],
+            Self::BuffBrick => [185, 161, 112],
+            Self::PaleBrick => [206, 199, 165],
+            Self::Limestone => [152, 155, 142],
         }
     }
 
@@ -50,6 +75,11 @@ impl BuildingMaterial {
             Self::Concrete => [192, 198, 194],
             Self::Glass => [151, 173, 181],
             Self::Brick => [154, 143, 133],
+            Self::RedBrick
+            | Self::BrownBrick
+            | Self::BuffBrick
+            | Self::PaleBrick
+            | Self::Limestone => [83, 95, 91],
         }
     }
 
@@ -100,10 +130,10 @@ impl BuildingStyle {
             match key.as_str() {
                 "material" => {
                     let Argument::Identifier(keyword) = value else {
-                        return Err("building material must be concrete, glass, or brick".into());
+                        return Err("unknown building material".into());
                     };
                     style.material = BuildingMaterial::from_keyword(keyword)
-                        .ok_or("building material must be concrete, glass, or brick")?;
+                        .ok_or("unknown building material")?;
                 }
                 "floor_height" => {
                     let Argument::Number(text) = value else {

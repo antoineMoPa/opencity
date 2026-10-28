@@ -81,7 +81,7 @@ fn sidewalk_furniture_follows_both_sides_of_straight_reversed_and_curved_roads()
                         let light: Vec<_> = mesh
                             .vertices
                             .iter()
-                            .filter(|v| v.surface[0] == SurfaceKind::Marking as u32 as f32)
+                            .filter(|v| v.surface[0] == SurfaceKind::Light as u32 as f32)
                             .collect();
                         assert!(!light.is_empty());
                         assert!(light.iter().all(|v| {

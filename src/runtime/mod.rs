@@ -4,17 +4,22 @@
 mod bridges;
 mod geometry;
 use crate::junction_mesh;
+mod building_details;
 mod mesh;
 mod svg;
 use crate::{
     heightmap::{ElevationMap, ElevationMapSpec},
     map, network, LandscapeFeature, LandscapeKind, Program, RoadDefinition,
 };
+pub use building_details::{
+    BuildingDetailConfig, BuildingPattern, FacadeKind, FencePattern, GardenEdge, GardenProp,
+    RoofKind, StairKind,
+};
 pub use mesh::{Mesh, StreetFeature, StreetFeatureKind, Vertex};
 use std::{collections::HashMap, path::Path};
 
 /// Optional standalone wgpu shader: Z-up positions, linear RGB, surface metadata.
-/// Group 0 binding 0: view-projection, light view-projection, eye/time, sun/exposure.
+/// Group 0 binding 0: view-projection, light view-projection, eye/time, sun/exposure, daylight/sky.
 /// Group 1: 2048² shadow depth texture and comparison sampler (see shader).
 pub const GAME_SHADER: &str = include_str!("game.wgsl");
 /// Original editor shader, for consumers implementing its documented bindings.
@@ -31,6 +36,14 @@ pub enum SurfaceKind {
     Sand = 5,
     Marking = 6,
     Prop = 7,
+    /// A window pane, which a renderer may illuminate after dark.
+    Window = 8,
+    /// An artificial light source, such as a street lamp.
+    Light = 9,
+    /// Roof covering with texture scale supplied in surface metadata.
+    Roof = 10,
+    /// A double-sided fence plane with local pattern coordinates and cutout gaps.
+    Fence = 11,
 }
 impl SurfaceKind {
     /// Dry-surface tire friction coefficient, used by the example vehicle.
