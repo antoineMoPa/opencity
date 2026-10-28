@@ -662,6 +662,7 @@ impl RoadEditor {
                     &legacy.projection,
                     &legacy.intersection,
                     editor_palette(root.ctx().theme()),
+                    false,
                 );
             }
             if viewer.ports {

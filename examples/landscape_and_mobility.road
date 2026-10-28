@@ -12,6 +12,7 @@ road cycle_path:
 end
 road interstate:
     verge carlane carlane middle carlane carlane verge;
+    role highway;
 end
 
 mainland = land(-5, -3, 5, -3, 5, 3, -5, 3);

@@ -94,9 +94,17 @@ fn add_segment(
                 ];
                 mesh.quad(
                     corners.map(|v| (v.point, v.height + surface_bias)),
-                    band_color(element.kind),
+                    band_color(geometry.surface_element(index, element.kind)),
                 );
             }
+        }
+    }
+    for wall in geometry.safety_walls.iter().filter(|w| w.segment == index) {
+        for face in wall.barrier_faces() {
+            mesh.quad(
+                face.map(|p| (WorldPoint { x: p[0], y: p[1] }, p[2])),
+                [164, 170, 166, 255],
+            );
         }
     }
     for wall in geometry.walls.iter().filter(|w| w.segment == index) {
@@ -125,7 +133,9 @@ pub fn export(program: &Program) -> Vec<u8> {
 
 pub fn export_with_base(program: &Program, base: Option<&std::path::Path>) -> Vec<u8> {
     let projection = map::project(program);
-    let geometry = opencity::road_geometry::RoadGeometry::compile(program, &projection);
+    let mut geometry = opencity::road_geometry::RoadGeometry::compile(program, &projection);
+    let elevation = super::elevation_map::load(program, base).ok().flatten();
+    geometry.configure_safety(program, &projection, elevation.as_deref());
     let mut mesh = Geometry::new();
     if let Ok(Some(map)) = super::elevation_map::load(program, base) {
         map.for_each_triangle(|triangle| {
@@ -156,8 +166,15 @@ pub fn export_with_base(program: &Program, base: Option<&std::path::Path>) -> Ve
         add_segment(&mut mesh, segment, road, &geometry, index);
     }
     for intersection in map::intersections(program, &projection) {
-        if let Some(instance) =
-            opencity::network::default_right_turn_instance(program, &projection, &intersection)
+        if let Some(mut instance) =
+            opencity::network::default_four_way_instance(program, &projection, &intersection)
+                .or_else(|| {
+                    opencity::network::default_right_turn_instance(
+                        program,
+                        &projection,
+                        &intersection,
+                    )
+                })
                 .or_else(|| {
                     opencity::network::default_three_way_instance(
                         program,
@@ -166,6 +183,11 @@ pub fn export_with_base(program: &Program, base: Option<&std::path::Path>) -> Ve
                     )
                 })
         {
+            if geometry.junction_is_protected(&intersection.point_ref) {
+                for band in &mut instance.geometry.bands {
+                    band.material = opencity::road_geometry::paved_material(band.material);
+                }
+            }
             let mut seams = Vec::new();
             for (index, segment) in projection.segments.iter().enumerate() {
                 for (reference, end) in [(&segment.start_ref, false), (&segment.end_ref, true)] {

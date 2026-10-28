@@ -548,3 +548,20 @@ elevation PNG is exported alongside the snapshot. The original file and editor s
 untouched, and the snapshot is removed after the external process exits. The launch window reports
 process creation errors and unsuccessful exits with recent stderr output. The browser editor
 provides coordinate copying only.
+
+### Road shoulders and safety walls
+
+Use `role highway;` on interstate profiles, including ground-level roads. The bundled interstate
+profiles declare this role. Highway, ramp and merge profiles have concrete edge barriers; highways
+with a `middle` band also have a median barrier. Explicit `barrier` bands produce solid walls.
+
+Other road types gain edge barriers when their pavement clears the local terrain by more than
+0.02 map units. Grass verge and median bands become paved surfaces on protected roads, retaining
+their authored widths and lane indices. Merge openings use the shared attachment geometry.
+The editor scene, GLB export and game runtime share the barrier prisms.
+Protected intersections continue these barriers around their curved exterior and closed sides,
+leaving approach mouths open. Their grass bands use pavement, matching the connected road decks.
+
+Runtime consumers can inspect `City::road_barriers` and use `City::road_barrier_contact` for circle
+contacts with a vertical interval. Barriers render as props and do not support tires; their height
+is 0.011 map units and their width is 0.004 map units.

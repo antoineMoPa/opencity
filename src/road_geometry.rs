@@ -9,6 +9,8 @@ use crate::{
 pub const GEOMETRY_TOLERANCE: f32 = 0.0005;
 const MAX_SPAN: f32 = 0.04;
 const HEIGHT_TOLERANCE: f32 = 0.012;
+// Land polygons sit 0.02 below authored pavement; leave that ground-road offset clear.
+const SAFETY_CLEARANCE: f32 = 0.02001;
 
 #[derive(Clone, Copy, Debug)]
 pub struct Vertex {
@@ -20,6 +22,52 @@ pub struct Wall {
     pub segment: usize,
     pub start: Vertex,
     pub end: Vertex,
+}
+pub const BARRIER_HEIGHT: f32 = 0.011;
+pub const BARRIER_HALF_WIDTH: f32 = 0.002;
+pub fn paved_material(material: crate::network::Material) -> crate::network::Material {
+    use crate::network::Material;
+    match material {
+        Material::Verge
+        | Material::RoadElement(RoadElementKind::Verge | RoadElementKind::Middle) => {
+            Material::Asphalt
+        }
+        other => other,
+    }
+}
+impl Wall {
+    /// Closed concrete barrier prism, in map coordinates (Z up).
+    pub fn barrier_faces(&self) -> [[[f32; 3]; 4]; 6] {
+        let dx = self.end.point.x - self.start.point.x;
+        let dy = self.end.point.y - self.start.point.y;
+        let length = dx.hypot(dy).max(1e-8);
+        let nx = -dy / length * BARRIER_HALF_WIDTH;
+        let ny = dx / length * BARRIER_HALF_WIDTH;
+        let point = |v: Vertex, sign: f32, h: f32| {
+            [v.point.x + nx * sign, v.point.y + ny * sign, v.height + h]
+        };
+        let [a, b, c, d] = [
+            point(self.start, -1., 0.),
+            point(self.end, -1., 0.),
+            point(self.end, 1., 0.),
+            point(self.start, 1., 0.),
+        ];
+        let [e, f, g, h] = [
+            point(self.start, -1., BARRIER_HEIGHT),
+            point(self.end, -1., BARRIER_HEIGHT),
+            point(self.end, 1., BARRIER_HEIGHT),
+            point(self.start, 1., BARRIER_HEIGHT),
+        ];
+        [
+            [a, b, c, d],
+            [e, h, g, f],
+            [a, e, f, b],
+            [d, c, g, h],
+            [a, d, h, e],
+            [b, f, g, c],
+        ]
+        .map(|[a, b, c, d]| [d, c, b, a])
+    }
 }
 #[derive(Clone, Copy)]
 struct Triangle {
@@ -39,6 +87,10 @@ struct Surface {
 }
 pub struct RoadGeometry {
     pub walls: Vec<Wall>,
+    pub safety_walls: Vec<Wall>,
+    paved_edges: Vec<bool>,
+    edge_walls: Vec<Wall>,
+    protected_junctions: std::collections::HashSet<String>,
     /// Curves that could not be resolved within the subdivision budget.
     pub unresolved: Vec<usize>,
     surfaces: Vec<Surface>,
@@ -271,6 +323,203 @@ fn surface_rows(
 }
 
 impl RoadGeometry {
+    /// Apply terrain-relative road protection after loading the elevation asset.
+    pub fn configure_safety(
+        &mut self,
+        program: &Program,
+        projection: &Projection,
+        elevation: Option<&crate::heightmap::ElevationMap>,
+    ) {
+        let features: Vec<_> = crate::project_landscape_features(program)
+            .features
+            .into_iter()
+            .filter(|feature| {
+                matches!(
+                    feature.kind,
+                    crate::LandscapeKind::Land
+                        | crate::LandscapeKind::Beach
+                        | crate::LandscapeKind::Concrete
+                        | crate::LandscapeKind::Terrain
+                )
+            })
+            .collect();
+        let ground = |v: Vertex| {
+            let p = v.point;
+            let mut height = elevation.and_then(|e| e.height_at([p.x, p.y]));
+            for feature in &features {
+                let mut inside = false;
+                for (a, b) in feature
+                    .points
+                    .iter()
+                    .zip(feature.points.iter().cycle().skip(1))
+                    .take(feature.points.len())
+                {
+                    if (a[1] > p.y) != (b[1] > p.y)
+                        && p.x < (b[0] - a[0]) * (p.y - a[1]) / (b[1] - a[1]) + a[0]
+                    {
+                        inside = !inside;
+                    }
+                }
+                if inside {
+                    let h = feature.elevation - 0.02 + feature.height.unwrap_or(0.);
+                    height = Some(height.map_or(h, |prior| prior.max(h)));
+                }
+            }
+            height.unwrap_or(0.)
+        };
+        let protected = |index: usize| {
+            definition(program, &projection.segments[index])
+                .is_some_and(|r| r.role != RoadRole::Ordinary)
+        };
+        self.safety_walls = self
+            .edge_walls
+            .iter()
+            .copied()
+            .filter(|w| {
+                protected(w.segment)
+                    || (w.start.height - ground(w.start) > SAFETY_CLEARANCE
+                        && w.end.height - ground(w.end) > SAFETY_CLEARANCE)
+            })
+            .collect();
+        self.paved_edges = self
+            .surfaces
+            .iter()
+            .enumerate()
+            .map(|(i, s)| {
+                protected(i)
+                    || s.rows.iter().any(|r| {
+                        r.boundaries
+                            .iter()
+                            .any(|v| v.height - ground(*v) > SAFETY_CLEARANCE)
+                    })
+            })
+            .collect();
+        for (index, surface) in self.surfaces.iter().enumerate() {
+            let Some(road) = definition(program, &projection.segments[index]) else {
+                continue;
+            };
+            for (band, element) in road.elements.iter().enumerate() {
+                if element.kind != RoadElementKind::Barrier
+                    && !(road.role == RoadRole::Highway && element.kind == RoadElementKind::Middle)
+                {
+                    continue;
+                }
+                for pair in surface.rows.windows(2) {
+                    self.safety_walls.push(Wall {
+                        segment: index,
+                        start: mix(pair[0].boundaries[band], pair[0].boundaries[band + 1], 0.5),
+                        end: mix(pair[1].boundaries[band], pair[1].boundaries[band + 1], 0.5),
+                    });
+                }
+            }
+        }
+        self.protected_junctions.clear();
+        for junction in map::intersections(program, projection) {
+            let mut seams = Vec::new();
+            for (index, segment) in projection.segments.iter().enumerate() {
+                for (reference, end) in [(&segment.start_ref, false), (&segment.end_ref, true)] {
+                    if !reference.as_ref().is_some_and(|r| {
+                        r == &junction.point_ref || junction.ports.iter().any(|p| &p.point_ref == r)
+                    }) {
+                        continue;
+                    }
+                    let rows = self.cross_sections(index);
+                    if let Some(row) = if end { rows.last() } else { rows.first() } {
+                        if let (Some(&a), Some(&b)) =
+                            (row.boundaries.first(), row.boundaries.last())
+                        {
+                            seams.push((index, a, b));
+                        }
+                    }
+                }
+            }
+            if !seams.iter().any(|&(index, a, b)| {
+                protected(index)
+                    || a.height - ground(a) > SAFETY_CLEARANCE
+                    || b.height - ground(b) > SAFETY_CLEARANCE
+            }) {
+                continue;
+            }
+            let Some(instance) =
+                crate::network::default_four_way_instance(program, projection, &junction)
+                    .or_else(|| {
+                        crate::network::default_three_way_instance(program, projection, &junction)
+                    })
+                    .or_else(|| {
+                        crate::network::default_right_turn_instance(program, projection, &junction)
+                    })
+            else {
+                continue;
+            };
+            self.protected_junctions.insert(junction.point_ref.clone());
+            let half = map::intersection_footprint_half(
+                &junction,
+                seams
+                    .iter()
+                    .map(|(_, a, b)| distance(a.point, b.point) * 0.5)
+                    .fold(0., f32::max),
+            );
+            let height = |point: WorldPoint| {
+                let mut weight = 0.;
+                let mut sum = 0.;
+                for &(_, a, b) in &seams {
+                    let dx = b.point.x - a.point.x;
+                    let dy = b.point.y - a.point.y;
+                    let t = (((point.x - a.point.x) * dx + (point.y - a.point.y) * dy)
+                        / (dx * dx + dy * dy).max(1e-20))
+                    .clamp(0., 1.);
+                    let d = (point.x - a.point.x - dx * t).powi(2)
+                        + (point.y - a.point.y - dy * t).powi(2);
+                    let h = a.height + (b.height - a.height) * t;
+                    if d < 1e-12 {
+                        return h;
+                    }
+                    sum += h / d;
+                    weight += 1. / d;
+                }
+                sum / weight
+            };
+            for edge in crate::junction_mesh::boundary(&instance.geometry, half) {
+                let vertices = edge.map(|p| {
+                    let p = instance.world_point(p);
+                    let point = WorldPoint { x: p.x, y: p.y };
+                    Vertex {
+                        point,
+                        height: height(point),
+                    }
+                });
+                let middle = mix(vertices[0], vertices[1], 0.5).point;
+                let mouth = seams.iter().any(|&(_, a, b)| {
+                    let dx = b.point.x - a.point.x;
+                    let dy = b.point.y - a.point.y;
+                    let t = ((middle.x - a.point.x) * dx + (middle.y - a.point.y) * dy)
+                        / (dx * dx + dy * dy).max(1e-20);
+                    (-1e-4..=1.0001).contains(&t)
+                        && (middle.x - a.point.x - dx * t).hypot(middle.y - a.point.y - dy * t)
+                            < 1e-5
+                });
+                if !mouth {
+                    self.safety_walls.push(Wall {
+                        segment: seams[0].0,
+                        start: vertices[0],
+                        end: vertices[1],
+                    });
+                }
+            }
+        }
+    }
+    pub fn junction_is_protected(&self, reference: &str) -> bool {
+        self.protected_junctions.contains(reference)
+    }
+    pub fn surface_element(&self, segment: usize, kind: RoadElementKind) -> RoadElementKind {
+        if self.paved_edges[segment]
+            && matches!(kind, RoadElementKind::Verge | RoadElementKind::Middle)
+        {
+            RoadElementKind::CarLane
+        } else {
+            kind
+        }
+    }
     pub fn cross_sections(&self, segment: usize) -> &[CrossSection] {
         &self.surfaces[segment].rows
     }
@@ -368,9 +617,6 @@ impl RoadGeometry {
             for edge in &surface.edges {
                 for pair in edge.windows(2) {
                     let (a, b) = (pair[0], pair[1]);
-                    if a.height.max(b.height) <= 0.0 {
-                        continue;
-                    }
                     let mut cuts = Vec::new();
                     for &other in &connections[index] {
                         for triangle in &surfaces[other].lanes {
@@ -404,7 +650,14 @@ impl RoadGeometry {
             }
         }
         Self {
-            walls,
+            edge_walls: walls.clone(),
+            protected_junctions: Default::default(),
+            walls: walls
+                .into_iter()
+                .filter(|w| w.start.height.max(w.end.height) > 0.)
+                .collect(),
+            safety_walls: Vec::new(),
+            paved_edges: vec![false; surfaces.len()],
             unresolved,
             surfaces,
         }

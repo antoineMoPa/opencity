@@ -161,9 +161,37 @@ pub(super) fn compile(
     program: &Program,
     projection: &map::Projection,
 ) -> Result<(), String> {
-    let geometry = RoadGeometry::compile(program, projection);
+    let mut geometry = RoadGeometry::compile(program, projection);
+    geometry.configure_safety(program, projection, city.elevation.as_ref());
     if !geometry.unresolved.is_empty() {
         return Err("road subdivision budget exceeded".into());
+    }
+    city.road_barriers = geometry.safety_walls.clone();
+    for (id, wall) in city.road_barriers.iter().enumerate() {
+        let a = cell([
+            wall.start.point.x.min(wall.end.point.x),
+            wall.start.point.y.min(wall.end.point.y),
+        ]);
+        let b = cell([
+            wall.start.point.x.max(wall.end.point.x),
+            wall.start.point.y.max(wall.end.point.y),
+        ]);
+        for x in a.0..=b.0 {
+            for y in a.1..=b.1 {
+                city.barrier_cells.entry((x, y)).or_default().push(id);
+            }
+        }
+    }
+    for wall in &geometry.safety_walls {
+        for face in wall.barrier_faces() {
+            quad(
+                city,
+                face,
+                SurfaceKind::Prop,
+                Some(wall.segment),
+                [165, 170, 162],
+            );
+        }
     }
     for (id, seg) in projection.segments.iter().enumerate() {
         let road = crate::road_profiles::road_for_segment(program, seg)
@@ -173,7 +201,8 @@ pub(super) fn compile(
         let mut distance = 0.;
         for pair in rows.windows(2) {
             for (band, e) in road.elements.iter().enumerate() {
-                let k = kind(e.kind);
+                let effective = geometry.surface_element(id, e.kind);
+                let k = kind(effective);
                 let raised = if k == SurfaceKind::Sidewalk {
                     0.0015
                 } else {
@@ -186,7 +215,7 @@ pub(super) fn compile(
                     pair[0].boundaries[band + 1],
                 ]
                 .map(|v| [v.point.x, v.point.y, v.height + raised]);
-                quad(city, p, k, Some(id), network::road_color(e.kind, false));
+                quad(city, p, k, Some(id), network::road_color(effective, false));
                 // Vertical curb faces share the pavement's subdivision and slopes.
                 if k == SurfaceKind::Sidewalk {
                     for (a, b) in [(p[0], p[1]), (p[3], p[2])] {
@@ -252,7 +281,11 @@ pub(super) fn compile(
             }
             // Short grass shoulders connect the authored raised pavement to terrain.
             // Large drops are bridge decks and retain the open space below them.
-            if let Some(elevation) = city.elevation.as_ref() {
+            if let Some(elevation) = city
+                .elevation
+                .as_ref()
+                .filter(|_| geometry.surface_element(id, K::Verge) == K::Verge)
+            {
                 let mut shoulders = Vec::new();
                 for side in [0, road.elements.len()] {
                     let outward = |row: &crate::road_geometry::CrossSection| {
@@ -334,6 +367,11 @@ pub(super) fn compile(
                 .map(|(_, h)| h)
                 .collect();
             instance.origin.z = heights.iter().sum::<f32>() / heights.len().max(1) as f32;
+            if geometry.junction_is_protected(&j.point_ref) {
+                for band in &mut instance.geometry.bands {
+                    band.material = crate::road_geometry::paved_material(band.material);
+                }
+            }
             city.components.push(instance);
         } else {
             // Three-arm junction: continuous paved footprint, closed-side sidewalk.
@@ -609,7 +647,10 @@ pub(super) fn compile(
     }
     // Build after the support index so piers can avoid the lower road network.
     // Props participate in rendering only; deck driving surfaces stay unchanged.
-    for triangle in super::bridges::mesh(city, &geometry).vertices.chunks_exact(3) {
+    for triangle in super::bridges::mesh(city, &geometry)
+        .vertices
+        .chunks_exact(3)
+    {
         let i = city.triangles.len();
         let points = std::array::from_fn(|j| triangle[j].position);
         let b = bounds(points.map(|p| [p[0], p[1]]));

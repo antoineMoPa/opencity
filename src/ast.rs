@@ -25,6 +25,7 @@ pub struct RoadDefinition {
 pub enum RoadRole {
     #[default]
     Ordinary,
+    Highway,
     Ramp,
     Merge,
 }
@@ -32,6 +33,7 @@ impl RoadRole {
     pub fn from_keyword(value: &str) -> Option<Self> {
         match value {
             "ordinary" => Some(Self::Ordinary),
+            "highway" => Some(Self::Highway),
             "ramp" => Some(Self::Ramp),
             "merge" => Some(Self::Merge),
             _ => None,
@@ -40,6 +42,7 @@ impl RoadRole {
     pub fn keyword(self) -> &'static str {
         match self {
             Self::Ordinary => "ordinary",
+            Self::Highway => "highway",
             Self::Ramp => "ramp",
             Self::Merge => "merge",
         }

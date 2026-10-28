@@ -4,7 +4,7 @@
 //! later surface bands replace earlier fills instead of leaving coplanar faces.
 use crate::network::{BandKind, Material, Point, Resolved};
 
-pub(super) struct Patch {
+pub struct Patch {
     pub points: Vec<Point>,
     pub material: Material,
     pub kind: BandKind,
@@ -115,7 +115,7 @@ fn difference(poly: Vec<Point>, clip: &[Point]) -> Vec<Vec<Point>> {
 }
 /// `half` selects native-junction composition. Explicit authored components
 /// keep their original geometry, including intentional surfaces at other decks.
-pub(super) fn patches(geometry: &Resolved, half: Option<f32>) -> Vec<Patch> {
+pub fn patches(geometry: &Resolved, half: Option<f32>) -> Vec<Patch> {
     let boundary = half.map(|h| {
         [
             Point {
@@ -177,6 +177,112 @@ pub(super) fn patches(geometry: &Resolved, half: Option<f32>) -> Vec<Patch> {
             material: patch.material,
             kind: patch.kind,
         }));
+    }
+    result
+}
+
+/// Exterior of the physical junction footprint. Internal band seams and paint
+/// overlays are excluded; callers remove the open road mouths.
+pub fn boundary(geometry: &Resolved, half: f32) -> Vec<[Point; 2]> {
+    let clip = [
+        Point {
+            x: -half,
+            y: -half,
+            z: 0.,
+        },
+        Point {
+            x: half,
+            y: -half,
+            z: 0.,
+        },
+        Point {
+            x: half,
+            y: half,
+            z: 0.,
+        },
+        Point {
+            x: -half,
+            y: half,
+            z: 0.,
+        },
+    ];
+    let polygons: Vec<_> = geometry
+        .bands
+        .iter()
+        .filter(|b| b.kind == BandKind::Surface)
+        .flat_map(|b| geometry.band_quads(b))
+        .map(|q| intersection(q.to_vec(), &clip))
+        .filter(|p| area(p).abs() > 1e-14)
+        .collect();
+    let polygon_bounds: Vec<_> = polygons.iter().map(|p| bounds(p)).collect();
+    let covered = |point: Point| {
+        polygons.iter().zip(&polygon_bounds).any(|(poly, b)| {
+            if point.x < b[0] || point.y < b[1] || point.x > b[2] || point.y > b[3] {
+                return false;
+            }
+            let mut inside = false;
+            for (a, b) in poly
+                .iter()
+                .zip(poly.iter().cycle().skip(1))
+                .take(poly.len())
+            {
+                if (a.y > point.y) != (b.y > point.y)
+                    && point.x < (b.x - a.x) * (point.y - a.y) / (b.y - a.y) + a.x
+                {
+                    inside = !inside;
+                }
+            }
+            inside
+        })
+    };
+    let mut result: Vec<[Point; 2]> = Vec::new();
+    for poly in &polygons {
+        for (&a, &b) in poly
+            .iter()
+            .zip(poly.iter().cycle().skip(1))
+            .take(poly.len())
+        {
+            let dx = b.x - a.x;
+            let dy = b.y - a.y;
+            let length_squared = dx * dx + dy * dy;
+            if length_squared < 1e-14 {
+                continue;
+            }
+            let mut cuts = vec![0., 1.];
+            for p in polygons.iter().flatten() {
+                let t = ((p.x - a.x) * dx + (p.y - a.y) * dy) / length_squared;
+                if t > 0. && t < 1. && (p.x - a.x - dx * t).hypot(p.y - a.y - dy * t) < 1e-6 {
+                    cuts.push(t);
+                }
+            }
+            cuts.sort_by(f32::total_cmp);
+            cuts.dedup_by(|a, b| (*a - *b).abs() < 1e-6);
+            let point = |t: f32| Point {
+                x: a.x + dx * t,
+                y: a.y + dy * t,
+                z: a.z + (b.z - a.z) * t,
+            };
+            let length = length_squared.sqrt();
+            for pair in cuts.windows(2) {
+                let middle = point((pair[0] + pair[1]) * 0.5);
+                let probe = |sign: f32| Point {
+                    x: middle.x - dy / length * 1e-6 * sign,
+                    y: middle.y + dx / length * 1e-6 * sign,
+                    z: middle.z,
+                };
+                if covered(probe(-1.)) == covered(probe(1.)) {
+                    continue;
+                }
+                let edge = [point(pair[0]), point(pair[1])];
+                let close = |a: Point, b: Point| (a.x - b.x).hypot(a.y - b.y) < 1e-6;
+                if !result.iter().any(|p| {
+                    (close(p[0], edge[0]) && close(p[1], edge[1]))
+                        || (close(p[0], edge[1]) && close(p[1], edge[0]))
+                }) {
+                    result.push(edge);
+                }
+            }
+        }
     }
     result
 }

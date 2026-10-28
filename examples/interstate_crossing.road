@@ -1,8 +1,10 @@
 road east_west_interstate:
     verge carlane carlane middle carlane carlane verge;
+    role highway;
 end
 road north_south_interstate:
     verge carlane carlane middle carlane carlane verge;
+    role highway;
 end
 road exit_ramp:
     verge carlane verge;

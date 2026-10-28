@@ -40,7 +40,8 @@ pub fn build_scene_with_model_base(
     networks::append_networks(&mut scene, program, palette.theme);
     let ctx = egui::Context::default();
     let profiles = paint_profiles(program, projection);
-    let geometry = opencity::road_geometry::RoadGeometry::compile(program, projection);
+    let mut geometry = opencity::road_geometry::RoadGeometry::compile(program, projection);
+    geometry.configure_safety(program, projection, heightmap.as_deref());
     let mut features = project_landscape_features(program).features;
     if heightmap.is_none()
         && !features
@@ -123,7 +124,7 @@ impl WebSceneBuild {
     ) -> Self {
         let ctx = egui::Context::default();
         let profiles = paint_profiles(&program, &projection);
-        let geometry = opencity::road_geometry::RoadGeometry::compile(&program, &projection);
+        let mut geometry = opencity::road_geometry::RoadGeometry::compile(&program, &projection);
         let road_order = road_paint_order(&program, &projection, &profiles);
         let intersections = map::intersections(&program, &projection);
         let mut landscape = project_landscape_features(&program).features;
@@ -134,6 +135,7 @@ impl WebSceneBuild {
         if let Some(map) = &heightmap {
             heightmap::append_heightmap(&mut scene, map, palette);
         }
+        geometry.configure_safety(&program, &projection, heightmap.as_deref());
         networks::append_networks(&mut scene, &program, palette.theme);
         if heightmap.is_none()
             && !landscape

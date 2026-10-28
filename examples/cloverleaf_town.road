@@ -48,6 +48,7 @@ end
 
 road divided_highway:
     verge carlane carlane middle carlane carlane verge;
+    role highway;
 end
 
 road exit_ramp:
@@ -57,10 +58,12 @@ end
 
 road interstate_three_lane:
     verge carlane carlane carlane middle carlane carlane carlane verge;
+    role highway;
 end
 
 road interstate_four_lane:
     verge carlane carlane carlane carlane middle carlane carlane carlane carlane verge;
+    role highway;
 end
 
 road ramp_mouth:

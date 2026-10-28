@@ -29,6 +29,9 @@ mod error;
 pub mod heightmap;
 #[doc(hidden)]
 pub mod junction_layouts;
+#[doc(hidden)]
+#[path = "runtime/junction_mesh.rs"]
+pub mod junction_mesh;
 mod landscape;
 mod lexer;
 pub mod network;

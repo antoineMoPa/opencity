@@ -54,7 +54,7 @@ fn road_network_role(road: &RoadDefinition) -> RoadNetworkRole {
     match road.role {
         crate::RoadRole::Merge => RoadNetworkRole::RampMouth,
         crate::RoadRole::Ramp => RoadNetworkRole::Ramp,
-        crate::RoadRole::Ordinary => RoadNetworkRole::Other,
+        crate::RoadRole::Ordinary | crate::RoadRole::Highway => RoadNetworkRole::Other,
     }
 }
 

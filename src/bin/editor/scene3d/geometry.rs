@@ -173,7 +173,7 @@ pub(super) fn add_resolved_road_surface(
                     pair[1].boundaries[band + 1],
                     pair[0].boundaries[band + 1],
                 ],
-                kind_color(element.kind, palette.theme),
+                kind_color(geometry.surface_element(index, element.kind), palette.theme),
                 0.0,
             );
         }
@@ -311,6 +311,7 @@ pub(super) fn append_intersection(
                 projection,
                 intersection,
                 palette,
+                geometry.junction_is_protected(&intersection.point_ref),
             );
         },
         |point| intersection_surface_height(point, &seams),
@@ -330,6 +331,20 @@ pub(super) fn append_road(
     selected: &[SegmentSource],
 ) {
     let first_vertex = scene.vertices.len() as u32;
+    for wall in geometry.safety_walls.iter().filter(|w| w.segment == index) {
+        for face in wall.barrier_faces() {
+            for i in [0, 1, 2, 0, 2, 3] {
+                let p = face[i];
+                scene.vertices.push(WorldVertex {
+                    point: WorldPoint { x: p[0], y: p[1] },
+                    height: p[2] + PAVEMENT_OFFSET,
+                    depth_bias: 0.,
+                    color: kind_color(RoadElementKind::Barrier, palette.theme),
+                    surface: [0.; 4],
+                });
+            }
+        }
+    }
     let segment = &projection.segments[index];
     let road = program
         .statements

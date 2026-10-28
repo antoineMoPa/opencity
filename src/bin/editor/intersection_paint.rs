@@ -317,11 +317,12 @@ pub(super) fn paint_intersection(
     projection: &map::Projection,
     intersection: &map::Intersection,
     palette: EditorPalette,
+    paved: bool,
 ) {
     let Some(paint) = intersection_paint(program, projection, intersection, rect, pan, zoom) else {
         return;
     };
-    if let Some(instance) =
+    if let Some(mut instance) =
         opencity::network::default_four_way_instance(program, projection, intersection)
             .or_else(|| {
                 opencity::network::default_three_way_instance(program, projection, intersection)
@@ -330,6 +331,11 @@ pub(super) fn paint_intersection(
                 opencity::network::default_right_turn_instance(program, projection, intersection)
             })
     {
+        if paved {
+            for band in &mut instance.geometry.bands {
+                band.material = opencity::road_geometry::paved_material(band.material);
+            }
+        }
         let screen = |point| {
             let p = instance.world_point(point);
             screen_of(rect, pan, zoom, WorldPoint { x: p.x, y: p.y })

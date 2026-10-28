@@ -1,9 +1,9 @@
 //! Renderer-independent game data. Map coordinates are X east, Y north, Z up.
 //! A map unit is deliberately not assigned a physical length; consumers choose a scale.
 //! Load once, query borrowed structured records, and request camera-local triangle meshes.
-mod geometry;
 mod bridges;
-mod junction_mesh;
+mod geometry;
+use crate::junction_mesh;
 mod mesh;
 mod svg;
 use crate::{
@@ -125,6 +125,7 @@ struct Triangle {
 /// Compiled snapshot. IDs are indices stable for this snapshot, never source-file offsets.
 pub struct City {
     pub roads: Vec<Road>,
+    pub road_barriers: Vec<crate::road_geometry::Wall>,
     pub paths: Vec<RoutePath>,
     pub landscape: Vec<LandscapeFeature>,
     pub junctions: Vec<map::Intersection>,
@@ -133,6 +134,7 @@ pub struct City {
     pub bounds: [f32; 4],
     triangles: Vec<Triangle>,
     cells: HashMap<(i32, i32), Vec<usize>>,
+    barrier_cells: HashMap<(i32, i32), Vec<usize>>,
 }
 impl City {
     pub fn load(path: impl AsRef<Path>) -> Result<Self, String> {
@@ -173,6 +175,7 @@ impl City {
         }
         let mut city = Self {
             roads: Vec::new(),
+            road_barriers: Vec::new(),
             paths: Vec::new(),
             landscape: landscape.features,
             junctions: map::intersections(program, &projection),
@@ -181,6 +184,7 @@ impl City {
             bounds: [-1., -1., 1., 1.],
             triangles: Vec::new(),
             cells: HashMap::new(),
+            barrier_cells: HashMap::new(),
         };
         geometry::compile(&mut city, program, &projection)?;
         Ok(city)
@@ -298,6 +302,53 @@ impl City {
             if let (Some(level), Some(b)) = (e.spec.water_level, best.as_mut()) {
                 if b.height < level {
                     b.kind = SurfaceKind::Water;
+                }
+            }
+        }
+        best
+    }
+    /// Deepest circle contact with a road barrier; normal and depth are in map units.
+    pub fn road_barrier_contact(
+        &self,
+        point: [f32; 2],
+        radius: f32,
+        bottom: f32,
+        top: f32,
+    ) -> Option<([f32; 2], f32)> {
+        let reach = radius + crate::road_geometry::BARRIER_HALF_WIDTH;
+        let a = geometry::cell([point[0] - reach, point[1] - reach]);
+        let b = geometry::cell([point[0] + reach, point[1] + reach]);
+        let mut best = None;
+        for x in a.0..=b.0 {
+            for y in a.1..=b.1 {
+                for &id in self.barrier_cells.get(&(x, y)).into_iter().flatten() {
+                    let wall = &self.road_barriers[id];
+                    let a = wall.start.point;
+                    let b = wall.end.point;
+                    let d = [b.x - a.x, b.y - a.y];
+                    let length_squared = d[0] * d[0] + d[1] * d[1];
+                    if length_squared < 1e-16 {
+                        continue;
+                    }
+                    let t = (((point[0] - a.x) * d[0] + (point[1] - a.y) * d[1]) / length_squared)
+                        .clamp(0., 1.);
+                    let height = wall.start.height + (wall.end.height - wall.start.height) * t;
+                    if height >= top || height + crate::road_geometry::BARRIER_HEIGHT <= bottom {
+                        continue;
+                    }
+                    let delta = [point[0] - a.x - d[0] * t, point[1] - a.y - d[1] * t];
+                    let distance = delta[0].hypot(delta[1]);
+                    let depth = reach - distance;
+                    if depth <= 0. || best.is_some_and(|(_, prior)| prior >= depth) {
+                        continue;
+                    }
+                    let normal = if distance > 1e-8 {
+                        delta.map(|v| v / distance)
+                    } else {
+                        let length = length_squared.sqrt();
+                        [-d[1] / length, d[0] / length]
+                    };
+                    best = Some((normal, depth));
                 }
             }
         }

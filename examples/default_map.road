@@ -778,10 +778,12 @@ end
 
 road interstate_three_lane:
     verge carlane carlane carlane middle carlane carlane carlane verge;
+    role highway;
 end
 
 road interstate_core:
     carlane carlane carlane middle carlane carlane carlane;
+    role highway;
 end
 
 road ramp_mouth:

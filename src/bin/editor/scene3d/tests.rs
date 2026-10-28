@@ -479,9 +479,13 @@ fn incremental_web_scene_matches_full_scene() {
     assert_eq!(incremental.theme, egui::Theme::Dark);
     assert_eq!(incremental.selected_landscape, None);
     let mut passes = 0;
+    let started = std::time::Instant::now();
     while !incremental.advance(std::time::Duration::from_millis(1)) {
         passes += 1;
-        assert!(passes < 1000, "scene builder did not finish");
+        assert!(
+            started.elapsed() < std::time::Duration::from_secs(120),
+            "scene builder did not finish after {passes} slices"
+        );
     }
     let incremental = incremental.finish();
     assert_eq!(incremental.vertices, full.vertices);

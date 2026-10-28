@@ -192,13 +192,14 @@ mod tests {
         }
     }
     #[test]
-    fn graded_curved_decks_have_finite_geometry_below_the_pavement() {
+    fn graded_curved_decks_and_barriers_have_finite_geometry() {
         let bridge = city("road r: sidewalk carlane sidewalk; end s=r(0,0,0.2,0.8,0.8,0.2,1,1); grade(s,0.04,0.12);");
         let concrete = props(&bridge);
         assert!(!concrete.is_empty());
         assert!(concrete
             .iter()
             .flat_map(|t| t.points)
-            .all(|p| p.iter().all(|v| v.is_finite()) && p[2] <= 0.12));
+            .all(|p| p.iter().all(|v| v.is_finite())
+                && p[2] <= 0.12 + crate::road_geometry::BARRIER_HEIGHT + 1e-6));
     }
 }

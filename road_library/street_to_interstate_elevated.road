@@ -4,6 +4,7 @@ end
 road eastbound_interstate:
     verge carlane carlane carlane verge;
     direction forward;
+    role highway;
 end
 road on_ramp:
     verge carlane verge;
