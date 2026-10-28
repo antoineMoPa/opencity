@@ -116,14 +116,16 @@ fn three_way_intersection_has_one_closed_side() {
 
 #[test]
 fn mixed_intersection_paints_narrow_local_arm_without_design_mismatch() {
-    let program = parse("\
-        road arterial: sidewalk-carlane-carlane-sidewalk; end; \
-        road local: sidewalk-carlane-sidewalk; end; \
-        center = map_point(0, 0); west = map_point(-1, 0); east = map_point(1, 0); north = map_point(0, 1); \
-        arterial(west, -0.7, 0, -0.3, 0, center); \
-        arterial(center, 0.3, 0, 0.7, 0, east); \
-        local(center, 0, 0.3, 0, 0.7, north); \
-        intersection3(center, arterial, north, local);").unwrap();
+    let program = parse(
+        "road arterial: sidewalk-carlane-carlane-sidewalk; end; road \
+        local: sidewalk-carlane-sidewalk; end; center = map_point(0, 0); \
+        west = map_point(-1, 0); east = map_point(1, 0); north = \
+        map_point(0, 1); arterial(west, -0.7, 0, -0.3, 0, center); \
+        arterial(center, 0.3, 0, 0.7, 0, east); local(center, 0, 0.3, 0, \
+        0.7, north); intersection3(center, arterial, north, local);",
+    )
+    .unwrap();
+
     let projection = map::project(&program);
     let junction = map::intersections(&program, &projection).pop().unwrap();
     let profiles = paint_profiles(&program, &projection);

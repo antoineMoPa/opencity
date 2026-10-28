@@ -354,7 +354,8 @@ fn connector_wall_tops_are_actual_pavement_vertices() {
                     .vertices
                     .iter()
                     .any(|v| v.point == top.point && v.height == top.height),
-                "wall top must meet the emitted pavement without height interpolation or offsets"
+                "wall top must meet the emitted pavement without height \
+                    interpolation or offsets"
             );
         }
     }
@@ -398,9 +399,11 @@ fn coastal_scene_keeps_water_free_of_editor_grid() {
 #[test]
 fn overlapping_ground_surfaces_have_stable_depth_order() {
     let program = parse(
-            "beach(0, 0, 3, 0, 3, 3, 0, 3); land(0, 0, 3, 0, 3, 3, 0, 3); vegetation(forest, 0, 0, 3, 0, 3, 3, 0, 3); concrete(0, 0, 3, 0, 3, 3, 0, 3);",
-        )
-        .unwrap();
+        "beach(0, 0, 3, 0, 3, 3, 0, 3); land(0, 0, 3, 0, 3, 3, 0, 3); \
+            vegetation(forest, 0, 0, 3, 0, 3, 3, 0, 3); concrete(0, 0, 3, 0, \
+            3, 3, 0, 3);",
+    )
+    .unwrap();
     let palette = editor_palette(egui::Theme::Dark);
     let scene = build_scene(&program, &map::project(&program), palette, &[], None);
     let fill_bias = |color| {
@@ -422,7 +425,11 @@ fn overlapping_ground_surfaces_have_stable_depth_order() {
 
 #[test]
 fn overlapping_terrain_outlines_expose_both_mountain_levels() {
-    let program = parse("lower = terrain(0.2, 0, 0, 2, 0, 2, 2, 0, 2); upper = terrain(0.4, 1, 1, 3, 1, 3, 3, 1, 3);").unwrap();
+    let program = parse(
+        "lower = terrain(0.2, 0, 0, 2, 0, 2, 2, 0, 2); upper = \
+            terrain(0.4, 1, 1, 3, 1, 3, 3, 1, 3);",
+    )
+    .unwrap();
     let features = project_landscape_features(&program).features;
     let mut scene = Scene::default();
     add_terrain_walls(
@@ -616,7 +623,9 @@ fn profile_target_scene_cpu() {
 
 #[test]
 fn airport_surfaces_and_markings_reach_shared_scene() {
-    let source = "road strip: runway; end; road connector: taxiway; end; road stand: apron; end; strip(0, 0, 3, 0); connector(0, 1, 3, 1); stand(0, 2, 3, 2);";
+    let source = "road strip: runway; end; road connector: taxiway; end; road \
+        stand: apron; end; strip(0, 0, 3, 0); connector(0, 1, 3, 1); \
+        stand(0, 2, 3, 2);";
     let program = parse(source).unwrap();
     assert_eq!(parse(&program.to_road_source()).unwrap(), program);
     let scene = build_scene(

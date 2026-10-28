@@ -121,8 +121,13 @@ impl RoadEditor {
         else {
             return false;
         };
-        let Some(road_index) = self.program.statements.iter().position(|statement|
-            matches!(statement, Statement::Road(road) if road.name == segment.road_name)) else { return false };
+        let Some(road_index) = self.program.statements.iter().position(|statement| {
+            matches!(statement,
+                 Statement::Road(road) if road.name == segment.road_name)
+        }) else {
+            return false;
+        };
+
         let Some((point, reference)) = map::link_endpoint(&mut self.program, source, is_end) else {
             return false;
         };

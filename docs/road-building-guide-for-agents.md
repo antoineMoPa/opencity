@@ -65,9 +65,9 @@ and four outer direct connectors for right turns. For each movement:
 
 The library's [`cloverleaf.road`](../road_library/cloverleaf.road) names its short through-road
 pieces `i_ew_*` and `i_ns_*`, loop pieces `*_loop_*`, and direct connectors `*_connector*`. Build
-each ramp port on a short `interstate_core` piece, keeping both highway shoulders continuous
-through the interchange. Merge pavement opens the parent wall across the lane and shoulders.
-Its east-west and north-south center points are separate; the latter deck is raised. The
+each ramp port on a short `interstate_core` piece, keeping both highway shoulders continuous through
+the interchange. Merge pavement opens the parent wall across the lane and shoulders. Its east-west
+and north-south center points are separate; the latter deck is raised. The
 [`flat`](../road_library/street_to_interstate_flat.road) and
 [`elevated`](../road_library/street_to_interstate_elevated.road) street ramps demonstrate a
 lane-specific entry and forward merge into an interstate. Copy the full entry/curve/mouth chain when
@@ -93,18 +93,18 @@ adapting one.
   after moving any junction or changing any profile.
 
 The supplied library tests cover parse/round-trip, projection, junction ports, directed ramp paths,
-and grade continuity. Use native `place(asset, id, x, y, quarter_turns)` and `join(id, port, id,
-port)` calls to assemble the [shared patterns](../road_library/README.md) in a `.road` file. The
-parser checks joined coordinates, cross sections, heights, tangents, and one-way travel before
-expanding the calls. The language still uses illustrative fixed band widths; final engine
-dimensions, clearance, lane tapers, pavement markings, collision geometry, and pixel alignment need
-project-specific specifications and visual QA.
+and grade continuity. Use native `place(asset, id, x, y, quarter_turns)` and
+`join(id, port, id, port)` calls to assemble the [shared patterns](../road_library/README.md) in a
+`.road` file. The parser checks joined coordinates, cross sections, heights, tangents, and one-way
+travel before expanding the calls. The language still uses illustrative fixed band widths; final
+engine dimensions, clearance, lane tapers, pavement markings, collision geometry, and pixel
+alignment need project-specific specifications and visual QA.
 
 ## 5. Declare connection semantics and check compiled geometry
 
-Road names are labels. Declare `role ramp;` on ramp profiles and `role merge;` on paved
-entry/merge profiles. The default is `role ordinary;`. A name such as `ramp_mouth` no longer grants
-a merge exception. Both `role` and `direction` survive saving, template expansion, translation, and
+Road names are labels. Declare `role ramp;` on ramp profiles and `role merge;` on paved entry/merge
+profiles. The default is `role ordinary;`. A name such as `ramp_mouth` no longer grants a merge
+exception. Both `role` and `direction` survive saving, template expansion, translation, and
 rotation.
 
 ```text
@@ -115,8 +115,8 @@ road connector:
 end
 ```
 
-Carry `verge carlane verge` continuously through ramp mouths so shoulders do not taper away at
-the highway entrance. Merge verges are paved; sidewalks and barriers are invalid merge bands.
+Carry `verge carlane verge` continuously through ramp mouths so shoulders do not taper away at the
+highway entrance. Merge verges are paved; sidewalks and barriers are invalid merge bands.
 
 A merge must have an explicit `lane_point` attachment to a parent **car lane**. Its other end
 connects to the ramp with a shared point reference. Match elevation and travel direction. Changing a
@@ -171,9 +171,10 @@ renderer uses a floating-point reversed-Z depth buffer for stable perspective pr
 paint has explicit depth priority without raising its physical surface.
 
 GPU regressions in scene3d.rs check merge pixels and coplanar layer ordering, including genuinely
-nearer occluders. Run `OPENCITY_QA_LIBRARY=1 cargo test --bin editor render_starter_scene_pngs --
---ignored --nocapture` with graphics access to generate template QA PNGs under `/private/tmp`.
-Inspect the images; do not infer visual correctness from geometry tests alone.
+nearer occluders. Run
+`OPENCITY_QA_LIBRARY=1 cargo test --bin editor render_starter_scene_pngs -- --ignored --nocapture`
+with graphics access to generate template QA PNGs under `/private/tmp`. Inspect the images; do not
+infer visual correctness from geometry tests alone.
 
 In vehicular input handling, read key state inside `ctx.input`/`ui.input`, then request repaint
 after the closure returns. Requesting repaint while holding the input lock can deadlock. Movement
@@ -233,11 +234,12 @@ available through `.road` and the Rust API.
 ## 8. Inspect and edit connections through the Rust API
 
 `get_connection_workspace {}` returns named merges and intersections, member roads, ports,
-attachments and asynchronous design-check status. `open_connection_editor
-{"connection_id":"merge:ramp"}` is a compatibility command that selects and focuses that connection
-in the full isometric viewport. It does not open a panel or enter a filtered workspace; its legacy
-`camera` argument is accepted, and the compatibility command focuses Isometric. The unused
-`close_connection_editor` and `cut_connection_segment` tools have been removed.
+attachments and asynchronous design-check status.
+`open_connection_editor {"connection_id":"merge:ramp"}` is a compatibility command that selects and
+focuses that connection in the full isometric viewport. It does not open a panel or enter a filtered
+workspace; its legacy `camera` argument is accepted, and the compatibility command focuses
+Isometric. The unused `close_connection_editor` and `cut_connection_segment` tools have been
+removed.
 
 `edit_connection` requires `connection_id` and `edit`. For `start`, `handle1`, `handle2`, or `end`,
 supply `segment`, `x`, `y`. For `grade`, supply `segment`, `start_height`, `end_height`. For
@@ -284,7 +286,7 @@ street profile is inserted only when placement commits. Each placement is one un
 with native named center/edge references. Extend roads outward from the matching ports. Standalone
 intersections currently require ground level: a red preview rejects any footprint touching raised
 terrain. Starting from Vehicular restores the previous editing view through the normal
-focus-preserving camera transition.
-A standalone intersection also requires a clear site: overlap with existing road surfaces or
-junction bodies is rejected atomically. Use explicit source/API splits when converting an existing
-road into a junction; the palette action does not infer that topology.
+focus-preserving camera transition. A standalone intersection also requires a clear site: overlap
+with existing road surfaces or junction bodies is rejected atomically. Use explicit source/API
+splits when converting an existing road into a junction; the palette action does not infer that
+topology.

@@ -49,7 +49,11 @@ fn graded_approach_port_height_uses_the_actual_boundary_parameter() {
 
 #[test]
 fn short_spline_pieces_inside_a_junction_do_not_leave_following_road_paint_inside_it() {
-    let source=include_str!("../examples/default_intersection.road").replace("north_approach = street(north, 0, 0.7, 0, 0.3, center);","near=map_point(0,0.02); north_approach=street(north,0,0.7,0,0.3,near); short=street(near,0,0.01,0,0.005,center);");
+    let source = include_str!("../examples/default_intersection.road").replace(
+        "north_approach = street(north, 0, 0.7, 0, 0.3, center);",
+        "near=map_point(0,0.02); north_approach=street(north,0,0.7,0,0.3,\
+            near); short=street(near,0,0.01,0,0.005,center);",
+    );
     let program = parse(&source).unwrap();
     let projection = map::project(&program);
     let geometry = RoadGeometry::compile(&program, &projection);

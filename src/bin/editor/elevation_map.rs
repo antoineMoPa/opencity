@@ -174,7 +174,9 @@ impl RoadEditor {
                 self.scene_cache = None;
                 self.scene_build = None;
                 self.fit_scene_once = true;
-                self.status = "Imported elevation map: 20×20 map units, heights 0–2; edit elevation_map bounds in the .road file".into();
+                self.status = "Imported elevation map: 20×20 map units, heights 0–2; edit \
+                    elevation_map bounds in the .road file"
+                    .into();
             }
             Err(error) => self.status = format!("Could not import elevation map: {error}"),
         }

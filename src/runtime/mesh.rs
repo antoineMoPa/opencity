@@ -3,6 +3,9 @@ use std::collections::HashSet;
 /// Packed f32-only layout: position(0), normal(1), linear color(2), surface(3).
 /// `surface` = [SurfaceKind as f32, base elevation, floor spacing, facade material ID].
 /// Fence planes use [Fence, horizontal pattern units, vertical fraction 0..1, FencePattern].
+/// Room panes use [Window, U, V, 16 * (1 + seed % 256) + width / height].
+/// UVs are interpolated, with U increasing along (normal.y, -normal.x, 0).
+/// Aspect is clamped to 0.125..15; zero metadata retains legacy glass rendering.
 #[derive(Clone, Copy, Debug)]
 #[repr(C)]
 pub struct Vertex {
@@ -121,7 +124,8 @@ pub struct StreetFeature {
 impl City {
     /// A bounded mesh containing nearby compiled surfaces plus a heightmap grid.
     /// `terrain_step` chooses an integer PNG sample stride (map units).
-    /// Steps below a pixel preserve exact terrain/support geometry; larger steps are LOD. Meshes are suitable for
+    /// Steps below a pixel preserve exact terrain/support geometry; larger steps are LOD. Meshes
+    /// are suitable for
     /// caching per fixed world tile, independent of camera orientation.
     pub fn mesh(&self, region: Region, terrain_step: f32) -> Result<Mesh, String> {
         if !region.valid() || !terrain_step.is_finite() || terrain_step < 0.005 {

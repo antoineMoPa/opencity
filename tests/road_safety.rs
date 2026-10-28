@@ -11,8 +11,14 @@ fn city(source: &str) -> City {
 #[test]
 fn elevated_roads_have_paved_shoulders_and_height_limited_barriers() {
     for height in [0.08, -0.08] {
-        let source = format!("road r: verge carlane verge; end s=r(0,0,1,0); elevation(s,{height}); ground = land(-1,-1,2,-1,2,1,-1,1); elevation(ground,{});", height - 0.08);
-        // Use a plain bridge for the positive case and an authored lower land for the negative case.
+        let source = format!(
+            "road r: verge carlane verge; end s=r(0,0,1,0); elevation(s,\
+                {height}); ground = land(-1,-1,2,-1,2,1,-1,1); elevation(ground,\
+                {});",
+            height - 0.08
+        );
+        // Use a plain bridge for the positive case and an authored lower land for the negative
+        // case.
         let source = if height > 0. {
             "road r: verge carlane verge; end s=r(0,0,1,0); elevation(s,0.08);".to_owned()
         } else {
@@ -85,7 +91,11 @@ fn raised_terrain_is_not_a_bridge() {
             .write_image_data(&vec![0; 1024 * 1024])
             .unwrap();
     }
-    let program = parse("elevation_map(\"terrain.png\",-1,-1,3,2,0.1,0.2); road r: verge carlane verge; end s=r(0,0,1,0); elevation(s,0.1);").unwrap();
+    let program = parse(
+        "elevation_map(\"terrain.png\",-1,-1,3,2,0.1,0.2); road r: verge \
+            carlane verge; end s=r(0,0,1,0); elevation(s,0.1);",
+    )
+    .unwrap();
     let city = City::from_program_with_elevation_loader(&program, |spec| {
         opencity::heightmap::ElevationMap::from_png(spec.clone(), &bytes)
     })
@@ -304,9 +314,13 @@ fn ramp_mouth_shoulders_are_paved_and_clear_for_vehicle_width() {
                     ];
                     let contact =
                         city.road_barrier_contact(p, 0.0092, a.height + 0.003, a.height + 0.01);
-                    assert!(contact.is_none(),
-                        "{:?}: blocked shoulder at t={}, fraction={fraction}, point={p:?}, contact={contact:?}",
-                        segment.name, row.t);
+                    assert!(
+                        contact.is_none(),
+                        "{:?}: blocked shoulder at t={}, fraction={fraction}, point={p:?}, \
+                            contact={contact:?}",
+                        segment.name,
+                        row.t
+                    );
                     // An entry on a ground street may also overlap its existing sidewalk.
                     assert!(
                         matches!(

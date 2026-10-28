@@ -280,8 +280,14 @@ fn reusable_crossing_instances_keep_local_levels() {
 
 #[test]
 fn top_level_and_nested_road_grades_add_instance_heights() {
-    let program = parse("road ramp: carlane;
-role ramp; end; direct = ramp(0, 0, 2, 0); grade(direct, 0, 0.25); block inner: local = ramp(0, 0, 2, 0); grade(local, 0, 0.25); end; block outer: nested = inner(0, 0, 0.5); end; outer(4, 0, 1);").unwrap();
+    let program = parse(
+        "road ramp: carlane;\nrole ramp; end; direct = ramp(0, 0, 2, 0); \
+        grade(direct, 0, 0.25); block inner: local = ramp(0, 0, 2, 0); \
+        grade(local, 0, 0.25); end; block outer: nested = inner(0, 0, \
+        0.5); end; outer(4, 0, 1);",
+    )
+    .unwrap();
+
     let projection = project(&program);
     assert_eq!(projection.unresolved, 0);
     assert_eq!(
@@ -296,7 +302,12 @@ role ramp; end; direct = ramp(0, 0, 2, 0); grade(direct, 0, 0.25); block inner: 
 
 #[test]
 fn a_block_instance_can_be_raised_independently() {
-    let program = parse("road rail: traintrack; end; block crossing: a = rail(-1, 0, 1, 0); elevation(a, -0.5); end; one = crossing(0, 0); two = crossing(2, 0, 1);").unwrap();
+    let program = parse(
+        "road rail: traintrack; end; block crossing: a = rail(-1, 0, 1, \
+            0); elevation(a, -0.5); end; one = crossing(0, 0); two = \
+            crossing(2, 0, 1);",
+    )
+    .unwrap();
     let projection = project(&program);
     assert_eq!(
         projection
@@ -310,7 +321,13 @@ fn a_block_instance_can_be_raised_independently() {
 
 #[test]
 fn nested_block_roads_translate_and_stack_elevation() {
-    let program = parse("road rail: traintrack; end; block span: rail_line = rail(-1, 0, 1, 0); elevation(rail_line, -0.5); end; block crossing: left = span(-2, 0, 0.25); elevation(left, 0.5); right = span(2, 0); end; crossing(10, 3, 1);").unwrap();
+    let program = parse(
+        "road rail: traintrack; end; block span: rail_line = rail(-1, 0, \
+            1, 0); elevation(rail_line, -0.5); end; block crossing: left = \
+            span(-2, 0, 0.25); elevation(left, 0.5); right = span(2, 0); end; \
+            crossing(10, 3, 1);",
+    )
+    .unwrap();
     let projection = project(&program);
     assert_eq!(projection.unresolved, 0);
     assert_eq!(projection.segments.len(), 2);
@@ -324,7 +341,11 @@ fn nested_block_roads_translate_and_stack_elevation() {
 
 #[test]
 fn nested_block_recursion_and_bad_placement_are_unresolved() {
-    let program = parse("road rail: traintrack; end; block loop: rail(0, 0, 1, 0); loop(2, 0); end; block outer: loop(0, 0); loop(bad, 0); end; outer(0, 0);").unwrap();
+    let program = parse(
+        "road rail: traintrack; end; block loop: rail(0, 0, 1, 0); loop(2, \
+            0); end; block outer: loop(0, 0); loop(bad, 0); end; outer(0, 0);",
+    )
+    .unwrap();
     let projection = project(&program);
     assert_eq!(projection.segments.len(), 1);
     assert_eq!(projection.unresolved, 2);

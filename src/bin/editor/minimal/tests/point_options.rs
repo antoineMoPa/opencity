@@ -5,7 +5,8 @@ fn point_options_click_lane_branch_and_cancel_in_both_views() {
     for iso in [false, true] {
         let mut editor = editor();
         editor.program = parse(
-            "road street: carlane-middle-carlane; end; main=street(-2,0,2,0); grade(main,0.2,0.5);",
+            "road street: carlane-middle-carlane; end; main=street(-2,0,2,0); \
+                grade(main,0.2,0.5);",
         )
         .unwrap();
         editor.saved_program = editor.program.clone();

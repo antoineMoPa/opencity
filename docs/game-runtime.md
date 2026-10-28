@@ -101,26 +101,29 @@ uses an internal-entry facade and omits the exterior stair.
 
 In addition to the original materials, building calls accept `red_brick`, `brown_brick`,
 `buff_brick`, `pale_brick` and `limestone`. The game shader renders their masonry as a surface
-texture and leaves openings to explicit detail geometry; no individual bricks or stones are
-modeled. These are generic material choices and applications decide where to use them.
+texture and leaves openings to explicit detail geometry; no individual bricks or stones are modeled.
+These are generic material choices and applications decide where to use them. Masonry uses separate
+mineral-colored mortar and deterministic per-unit clay variation. The shader filters joint coverage
+over the pixel footprint, preserving mortar color at a distance without adding geometry. Limestone
+uses larger courses and a cooler, darker joint palette.
 
 The seed derives from footprint coordinates, so a given feature is consistent between whole-map and
 radius queries. The street-facing edge is selected from nearby road geometry; without a nearby road,
 the longest edge is used. Windows, trim, balconies, straight/curved/quarter-turn stairs, coping,
 cornices, parapets and eligible pitched/mansard roofs use coarse geometry. Masonry and shingle
 detail is a shader texture, not separate bricks or rocks. Pitched roofs fall back to coping on
-irregular
-footprints. GLB-authored buildings are skipped. Garden features are omitted when the sampled
-frontage is obstructed or paved. Details do not modify footprint collisions, support queries or
-authored map
-records; users can implement those behaviors separately.
-`building_detail_parts` separates facade geometry from independently removable balconies, gallery
-structures, stairs, garden boundary sections and garden objects. Its two outputs contain the same
-geometry as `building_detail_mesh` and carry no mutable physics state.
-Iron fences, chain-link fences and balcony guards use two-triangle planes. Each vertex carries
-local panel coordinates, so the procedural line pattern follows translated or rotated props.
-`FencePattern::IronPickets` and `FencePattern::ChainLink` select the mask. Openings are cut out in
-both color and shadow passes; custom renderers must implement the same material contract.
+irregular footprints. GLB-authored buildings are skipped. Garden features are omitted when the
+sampled frontage is obstructed or paved. Details do not modify footprint collisions, support queries
+or authored map records; users can implement those behaviors separately. `building_detail_parts`
+separates facade geometry from independently removable balconies, gallery structures, stairs, garden
+boundary sections and garden objects. Its two outputs contain the same geometry as
+`building_detail_mesh` and carry no mutable physics state. Iron fences, chain-link fences and
+balcony guards use two-triangle planes. Each vertex carries local panel coordinates, so the
+procedural line pattern follows translated or rotated props. `FencePattern::IronPickets` and
+`FencePattern::ChainLink` select the mask. Openings are cut out in both color and shadow passes;
+custom renderers must implement the same material contract. Garden fences include side returns where
+terrain and building clearance allow them; attached buildings share one divider. Each section
+remains an independently removable object.
 
 ## Optional shaders
 
@@ -133,29 +136,34 @@ shader.
 `runtime::GAME_SHADER` is a standalone Z-up shader for consuming applications. Its vertex stride is
 52 bytes, with the following float attributes:
 
-| Location | Field | Format |
-|---|---|---|
-| 0 | world position | Float32x3 |
-| 1 | world normal | Float32x3 |
-| 2 | linear RGB | Float32x3 |
-| 3 | surface kind, base elevation, floor spacing, facade ID | Float32x4 |
+| Location | Field                                                  | Format    |
+| -------- | ------------------------------------------------------ | --------- |
+| 0        | world position                                         | Float32x3 |
+| 1        | world normal                                           | Float32x3 |
+| 2        | linear RGB                                             | Float32x3 |
+| 3        | surface kind, base elevation, floor spacing, facade ID | Float32x4 |
 
-For `SurfaceKind::Fence`, location 3 instead stores `[11, horizontal pattern distance,
-vertical fraction 0..1, FencePattern]`. Horizontal distance is expressed in the consumer's
-`BuildingDetailConfig::unit`; pattern IDs are 0 for iron and 1 for chain-link. The packed vertex
-stride is unchanged. Render planes double-sided, with 4x MSAA and alpha-to-coverage enabled in
-the scene pipeline to soften line edges without sorting transparent objects.
+For `SurfaceKind::Fence`, location 3 instead stores
+`[11, horizontal pattern distance, vertical fraction 0..1, FencePattern]`. Horizontal distance is
+expressed in the consumer's `BuildingDetailConfig::unit`; pattern IDs are 0 for iron and 1 for
+chain-link. The packed vertex stride is unchanged. Render planes double-sided, with 4x MSAA and
+alpha-to-coverage enabled in the scene pipeline to soften line edges without sorting transparent
+objects.
 
 Group 0 binding 0 is a 176-byte uniform: column-major view-projection matrix, column-major light
 view-projection matrix, eye XYZ + time seconds, sun XYZ + exposure, daylight (0–1) + sky RGB.
 Matrices use wgpu's 0..1 clip depth. Group 1 binding 0 is a 2048² depth texture, binding 1 a
-comparison sampler. `vs_shadow`/`fs_shadow` write sunlight depth and discard fence gaps;
-`vs`/`fs` render the scene to an sRGB target. Create a depth-only shadow pipeline with a fragment
-stage, no color targets and just group 0, and the scene pipeline with both groups. The shader provides
+comparison sampler. `vs_shadow`/`fs_shadow` write sunlight depth and discard fence gaps; `vs`/`fs`
+render the scene to an sRGB target. Create a depth-only shadow pipeline with a fragment stage, no
+color targets and just group 0, and the scene pipeline with both groups. The shader provides
 procedural surface noise, facade details, animated water, PCF sunlight shadows, fog and exposure
-compression. `SurfaceKind::Window` and `SurfaceKind::Light` can glow at night;
-`SurfaceKind::Roof` stores its texture unit in `surface.y`. Games can replace the shader or bind an
-all-lit depth texture to omit shadowing.
+compression. `SurfaceKind::Window` supports five-face parallax interiors with seeded lighting and
+edge AO. Detailed panes store `[Window, U, V, 16 * (1 + seed % 256) + aspect]`, with aspect clamped
+to 0.125..15. UVs interpolate across the pane, U along `(normal.y, -normal.x, 0)` and V upward; the
+packed seed/aspect stays flat. The vertex layout is unchanged. Pane red values below 0.05 select an
+unoccupied room. Zero metadata keeps legacy glass glow. Procedural facade windows use the same
+five-face rooms. `SurfaceKind::Light` glows at night; `SurfaceKind::Roof` stores its texture unit in
+`surface.y`. Games can replace the shader or bind an all-lit depth texture to omit shadowing.
 
 Validate the library with `cargo test --no-default-features --features game-runtime`. Runtime
 integration tests cover structured selection, one-way lanes, polygon containment, stacked

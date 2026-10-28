@@ -21,7 +21,8 @@ fn unsaved_default_snapshot_materializes_embedded_elevation_and_cleans_it_up() {
         .expect("external application can load snapshot terrain");
     let expected = elevation_map::load(&program, None).unwrap().unwrap();
     #[cfg(feature = "game-runtime")]
-    opencity::runtime::City::load(&path).expect("game runtime loads the complete unsaved default city");
+    opencity::runtime::City::load(&path)
+        .expect("game runtime loads the complete unsaved default city");
     assert_eq!(
         elevation.height_at([-13.566294, 7.1542263]),
         expected.height_at([-13.566294, 7.1542263])
@@ -125,9 +126,12 @@ fn explicit_configuration_omitted_missing_and_invalid() {
 fn command_expands_explicit_tokens_without_shell_or_recursive_substitution() {
     let config_dir = std::env::temp_dir().join("config directory {x}");
     let action = LaunchAction::parse(
-        r#"{"label":"Inspect here","program":"{config_dir}/external viewer","args":["--map","{map}","{x},{y}","$(touch danger); quoted ' words", "{map}:{map}"]}"#,
+        "{\"label\":\"Inspect here\",\"program\":\"{config_dir}/external \
+            viewer\",\"args\":[\"--map\",\"{map}\",\"{x},{y}\",\"$(touch \
+            danger); quoted ' words\", \"{map}:{map}\"]}",
         config_dir.clone(),
-    ).unwrap();
+    )
+    .unwrap();
     let map = std::env::temp_dir()
         .join("map directory {y}")
         .join("city & map.road");

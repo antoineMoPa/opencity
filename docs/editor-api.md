@@ -16,7 +16,7 @@ Open a new stream for each call. Write one UTF-8 JSON object followed by a newli
 newline-terminated JSON response. The request has a tool `name` and an `arguments` object:
 
 ```json
-{"name":"get_road_state","arguments":{}}
+{ "name": "get_road_state", "arguments": {} }
 ```
 
 The response is an MCP tool result. For ordinary tools, check `isError`, then parse the JSON string
@@ -30,13 +30,16 @@ item with `mimeType: "image/png"`.
 To place a straight road with an existing type, send:
 
 ```json
-{"name":"add_road","arguments":{"road_type":"local","start_x":0,"start_y":0,"end_x":2,"end_y":0}}
+{
+  "name": "add_road",
+  "arguments": { "road_type": "local", "start_x": 0, "start_y": 0, "end_x": 2, "end_y": 0 }
+}
 ```
 
 This returns a top-level `segment_index`. Optional `control1_x`, `control1_y`, `control2_x`, and
 `control2_y` set Bézier controls. Optional `start_ref` and `end_ref` use exact junction references
-from the current state; their coordinates must match. The `replace_document` tool accepts `{
-"source": "..." }` with complete valid `.road` source and applies it as one undoable edit.
+from the current state; their coordinates must match. The `replace_document` tool accepts
+`{ "source": "..." }` with complete valid `.road` source and applies it as one undoable edit.
 `save_document` requires an absolute `.road` path. Road coordinates use map world units; viewport
 zoom is 18 to 2400 pixels per unit for ordinary maps, with a 0.1 minimum for documents containing
 explicit intersection components.
@@ -54,9 +57,7 @@ compatibility command: an optional `connection_id` selects and focuses a connect
 isometric viewport. It never opens a panel or filters the map. The legacy `camera` argument is
 accepted; this compatibility command focuses the isometric view. Top, Isometric and Vehicular remain
 available through the view switch. `edit_connection` performs validated, undoable AST edits. See the
-[connection editing
-guide](road-building-guide-for-agents.md#8-inspect-and-edit-connections-through-the-rust-api) for
-arguments and limitations.
+[connection editing guide][connection-guide] for arguments and limitations.
 
 `get_viewport_image` accepts `{"include_ui":true}` to capture the entire editor window including the
 selected road name field. Omit this option for the map rectangle. Check `design_checks` before
@@ -92,3 +93,6 @@ palette; its profile edits use the same document/history. The viewport Top/Isome
 switch, revealed by hovering the top 100 logical pixels, changes only camera state. Its 320ms
 transition preserves geographic focus and scale, and geometry editing pauses until the destination
 projection is ready; Box select changes only selection.
+
+[connection-guide]:
+  road-building-guide-for-agents.md#8-inspect-and-edit-connections-through-the-rust-api

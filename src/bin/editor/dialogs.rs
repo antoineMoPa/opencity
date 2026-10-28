@@ -16,7 +16,8 @@ impl RoadEditor {
                     ui.heading("Clear map?");
                     ui.add_space(10.0);
                     ui.label(
-                        "Remove all placements. Road and block definitions stay. You can undo this.",
+                        "Remove all placements. Road and block definitions stay. You can \
+                            undo this.",
                     );
                     ui.add_space(20.0);
                     ui.add_enabled_ui(!opening, |ui| {
@@ -89,7 +90,8 @@ impl RoadEditor {
             .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
             .show(ctx, |ui| {
                 ui.label(
-                    "Delete this road definition? Calls that name it will remain in the document.",
+                    "Delete this road definition? Calls that name it will remain in \
+                        the document.",
                 );
                 ui.add_space(8.0);
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -153,8 +155,10 @@ mod tests {
                     .unwrap_or_else(|| panic!("missing dialog text: {label}"))
             };
             let title = text("Clear map?").visual_bounding_rect();
-            let body =
-                text("Remove all placements. Road and block definitions stay. You can undo this.");
+            let body = text(
+                "Remove all placements. Road and block definitions stay. You can \
+                    undo this.",
+            );
             let cancel = text("Cancel").visual_bounding_rect();
             let clear = text("Clear").visual_bounding_rect();
             let mut rects = Vec::new();

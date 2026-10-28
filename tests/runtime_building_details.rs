@@ -34,8 +34,69 @@ fn config() -> BuildingDetailConfig {
 
 fn city() -> City {
     let source = "road street: sidewalk carlane sidewalk; end street(-1,0,1,0);\
-        building(0.07, {material: brick, floor_height: 0.035}, -0.04,0.1, 0.04,0.1, 0.04,0.21, -0.04,0.21);";
+        building(0.07, {material: brick, floor_height: 0.035}, -0.04,0.1, \
+        0.04,0.1, 0.04,0.21, -0.04,0.21);";
+
     City::from_program(&parse(source).unwrap(), None).unwrap()
+}
+
+#[test]
+fn room_panes_keep_uvs_aspect_and_tangent_through_facade_rotation() {
+    for (dx, dy) in [(1., 0.), (0., 1.), (0.6, 0.8), (-1., 0.)] {
+        let point = |x: f32, y: f32| (x * dx - y * dy, x * dy + y * dx);
+        let a = point(-1., 0.);
+        let b = point(1., 0.);
+        let corners = [
+            point(-0.04, 0.1),
+            point(0.04, 0.1),
+            point(0.04, 0.21),
+            point(-0.04, 0.21),
+        ];
+        let source = format!(
+            "road street: sidewalk carlane sidewalk; end street({},{},{},{}); \
+                building(0.07, {{floor_height: 0.035}}, {});",
+            a.0,
+            a.1,
+            b.0,
+            b.1,
+            corners
+                .iter()
+                .map(|p| format!("{},{}", p.0, p.1))
+                .collect::<Vec<_>>()
+                .join(",")
+        );
+        let city = City::from_program(&parse(&source).unwrap(), None).unwrap();
+        let mesh = city.building_detail_mesh(Region::WholeMap, &config());
+        let panes: Vec<_> = mesh
+            .vertices
+            .chunks_exact(6)
+            .filter(|p| {
+                p[0].surface[0] == SurfaceKind::Window as u32 as f32 && p[0].surface[3] >= 16.
+            })
+            .collect();
+        assert!(!panes.is_empty());
+        for pane in panes {
+            let n = pane[0].normal;
+            let u_axis = [n[1], -n[0]];
+            let packed = pane[0].surface[3];
+            let aspect = packed - (packed / 16.).floor() * 16.;
+            assert!((0.125..=15.).contains(&aspect));
+            for v in pane {
+                assert_eq!(v.surface[3], packed);
+                assert!((0. ..=1.).contains(&v.surface[1]));
+                assert!((0. ..=1.).contains(&v.surface[2]));
+            }
+            // The two triangles share a room; U increases in the shader's tangent direction.
+            for pair in pane.windows(2) {
+                let du = pair[1].surface[1] - pair[0].surface[1];
+                let distance = (pair[1].position[0] - pair[0].position[0]) * u_axis[0]
+                    + (pair[1].position[1] - pair[0].position[1]) * u_axis[1];
+                if du.abs() > 0.5 {
+                    assert!(du * distance > 0.);
+                }
+            }
+        }
+    }
 }
 
 #[test]
@@ -64,7 +125,11 @@ fn fence_sections_use_two_triangles_with_local_pattern_coordinates_at_any_width(
                         .all(|v| v.surface[0] == SurfaceKind::Fence as u32 as f32)
                 })
                 .collect();
-            assert_eq!(panels.len(), 2, "two garden fence sections");
+            assert_eq!(
+                panels.len(),
+                4,
+                "two front sections and two clear side returns"
+            );
             for panel in panels {
                 assert_eq!(
                     panel.vertices.len(),
@@ -81,6 +146,39 @@ fn fence_sections_use_two_triangles_with_local_pattern_coordinates_at_any_width(
             }
         }
     }
+}
+
+#[test]
+fn attached_gardens_share_one_divider_and_keep_each_fence_section_removable() {
+    let city = City::from_program(
+        &parse(
+            "road street: sidewalk carlane sidewalk; end street(-1,0,1,0); \
+                building(0.07, {floor_height: 0.035}, 0,0.1, 0.08,0.1, 0.08,0.21, \
+                0,0.21); building(0.07, {floor_height: 0.035}, 0.08,0.1, 0.16,\
+                0.1, 0.16,0.21, 0.08,0.21);",
+        )
+        .unwrap(),
+        None,
+    )
+    .unwrap();
+    let mut choices = config();
+    choices.garden_props = vec![(GardenProp::None, 1)];
+    let (_, objects) = city.building_detail_parts(Region::WholeMap, &choices);
+    let fences: Vec<_> = objects
+        .iter()
+        .filter(|object| {
+            object
+                .vertices
+                .iter()
+                .all(|v| v.surface[0] == SurfaceKind::Fence as u32 as f32)
+        })
+        .collect();
+    assert_eq!(
+        fences.len(),
+        7,
+        "four front sections and three lot dividers"
+    );
+    assert!(fences.iter().all(|fence| fence.vertices.len() == 6));
 }
 
 #[test]
@@ -264,7 +362,9 @@ fn roof_and_garden_choices_have_distinct_visual_geometry() {
 #[test]
 fn sloped_roofs_do_not_overhang_irregular_footprints() {
     let source = "road street: sidewalk carlane sidewalk; end street(-1,0,1,0);\
-        building(0.07, {floor_height: 0.035}, -0.04,0.1, 0.04,0.1, 0.07,0.16, 0.02,0.21, -0.04,0.21);";
+        building(0.07, {floor_height: 0.035}, -0.04,0.1, 0.04,0.1, 0.07,\
+        0.16, 0.02,0.21, -0.04,0.21);";
+
     let city = City::from_program(&parse(source).unwrap(), None).unwrap();
     let mut options = config();
     options.patterns[0].roof = RoofKind::Mansard;

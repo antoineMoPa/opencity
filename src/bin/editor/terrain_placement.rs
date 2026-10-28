@@ -516,20 +516,39 @@ impl RoadEditor {
             self.path.as_deref().and_then(Path::parent),
             point,
         );
-        let result = apply_with_base(&mut self.program, self.path.as_deref().and_then(Path::parent), SegmentSource::TopLevel(index),
-            start_height, end_height,
-            (self.map_start_ref.is_some(), point_ref.is_some())).and_then(|()| {
-                // A branch can add an entry and a remaining through segment.
-                // Their fixed seams must also clear terrain, without lifting
-                // either side of an existing connection.
-                let additional: Vec<_> = map::project(&self.program).segments.into_iter().filter(|s|
-                    matches!(s.source, SegmentSource::TopLevel(i) if i >= before_click.statements.len() && i != index))
-                    .collect();
-                for segment in additional {
-                    apply_with_base(&mut self.program, self.path.as_deref().and_then(Path::parent),segment.source,segment.start_z,segment.end_z,(true,true))?;
-                }
-                Ok(())
-            });
+        let result = apply_with_base(
+            &mut self.program,
+            self.path.as_deref().and_then(Path::parent),
+            SegmentSource::TopLevel(index),
+            start_height,
+            end_height,
+            (self.map_start_ref.is_some(), point_ref.is_some()),
+        )
+        .and_then(|()| {
+            // A branch can add an entry and a remaining through segment.
+            // Their fixed seams must also clear terrain, without lifting
+            // either side of an existing connection.
+            let additional: Vec<_> = map::project(&self.program)
+                .segments
+                .into_iter()
+                .filter(|s| {
+                    matches!(s.source,
+                         SegmentSource::TopLevel(i) if i >= before_click.statements.len() &&
+                         i != index)
+                })
+                .collect();
+            for segment in additional {
+                apply_with_base(
+                    &mut self.program,
+                    self.path.as_deref().and_then(Path::parent),
+                    segment.source,
+                    segment.start_z,
+                    segment.end_z,
+                    (true, true),
+                )?;
+            }
+            Ok(())
+        });
         if let Err(message) = result {
             self.program = before_click;
             self.minimal.pending_road = pending;

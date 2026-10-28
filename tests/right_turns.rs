@@ -13,11 +13,16 @@ fn source(sx: f32, sy: f32, mixed: bool, reverse: bool, placed: bool) -> String 
         "sidewalk carlane middle carlane sidewalk"
     };
     let horizontal = if mixed {
-        "buildingedge sidewalk parkinglane carlane buslane middle buslane carlane parkinglane sidewalk buildingedge"
+        "buildingedge sidewalk parkinglane carlane buslane middle buslane \
+            carlane parkinglane sidewalk buildingedge"
     } else {
         vertical
     };
-    let mut result = format!("road v: {vertical}; end\nroad h: {horizontal}; end\nc=map_point(0,0);\nv=map_point(0,{sy});\nh=map_point({sx},0);\n");
+    let mut result = format!(
+        "road v: {vertical}; end\nroad h: {horizontal}; \
+            end\nc=map_point(0,0);\nv=map_point(0,{sy});\nh=map_point({sx},\
+            0);\n"
+    );
     let v_ref = if placed { "vp" } else { "c" };
     let h_ref = if placed { "hp" } else { "c" };
     if placed {
@@ -73,11 +78,14 @@ fn full_profiles_match_road_seams_in_all_four_orientations_and_both_directions()
                         let mut source = source(sx, sy, profile != 0, reverse, placed);
                         if profile == 2 {
                             source = source.replace(
-                                "road v: sidewalk bikelane carlane middle carlane bikelane sidewalk;",
+                                "road v: sidewalk bikelane carlane middle carlane bikelane \
+                                    sidewalk;",
                                 "road v: sidewalk bikelane carlane middle carlane;",
                             ).replace(
-                                "road h: buildingedge sidewalk parkinglane carlane buslane middle buslane carlane parkinglane sidewalk buildingedge;",
-                                "road h: buildingedge sidewalk parkinglane carlane buslane middle buslane carlane;",
+                                "road h: buildingedge sidewalk parkinglane carlane buslane middle \
+                                    buslane carlane parkinglane sidewalk buildingedge;",
+                                "road h: buildingedge sidewalk parkinglane carlane buslane middle \
+                                    buslane carlane;",
                             );
                         }
                         let program = parse(&source).unwrap();

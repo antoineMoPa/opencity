@@ -206,7 +206,11 @@ fn map_hit_testing_respects_pan_and_zoom() {
 #[test]
 fn map_hit_picks_upper_road_at_local_grade_height() {
     let rect = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(800.0, 600.0));
-    let program = parse("road lane: carlane; end; low = lane(0, 0, 2, 0); high = lane(0, 0, 2, 0); grade(high, -1, 1);").unwrap();
+    let program = parse(
+        "road lane: carlane; end; low = lane(0, 0, 2, 0); high = lane(0, \
+            0, 2, 0); grade(high, -1, 1);",
+    )
+    .unwrap();
     let segments = map::project(&program).segments;
     let left = screen_of(rect, egui::Vec2::ZERO, 80.0, WorldPoint { x: 0.25, y: 0.0 });
     let right = screen_of(rect, egui::Vec2::ZERO, 80.0, WorldPoint { x: 1.75, y: 0.0 });

@@ -325,7 +325,8 @@ impl RoadEditor {
                 let mut ready_message = action.ready_message.clone();
                 std::thread::spawn(move || {
                     use std::io::Read;
-                    // Drain stderr while retaining only its tail, including cargo and startup errors.
+                    // Drain stderr while retaining only its tail, including cargo and startup
+                    // errors.
                     let mut tail = std::collections::VecDeque::new();
                     let mut buffer = [0; 4096];
                     if let Some(mut stderr) = child.stderr.take() {

@@ -25,8 +25,16 @@ fn road_elements_use_spaces_when_read_and_written() {
 
 #[test]
 fn road_elements_accept_tabs_and_newlines_with_parameter_captures() {
-    let program = parse("road street: buildingedge($1)\t sidewalk\n carlane\r\n buildingedge($2); direction forward; end;").unwrap();
-    assert_eq!(program.to_road_source(), "road street:\n    buildingedge($1) sidewalk carlane buildingedge($2);\n    direction forward;\nend\n");
+    let program = parse(
+        "road street: buildingedge($1)\t sidewalk\n carlane\r\n \
+            buildingedge($2); direction forward; end;",
+    )
+    .unwrap();
+    assert_eq!(
+        program.to_road_source(),
+        "road street:\n    buildingedge($1) sidewalk carlane \
+            buildingedge($2);\n    direction forward;\nend\n"
+    );
     assert_eq!(parse(&program.to_road_source()).unwrap(), program);
 }
 

@@ -75,7 +75,8 @@ fn legacy_buildings_keep_default_style_and_optional_models() {
 #[test]
 fn glb_path_can_precede_building_options() {
     let program = parse(
-        "building(0.2, \"assets/hall.glb\", {material: brick, floor_height: 0.03}, 0,0, 1,0, 1,1);",
+        "building(0.2, \"assets/hall.glb\", {material: brick, \
+            floor_height: 0.03}, 0,0, 1,0, 1,1);",
     )
     .unwrap();
     assert_eq!(parse(&program.to_road_source()).unwrap(), program);
@@ -97,11 +98,11 @@ fn glb_path_can_precede_building_options() {
 #[test]
 fn building_options_bind_independently_in_typed_blocks() {
     let program = parse(
-        "block tower({height, facade, floor}: {height: number, facade: identifier, floor: number}):\
-           building(height, {material: facade, floor_height: floor}, 0,0, 1,0, 1,1);\
-         end \
-         tower(10,20,0.4,{height:0.3, facade:glass, floor:0.05});\
-         tower(-10,-20,{height:0.1, facade:brick, floor:0.025});",
+        "block tower({height, facade, floor}: {height: number, facade: \
+            identifier, floor: number}):building(height, {material: facade, \
+            floor_height: floor}, 0,0, 1,0, 1,1);end tower(10,20,0.4,\
+            {height:0.3, facade:glass, floor:0.05});tower(-10,-20,\
+            {height:0.1, facade:brick, floor:0.025});",
     )
     .unwrap();
     let projection = project_landscape_features(&program);

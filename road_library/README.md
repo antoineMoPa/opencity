@@ -86,11 +86,11 @@ right.
 
 ## Plug patterns together in `.road`
 
-The language has native `place(asset, id, x, y, quarter_turns)` and `join(a_id, a_port, b_id,
-b_port)` calls. `asset` is one of the five names in the table above without `.road`. `quarter_turns`
-is 0–3 counterclockwise; x and y translate in world units. The parser expands the asset into
-ordinary named road calls and turns a join into one shared `map_point` reference. It rejects
-mismatched coordinates, cross sections, heights, tangents, or one-way travel.
+The language has native `place(asset, id, x, y, quarter_turns)` and
+`join(a_id, a_port, b_id, b_port)` calls. `asset` is one of the five names in the table above
+without `.road`. `quarter_turns` is 0–3 counterclockwise; x and y translate in world units. The
+parser expands the asset into ordinary named road calls and turns a join into one shared `map_point`
+reference. It rejects mismatched coordinates, cross sections, heights, tangents, or one-way travel.
 
 ```text
 place(four_way, cross, 0, 0, 0);
@@ -107,8 +107,8 @@ The cloverleaf is assembled as 25 short `interstate_core` pieces around sixteen 
 with outer highway stubs added after those local patches. The core profile exposes its outer car
 lanes for entries and merges; the outer stubs taper their verges before reaching it. Four five-piece
 loops and four four-piece direct connectors link the ports. Keep the `ew_center` and `ns_center`
-references separate: they occupy the same horizontal position but are on different decks. See [the
-agent guide](../docs/road-building-guide-for-agents.md) for the local construction order.
+references separate: they occupy the same horizontal position but are on different decks. See
+[the agent guide](../docs/road-building-guide-for-agents.md) for the local construction order.
 
 Run Rust `check_design_rules` after placing patterns. It checks car-lane continuity at shared points
 and lane attachments, including height and travel direction, and checks full-width lane surfaces

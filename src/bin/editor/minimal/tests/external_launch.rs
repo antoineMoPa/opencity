@@ -56,12 +56,15 @@ fn external_launch_uses_unsaved_contents_and_reports_child_failure() {
         for saved in [false, true] {
             let mut editor = editor();
             editor.launch_action = Ok(Some(
-            crate::external_launch::LaunchAction::parse(
-                r#"{"label":"Inspect here","program":"/bin/sh","ready_message":"point=","args":["-c","cat \"$1\" >&2; printf '\\npoint=%s\\n' \"$2\" >&2; exit 7","viewer","{map}","{x},{y}"]}"#,
-                PathBuf::from("/tmp"),
-            )
-            .unwrap(),
-        ));
+                crate::external_launch::LaunchAction::parse(
+                    "{\"label\":\"Inspect here\",\"program\":\"/bin/sh\",\
+                        \"ready_message\":\"point=\",\"args\":[\"-c\",\"cat \\\"$1\\\" \
+                        >&2; printf '\\\\npoint=%s\\\\n' \\\"$2\\\" >&2; exit 7\",\
+                        \"viewer\",\"{map}\",\"{x},{y}\"]}",
+                    PathBuf::from("/tmp"),
+                )
+                .unwrap(),
+            ));
             editor.camera_view = camera;
             let original =
                 std::env::temp_dir().join(format!("opencity-original-{}.road", std::process::id()));

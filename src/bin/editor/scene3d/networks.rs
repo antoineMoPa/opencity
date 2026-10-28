@@ -52,7 +52,9 @@ pub(super) fn append_networks(scene: &mut Scene, program: &Program, theme: egui:
 #[cfg(test)]
 mod tests {
     use super::*;
-    const SOURCE:&str="intersection sample { path p { move (0,0,2); line (1,1,3); } surface pavement along p width 0.2; marking stripe along p width 0.01 color yellow; } placed=sample(10,20,3);";
+    const SOURCE: &str = "intersection sample { path p { move (0,0,2); line (1,1,3); } \
+        surface pavement along p width 0.2; marking stripe along p width \
+        0.01 color yellow; } placed=sample(10,20,3);";
     #[test]
     fn surfaces_and_markings_keep_world_positions_and_independent_heights() {
         let program = parse(SOURCE).unwrap();

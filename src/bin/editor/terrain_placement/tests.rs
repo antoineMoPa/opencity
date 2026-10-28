@@ -109,30 +109,51 @@ fn close(a: f32, b: f32) {
 #[test]
 fn terrain_root_palette_top_and_iso_place_actual_xy_grade_roundtrip_and_undo() {
     for camera in [CameraView::Top, CameraView::Isometric] {
-        for source in ["ridge=terrain(0.75,-4,-4,4,-4,4,4,-4,4);",
-        "block plateau: terrain(0.25,-6,-7,2,-7,2,1,-6,1); end; terrain(0.4,-4,-4,4,-4,4,4,-4,4); high=plateau(2,3,0.2); elevation(high,0.3);"] {
-        let mut e=editor(source,camera);
-        let ctx=egui::Context::default(); frame(&mut e,&ctx,vec![]);
-        palette_road(&mut e,&ctx,"Add road: street");
-        let original=e.program.clone();
-        let (a,b)=(WorldPoint{x:-1.2,y:0.2},WorldPoint{x:1.4,y:0.2});
-        let (sa,sb)=(screen(&e,a,0.75),screen(&e,b,0.75));
-        click(&mut e,&ctx,sa);
-        close(e.map_start.unwrap().x,a.x);close(e.map_start.unwrap().y,a.y);
-        assert_eq!(e.program,original,"first click must not change saved source");
-        assert!(e.undo_stack.is_empty());
-        if camera==CameraView::Isometric {
-            let preview=e.terrain_draw_preview(&map::project(&e.program),e.map_rect.unwrap(),sb).unwrap();
-            close(preview.start_z,0.75);close(preview.end.x,b.x);close(preview.end_z,0.75);
+        for source in [
+            "ridge=terrain(0.75,-4,-4,4,-4,4,4,-4,4);",
+            "block plateau: terrain(0.25,-6,-7,2,-7,2,1,-6,1); end; \
+                terrain(0.4,-4,-4,4,-4,4,4,-4,4); high=plateau(2,3,0.2); \
+                elevation(high,0.3);",
+        ] {
+            let mut e = editor(source, camera);
+            let ctx = egui::Context::default();
+            frame(&mut e, &ctx, vec![]);
+            palette_road(&mut e, &ctx, "Add road: street");
+            let original = e.program.clone();
+            let (a, b) = (
+                WorldPoint { x: -1.2, y: 0.2 },
+                WorldPoint { x: 1.4, y: 0.2 },
+            );
+            let (sa, sb) = (screen(&e, a, 0.75), screen(&e, b, 0.75));
+            click(&mut e, &ctx, sa);
+            close(e.map_start.unwrap().x, a.x);
+            close(e.map_start.unwrap().y, a.y);
+            assert_eq!(
+                e.program, original,
+                "first click must not change saved source"
+            );
+            assert!(e.undo_stack.is_empty());
+            if camera == CameraView::Isometric {
+                let preview = e
+                    .terrain_draw_preview(&map::project(&e.program), e.map_rect.unwrap(), sb)
+                    .unwrap();
+                close(preview.start_z, 0.75);
+                close(preview.end.x, b.x);
+                close(preview.end_z, 0.75);
+            }
+            click(&mut e, &ctx, sb);
+            let placed = map::project(&e.program).segments.pop().unwrap();
+            close(placed.start.x, a.x);
+            close(placed.start.y, a.y);
+            close(placed.end.x, b.x);
+            close(placed.end.y, b.y);
+            close(placed.start_z, 0.75);
+            close(placed.end_z, 0.75);
+            assert_eq!(parse(&e.program.to_road_source()).unwrap(), e.program);
+            assert_eq!(e.undo_stack.len(), 1);
+            assert!(e.restore_history(true));
+            assert_eq!(e.program, original);
         }
-        click(&mut e,&ctx,sb);
-        let placed=map::project(&e.program).segments.pop().unwrap();
-        close(placed.start.x,a.x);close(placed.start.y,a.y);close(placed.end.x,b.x);close(placed.end.y,b.y);
-        close(placed.start_z,0.75);close(placed.end_z,0.75);
-        assert_eq!(parse(&e.program.to_road_source()).unwrap(),e.program);
-        assert_eq!(e.undo_stack.len(),1);
-        assert!(e.restore_history(true));assert_eq!(e.program,original);
-      }
     }
 }
 
@@ -166,7 +187,10 @@ fn terrain_midspan_and_edge_footprint_narrow_patches_raise_whole_grade() {
 
 #[test]
 fn terrain_projected_blocks_overlap_and_iso_top_ray() {
-    let p=program("block patch: terrain(0.4,-1,-1,1,-1,1,1,-1,1); end; hill=patch(2,3,0.2); elevation(hill,0.6); terrain(0.3,1,2,3,2,3,4,1,4);");
+    let p = program(
+        "block patch: terrain(0.4,-1,-1,1,-1,1,1,-1,1); end; hill=patch(2,\
+            3,0.2); elevation(hill,0.6); terrain(0.3,1,2,3,2,3,4,1,4);",
+    );
     let features = terrain(&p);
     assert_eq!(features.len(), 2);
     let top = features.iter().map(|f| f.elevation).fold(0.0, f32::max);
@@ -245,7 +269,11 @@ fn terrain_first_click_reference_cancel_leaves_authoritative_source_unchanged() 
 #[test]
 fn terrain_anchor_collision_rejection_is_atomic_visible_and_retryable() {
     for camera in [CameraView::Top, CameraView::Isometric] {
-        let mut e=editor("old=street(-2,0,-1,0); grade(old,0.2,0.2); terrain(0.8,-0.1,-0.3,0.1,-0.3,0.1,0.3,-0.1,0.3);",camera);
+        let mut e = editor(
+            "old=street(-2,0,-1,0); grade(old,0.2,0.2); terrain(0.8,-0.1,-0.3,\
+                0.1,-0.3,0.1,0.3,-0.1,0.3);",
+            camera,
+        );
         let ctx = egui::Context::default();
         frame(&mut e, &ctx, vec![]);
         palette_road(&mut e, &ctx, "Add road: street");
@@ -279,7 +307,11 @@ fn terrain_anchor_collision_rejection_is_atomic_visible_and_retryable() {
 
 #[test]
 fn terrain_top_snapping_chooses_visible_deck_and_block_roads_stay_read_only() {
-    let e=editor("low=street(-1,0,1,0); high=street(-1,0,1,0); grade(high,0.7,0.7); block b: inside=street(-1,2,1,2); end; b(0,0);",CameraView::Top);
+    let e = editor(
+        "low=street(-1,0,1,0); high=street(-1,0,1,0); grade(high,0.7,0.7); \
+            block b: inside=street(-1,2,1,2); end; b(0,0);",
+        CameraView::Top,
+    );
     let rect = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(900.0, 650.0));
     let projection = map::project(&e.program);
     let pointer = screen_of(rect, e.map_pan, e.map_zoom, WorldPoint { x: 1.0, y: 0.0 });
@@ -517,10 +549,28 @@ fn elevation_png_mcp_routes_clear_terrain_and_failed_connections_roll_back() {
     );
     e.path = Some(fixture.dir.join("map.road"));
     let before = e.program.clone();
-    let args = serde_json::json!({"road_type":"street","start_x":-1,"start_y":0,"end_x":1,"end_y":0,"start_ref":"a"});
+    let args = serde_json::json!({
+    "road_type":"street",
+    "start_x":-1,
+    "start_y":0,
+    "end_x":1,
+    "end_y":0,
+    "start_ref":"a"
+    }
+    );
+
     assert!(e.call_mcp("add_road", &args).is_err());
     assert_eq!(e.program, before);
-    let args = serde_json::json!({"road_type":"street","name":"scenic","start_x":-1,"start_y":0,"end_x":1,"end_y":0});
+    let args = serde_json::json!({
+    "road_type":"street",
+    "name":"scenic",
+    "start_x":-1,
+    "start_y":0,
+    "end_x":1,
+    "end_y":0
+    }
+    );
+
     e.call_mcp("add_road", &args).unwrap();
     let road = map::project(&e.program).segments.pop().unwrap();
     assert_eq!(road.name.as_deref(), Some("scenic"));

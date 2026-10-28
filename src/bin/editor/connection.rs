@@ -41,7 +41,12 @@ fn connections(program: &Program) -> Vec<Connection> {
             .into_iter()
             .flatten()
             .any(|name| map::lane_attachment(program, name).is_some());
-        let merge = program.statements.iter().any(|statement| matches!(statement, Statement::Road(road) if road.name == segment.road_name && road.role == opencity::RoadRole::Merge));
+        let merge = program.statements.iter().any(|statement| {
+            matches!(statement,
+             Statement::Road(road) if road.name == segment.road_name &&
+             road.role == opencity::RoadRole::Merge)
+        });
+
         if !attached && !merge {
             continue;
         }
@@ -290,7 +295,13 @@ impl RoadEditor {
                     .iter()
                     .find(|road| road.name.as_deref() == Some(&parent))
                     .ok_or("Missing parent")?;
-                let valid = next.statements.iter().any(|statement| matches!(statement, Statement::Road(road) if road.name == parent.road_name && road.elements.get(lane).is_some_and(|element| element.kind == RoadElementKind::CarLane)));
+                let valid = next.statements.iter().any(|statement| {
+                    matches!(statement,
+                     Statement::Road(road) if road.name == parent.road_name &&
+                     road.elements.get(lane)
+                         .is_some_and(|element| element.kind == RoadElementKind::CarLane))
+                });
+
                 if !valid || !map::set_lane_attachment(&mut next, &reference, lane, t) {
                     return Err("Choose a parent car lane and valid t".into());
                 }
@@ -320,10 +331,35 @@ impl RoadEditor {
                     )?;
                 } else {
                     if kind != intersection.kind {
-                        return Err("Port-based intersection type changes require rebuilding its ports; existing ports are preserved".into());
+                        return Err(
+                            "Port-based intersection type changes require rebuilding its \
+                                ports; existing ports are preserved"
+                                .into(),
+                        );
                     }
-                    if !next.statements.iter().any(|statement| matches!(statement, Statement::Road(road) if road.name == profile)) { return Err("Unknown intersection profile".into()); }
-                    let call = next.statements.iter_mut().find_map(|statement| match statement { Statement::Call(call) if call.name == kind.call_name() && matches!(call.args.first(), Some(Argument::Identifier(reference)) if reference == &intersection.point_ref) => Some(call), _ => None }).ok_or("Missing intersection definition")?;
+                    if !next.statements.iter().any(|statement| {
+                        matches!(statement,
+                         Statement::Road(road) if road.name == profile)
+                    }) {
+                        return Err("Unknown intersection profile".into());
+                    }
+
+                    let call = next
+                        .statements
+                        .iter_mut()
+                        .find_map(|statement| match statement {
+                            Statement::Call(call)
+                                if call.name == kind.call_name()
+                                    && matches!(call.args.first(),
+                         Some(Argument::Identifier(reference))
+                             if reference == &intersection.point_ref) =>
+                            {
+                                Some(call)
+                            }
+                            _ => None,
+                        })
+                        .ok_or("Missing intersection definition")?;
+
                     call.args[1] = Argument::Identifier(profile);
                 }
             }
@@ -476,14 +512,116 @@ impl RoadEditor {
             };
             self.edit_connection(id, edit)?;
         }
-        let items: Vec<_> = connections(&self.program).into_iter().map(|item| json!({"id":item.id,"label":item.label,"center":{"x":item.center.x,"y":item.center.y},"kind":item.intersection.as_ref().map(|intersection| match intersection.kind { map::IntersectionKind::RightTurn => "right_turn", map::IntersectionKind::ThreeWay => "three_way", map::IntersectionKind::FourWay => "four_way" }),"profile":item.intersection.as_ref().map(|intersection| &intersection.road_name),"ports":item.intersection.as_ref().map(|intersection| intersection.ports.iter().map(|port| json!({"reference":port.point_ref,"x":port.position.x,"y":port.position.y})).collect::<Vec<_>>()),"roads":item.segments.iter().map(|road| json!({"name":road.name,"profile":road.road_name,"editable":road.source.editable(),"start":{"x":road.start.x,"y":road.start.y,"reference":road.start_ref},"handle1":{"x":road.controls[0].x,"y":road.controls[0].y},"handle2":{"x":road.controls[1].x,"y":road.controls[1].y},"end":{"x":road.end.x,"y":road.end.y,"reference":road.end_ref},"start_height":road.start_z,"end_height":road.end_z,"attachments":[road.start_ref.as_deref().and_then(|reference| map::lane_attachment(&self.program, reference).map(|(parent,lane,t)| json!({"reference":reference,"parent":parent,"lane":lane,"t":t}))),road.end_ref.as_deref().and_then(|reference| map::lane_attachment(&self.program, reference).map(|(parent,lane,t)| json!({"reference":reference,"parent":parent,"lane":lane,"t":t})))]})).collect::<Vec<_>>()})).collect();
+        let items: Vec<_> = connections(&self.program)
+            .into_iter()
+            .map(|item| {
+                json!({
+                "id":item.id,
+                "label":item.label,
+                "center":{
+                "x":item.center.x,
+                "y":item.center.y
+                }
+                ,
+                "kind":item.intersection.as_ref().map(|intersection| match intersection.kind {
+                 map::IntersectionKind::RightTurn =>
+                 "right_turn",
+                 map::IntersectionKind::ThreeWay =>
+                 "three_way",
+                 map::IntersectionKind::FourWay =>
+                 "four_way"
+                }
+                ),
+                "profile":item.intersection.as_ref().map(|intersection| &intersection.road_name),
+                "ports":item.intersection.as_ref().map(|intersection|
+                    intersection.ports.iter().map(|port| json!({
+
+                "reference":port.point_ref,
+                "x":port.position.x,
+                "y":port.position.y
+                }
+                )).collect::<Vec<_>>()),
+                "roads":item.segments.iter().map(|road| json!({
+                "name":road.name,
+                "profile":road.road_name,
+                "editable":road.source.editable(),
+                "start":{
+                "x":road.start.x,
+                "y":road.start.y,
+                "reference":road.start_ref
+                }
+                ,
+                "handle1":{
+                "x":road.controls[0].x,
+                "y":road.controls[0].y
+                }
+                ,
+                "handle2":{
+                "x":road.controls[1].x,
+                "y":road.controls[1].y
+                }
+                ,
+                "end":{
+                "x":road.end.x,
+                "y":road.end.y,
+                "reference":road.end_ref
+                }
+                ,
+                "start_height":road.start_z,
+                "end_height":road.end_z,
+                "attachments":[road.start_ref.as_deref().and_then(|reference|
+                    map::lane_attachment(&self.program,
+
+                 reference).map(|(parent,
+                lane,
+                t)| json!({
+                "reference":reference,
+                "parent":parent,
+                "lane":lane,
+                "t":t
+                }
+                ))),
+                road.end_ref.as_deref().and_then(|reference| map::lane_attachment(&self.program,
+                 reference).map(|(parent,
+                lane,
+                t)| json!({
+                "reference":reference,
+                "parent":parent,
+                "lane":lane,
+                "t":t
+                }
+                )))]
+                }
+                )).collect::<Vec<_>>()
+                }
+                )
+            })
+            .collect();
+
         let analysis = self
             .design_analysis_cache
             .as_ref()
             .filter(|cache| cache.program == self.program);
-        Ok(
-            json!({"workspace":serde_json::Value::Null,"active":self.active_connection().map(|item| item.id),"connections":items,"design_checks":if analysis.is_some() { "current" } else { "pending" },"issues":analysis.map(|cache| cache.issues.iter().map(|issue| json!({"code":issue.code,"message":issue.message,"x":issue.at.x,"y":issue.at.y})).collect::<Vec<_>>())}),
-        )
+        Ok(json!({
+        "workspace":serde_json::Value::Null,
+        "active":self.active_connection().map(|item| item.id),
+        "connections":items,
+        "design_checks":if analysis.is_some() {
+         "current"
+        }
+         else {
+         "pending"
+        }
+        ,
+        "issues":analysis.map(|cache| cache.issues.iter().map(|issue| json!({
+        "code":issue.code,
+        "message":issue.message,
+        "x":issue.at.x,
+        "y":issue.at.y
+        }
+        )).collect::<Vec<_>>())
+        }
+        ))
     }
 }
 

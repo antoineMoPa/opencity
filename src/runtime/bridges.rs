@@ -193,7 +193,10 @@ mod tests {
     }
     #[test]
     fn graded_curved_decks_and_barriers_have_finite_geometry() {
-        let bridge = city("road r: sidewalk carlane sidewalk; end s=r(0,0,0.2,0.8,0.8,0.2,1,1); grade(s,0.04,0.12);");
+        let bridge = city(
+            "road r: sidewalk carlane sidewalk; end s=r(0,0,0.2,0.8,0.8,0.2,1,\
+                1); grade(s,0.04,0.12);",
+        );
         let concrete = props(&bridge);
         assert!(!concrete.is_empty());
         assert!(concrete

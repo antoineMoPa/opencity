@@ -436,8 +436,19 @@ pub fn export_with_base(program: &Program, base: Option<&std::path::Path>) -> Ve
         bin.extend_from_slice(&index.to_le_bytes());
     }
     let index_length = bin.len() - index_offset;
-    let building_models: Vec<_> = features.iter()
-        .filter_map(|feature| feature.model.as_ref().map(|model| json!({"name": feature.name, "glb": model, "footprint": feature.points, "height": feature.height})))
+    let building_models: Vec<_> = features
+        .iter()
+        .filter_map(|feature| {
+            feature.model.as_ref().map(|model| {
+                json!({
+                "name": feature.name,
+                 "glb": model,
+                 "footprint": feature.points,
+                 "height": feature.height
+                }
+                )
+            })
+        })
         .collect();
     let document = json!({
         "asset": {"version": "2.0", "generator": "OpenCity"},
@@ -451,7 +462,14 @@ pub fn export_with_base(program: &Program, base: Option<&std::path::Path>) -> Ve
         "buffers": [{"byteLength": bin.len()}],
         "bufferViews": [
             {"buffer": 0, "byteOffset": 0, "byteLength": position_length, "target": 34962},
-            {"buffer": 0, "byteOffset": position_length, "byteLength": color_length, "target": 34962},
+            {
+                "buffer": 0,
+                 "byteOffset": position_length,
+                 "byteLength": color_length,
+                 "target": 34962
+                }
+                ,
+
             {"buffer": 0, "byteOffset": index_offset, "byteLength": index_length, "target": 34963}
         ],
         "accessors": [
@@ -484,7 +502,12 @@ mod tests {
 
     #[test]
     fn elevated_road_exports_only_outer_side_walls() {
-        let program = opencity::parse("road divided: verge-carlane-middle-carlane-verge; end; p = map_point(0, 0); q = map_point(1, 0); road_piece = divided(p, 0.3, 0, 0.7, 0, q); elevation(road_piece, 0.3);").unwrap();
+        let program = opencity::parse(
+            "road divided: verge-carlane-middle-carlane-verge; end; p = \
+                map_point(0, 0); q = map_point(1, 0); road_piece = divided(p, \
+                0.3, 0, 0.7, 0, q); elevation(road_piece, 0.3);",
+        )
+        .unwrap();
         let projection = map::project(&program);
         let road = program
             .statements
@@ -512,7 +535,8 @@ mod tests {
     #[test]
     fn overlapping_ground_surfaces_export_at_separate_heights() {
         let program = opencity::parse(
-            "beach(0, 0, 2, 0, 2, 2, 0, 2); land(0, 0, 2, 0, 2, 2, 0, 2); vegetation(forest, 0, 0, 2, 0, 2, 2, 0, 2);",
+            "beach(0, 0, 2, 0, 2, 2, 0, 2); land(0, 0, 2, 0, 2, 2, 0, 2); \
+                vegetation(forest, 0, 0, 2, 0, 2, 2, 0, 2);",
         )
         .unwrap();
         let mesh = super::super::model::parse_glb(&export(&program)).unwrap();
@@ -549,7 +573,12 @@ mod tests {
 
     #[test]
     fn two_way_export_contains_curved_profile_bands_instead_of_a_square() {
-        let program = opencity::parse("road street: sidewalk-carlane-carlane-sidewalk; end; c = map_point(0,0); n = map_point(0,0.2); e = map_point(0.2,0); intersection2(c,street,north,n,east,e);").unwrap();
+        let program = opencity::parse(
+            "road street: sidewalk-carlane-carlane-sidewalk; end; c = \
+                map_point(0,0); n = map_point(0,0.2); e = map_point(0.2,0); \
+                intersection2(c,street,north,n,east,e);",
+        )
+        .unwrap();
         let bytes = export(&program);
         let mesh = super::super::model::parse_glb(&bytes).unwrap();
         assert!(mesh.triangles.len() > 100);
@@ -566,9 +595,11 @@ mod tests {
 
     #[test]
     fn building_export_has_roof_walls_and_model_reference() {
-        let program =
-            opencity::parse("hall = building(0.5, \"assets/hall.glb\", 0, 0, 1, 0, 1, 1, 0, 1);")
-                .unwrap();
+        let program = opencity::parse(
+            "hall = building(0.5, \"assets/hall.glb\", 0, 0, 1, 0, 1, 1, 0, \
+                1);",
+        )
+        .unwrap();
         let bytes = export(&program);
         let json_length = u32::from_le_bytes(bytes[12..16].try_into().unwrap()) as usize;
         let json: serde_json::Value = serde_json::from_slice(&bytes[20..20 + json_length]).unwrap();
@@ -582,7 +613,11 @@ mod tests {
 
     #[test]
     fn overlapping_terrain_exports_exposed_mountain_sides() {
-        let program = opencity::parse("low = terrain(0.2, 0, 0, 2, 0, 2, 2, 0, 2); high = terrain(0.4, 1, 1, 3, 1, 3, 3, 1, 3);").unwrap();
+        let program = opencity::parse(
+            "low = terrain(0.2, 0, 0, 2, 0, 2, 2, 0, 2); high = terrain(0.4, \
+                1, 1, 3, 1, 3, 3, 1, 3);",
+        )
+        .unwrap();
         let bytes = export(&program);
         let json_length = u32::from_le_bytes(bytes[12..16].try_into().unwrap()) as usize;
         let json: serde_json::Value = serde_json::from_slice(&bytes[20..20 + json_length]).unwrap();

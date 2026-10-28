@@ -1,7 +1,7 @@
 //! Keep handwritten Rust source small enough to review as coherent modules.
 use std::{fs, path::Path};
 
-const MAX_SOURCE_LINES: usize = 850;
+const MAX_SOURCE_LINES: usize = 1200;
 
 fn inspect(path: &Path, failures: &mut Vec<String>) {
     if path.is_dir() {

@@ -105,7 +105,15 @@ fn annotation_segment_preview_commit_history_cancel() {
         &ctx,
         vec![egui::Event::PointerMoved(egui::pos2(760.0, 500.0))],
     );
-    assert!(output.shapes.iter().any(|s| matches!(&s.shape,egui::Shape::LineSegment{stroke,..} if stroke.color==egui::Color32::from_rgb(240,35,45))));
+    assert!(output.shapes.iter().any(|s| matches!(&s.shape,
+        egui::Shape::LineSegment{
+        stroke,
+        ..
+        }
+         if stroke.color==egui::Color32::from_rgb(240,
+        35,
+        45))));
+
     click(&mut editor, &ctx, egui::pos2(760.0, 500.0));
     assert!(editor.map_tool == MapTool::Select);
     assert_eq!(editor.undo_stack.len(), 1);
@@ -188,7 +196,12 @@ fn annotation_text_roundtrip_color_and_world_anchor() {
     );
     let output = frame(&mut editor, &ctx, vec![]);
     let before = text_position(&output, text);
-    assert!(output.shapes.iter().any(|s| matches!(&s.shape,egui::Shape::Text(t) if t.galley.job.text==text && t.fallback_color==egui::Color32::from_rgb(240,35,45))));
+    assert!(output.shapes.iter().any(|s| matches!(&s.shape,
+        egui::Shape::Text(t) if t.galley.job.text==text &&
+         t.fallback_color==egui::Color32::from_rgb(240,
+        35,
+        45))));
+
     editor.map_pan += egui::vec2(35.0, 20.0);
     let output = frame(&mut editor, &ctx, vec![]);
     assert!((text_position(&output, text) - before - egui::vec2(35.0, 20.0)).length() < 0.01);

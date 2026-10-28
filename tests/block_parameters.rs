@@ -143,8 +143,11 @@ fn invalid_parameter_declarations_have_source_locations() {
         let error = parse(&format!("\nblock piece({declaration}): end;")).unwrap_err();
         assert_eq!(error.span.line, 2, "{declaration}");
     }
-    let error = parse("block piece({ length }: { length: number }): length = river(0,0,1,0); end;")
-        .unwrap_err();
+    let error = parse(
+        "block piece({ length }: { length: number }): length = river(0,0,\
+            1,0); end;",
+    )
+    .unwrap_err();
     assert!(error.message.contains("shadow"));
     let error = parse("piece(0, 0, { length: 1, length: 2 });").unwrap_err();
     assert!(error.message.contains("duplicate object property"));
@@ -192,7 +195,12 @@ fn empty_objects_trailing_commas_and_recursive_blocks() {
     let program = parse("block empty({}: {}): end; empty(0,0,{});").unwrap();
     assert_eq!(map::project(&program).unresolved, 0);
     assert_eq!(parse(&program.to_road_source()).unwrap(), program);
-    let program = parse("road street: carlane; end; block loop({ length, }: { length: number, }): street(0,0,length,0); loop(0,0,{length,}); end; loop(0,0,{length: 2,});").unwrap();
+    let program = parse(
+        "road street: carlane; end; block loop({ length, }: { length: \
+            number, }): street(0,0,length,0); loop(0,0,{length,}); end; \
+            loop(0,0,{length: 2,});",
+    )
+    .unwrap();
     let roads = map::project(&program);
     assert_eq!(roads.segments.len(), 1);
     assert_eq!(roads.unresolved, 1);

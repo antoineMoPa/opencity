@@ -31,31 +31,9 @@ pub struct Bridge {
     socket_path: PathBuf,
 }
 
-fn tool(name: &str, description: &str, properties: Value, required: &[&str]) -> Value {
-    json!({"name":name,"description":description,"inputSchema":{"type":"object","properties":properties,"required":required}})
-}
-
-fn tools() -> Value {
-    json!({"tools":[
-        tool("get_road_state", "Get the current road AST source and projected road segments", json!({}), &[]),
-        tool("check_design_rules", "Check road joins and intersection edge cross sections", json!({}), &[]),
-        tool("get_viewport_image", "Capture the current editor viewport as a PNG image; include_ui captures the entire editor window", json!({"include_ui":{"type":"boolean","default":false}}), &[]),
-        tool("get_viewport", "Get map center and zoom in pixels per world unit", json!({}), &[]),
-        tool("set_viewport", "Set map center and zoom", json!({"center_x":{"type":"number"},"center_y":{"type":"number"},"zoom":{"type":"number"}}), &["center_x","center_y","zoom"]),
-        tool("replace_document", "Replace the editor document with valid OpenCity road source as one undoable edit", json!({"source":{"type":"string"}}), &["source"]),
-        tool("save_document", "Save the current editor document to an absolute .road path", json!({"path":{"type":"string"}}), &["path"]),
-        tool("add_road", "Place a cubic road using an existing road type; optional endpoint references share junctions", json!({"road_type":{"type":"string"},"name":{"type":"string"},"start_ref":{"type":"string"},"end_ref":{"type":"string"},"start_x":{"type":"number"},"start_y":{"type":"number"},"end_x":{"type":"number"},"end_y":{"type":"number"},"control1_x":{"type":"number"},"control1_y":{"type":"number"},"control2_x":{"type":"number"},"control2_y":{"type":"number"}}), &["road_type","start_x","start_y","end_x","end_y"]),
-        tool("get_connection_workspace", "List stable connection IDs, exact points, ports, lane attachments and cached design issues", json!({}), &[]),
-        tool("open_connection_editor", "Compatibility command: focus a connection in the full 3D viewport; no workspace is opened", json!({"connection_id":{"type":"string"},"camera":{"type":"string","enum":["top","isometric","road_level"]}}), &[]),
-        tool("edit_connection", "Atomically edit a local connection. Point edits require segment,x,y; grade requires segment,start_height,end_height; attachment requires reference,lane,t; intersection requires x,y,kind,profile. Shared/anchored references are preserved. Run check_design_rules after edits.", json!({"connection_id":{"type":"string"},"edit":{"type":"string","enum":["start","handle1","handle2","end","grade","attachment","intersection"]},"segment":{"type":"string"},"reference":{"type":"string"},"lane":{"type":"integer","minimum":0},"t":{"type":"number","minimum":0,"maximum":1},"x":{"type":"number"},"y":{"type":"number"},"start_height":{"type":"number"},"end_height":{"type":"number"},"kind":{"type":"string","enum":["right_turn","three_way","four_way"]},"profile":{"type":"string"}}), &["connection_id","edit"]),
-        tool("set_intersection", "Define or remove a square turn or intersection with a fixed edge cross section", json!({"point_ref":{"type":"string"},"kind":{"type":"string","enum":["right_turn","three_way","four_way","none"]},"road_type":{"type":"string"}}), &["point_ref","kind"]),
-        tool("move_road", "Translate a placed road and its connected endpoints", json!({"segment_index":{"type":"integer"},"dx":{"type":"number"},"dy":{"type":"number"}}), &["segment_index","dx","dy"]),
-        tool("move_control_point", "Set the first or second Bézier control point", json!({"segment_index":{"type":"integer"},"control":{"type":"integer","enum":[1,2]},"x":{"type":"number"},"y":{"type":"number"}}), &["segment_index","control","x","y"]),
-        tool("move_endpoint", "Set the start or end point, moving connected road ends too", json!({"segment_index":{"type":"integer"},"end":{"type":"boolean"},"x":{"type":"number"},"y":{"type":"number"}}), &["segment_index","end","x","y"]),
-        tool("undo", "Undo the latest document edit", json!({}), &[]),
-        tool("redo", "Redo the latest undone edit", json!({}), &[])
-    ]})
-}
+#[path = "mcp/tools.rs"]
+mod tools;
+use tools::tools;
 
 impl Bridge {
     #[cfg(unix)]
@@ -207,7 +185,27 @@ pub fn run_stdio() {
         let method = message.get("method").and_then(Value::as_str).unwrap_or("");
         let result = match method {
             "initialize" => {
-                json!({"jsonrpc":"2.0","id":id,"result":{"protocolVersion":"2025-06-18","capabilities":{"tools":{}},"serverInfo":{"name":"opencity-road-editor","version":env!("CARGO_PKG_VERSION")}}})
+                json!({
+                "jsonrpc":"2.0",
+                "id":id,
+                "result":{
+                "protocolVersion":"2025-06-18",
+                "capabilities":{
+                "tools":{
+
+                }
+
+                }
+                ,
+                "serverInfo":{
+                "name":"opencity-road-editor",
+                "version":env!("CARGO_PKG_VERSION")
+                }
+
+                }
+
+                }
+                )
             }
             "ping" => json!({"jsonrpc":"2.0","id":id,"result":{}}),
             "tools/list" => json!({"jsonrpc":"2.0","id":id,"result":tools()}),
@@ -221,12 +219,34 @@ pub fn run_stdio() {
                 match call_socket(name, args) {
                     Ok(value) => json!({"jsonrpc":"2.0","id":id,"result":value}),
                     Err(error) => {
-                        json!({"jsonrpc":"2.0","id":id,"result":{"isError":true,"content":[{"type":"text","text":error}]}})
+                        json!({
+                        "jsonrpc":"2.0",
+                        "id":id,
+                        "result":{
+                        "isError":true,
+                        "content":[{
+                        "type":"text",
+                        "text":error
+                        }
+                        ]
+                        }
+
+                        }
+                        )
                     }
                 }
             }
             _ => {
-                json!({"jsonrpc":"2.0","id":id,"error":{"code":-32601,"message":"Method not found"}})
+                json!({
+                "jsonrpc":"2.0",
+                "id":id,
+                "error":{
+                "code":-32601,
+                "message":"Method not found"
+                }
+
+                }
+                )
             }
         };
         if writeln!(stdout, "{result}").is_err() || stdout.flush().is_err() {
@@ -263,14 +283,25 @@ fn point(args: &Value, x: &str, y: &str) -> Result<WorldPoint, String> {
 
 fn segment_state(segment: &map::Segment) -> Value {
     json!({
-        "segment_index": match segment.source { SegmentSource::TopLevel(index) => Some(index), _ => None },
+        "segment_index": match segment.source {
+             SegmentSource::TopLevel(index) =>
+             Some(index),
+             _ =>
+             None
+            }
+            ,
+
         "name":segment.name,"road_type":segment.road_name,"elevation":segment.elevation,
         "direction":segment.direction.keyword(),
         "permits_forward":segment.permits_travel(true),
         "permits_reverse":segment.permits_travel(false),
         "start_z":segment.start_z,"end_z":segment.end_z,
         "start_ref":segment.start_ref,"end_ref":segment.end_ref,
-        "start":[segment.start.x,segment.start.y],"control1":[segment.controls[0].x,segment.controls[0].y],
+        "start":[segment.start.x,
+            segment.start.y],
+            "control1":[segment.controls[0].x,
+            segment.controls[0].y],
+
         "control2":[segment.controls[1].x,segment.controls[1].y],"end":[segment.end.x,segment.end.y]
     })
 }
@@ -337,8 +368,23 @@ impl RoadEditor {
         if let Some(image) = screenshot {
             if let Some(bridge) = &mut self.mcp {
                 if let Some((reply, include_ui)) = bridge.screenshot.take() {
-                    let result = encode_image(&image, if include_ui { None } else { self.map_rect }, ctx.pixels_per_point())
-                        .map(|data| json!({"content":[{"type":"image","data":data,"mimeType":"image/png"}]}));
+                    let result = encode_image(
+                        &image,
+                        if include_ui { None } else { self.map_rect },
+                        ctx.pixels_per_point(),
+                    )
+                    .map(|data| {
+                        json!({
+                        "content":[{
+                        "type":"image",
+                        "data":data,
+                        "mimeType":"image/png"
+                        }
+                        ]
+                        }
+                        )
+                    });
+
                     match result {
                         Ok(image_result) => {
                             let _ = reply.send(image_result);
@@ -360,10 +406,20 @@ impl RoadEditor {
             "check_design_rules" => {
                 let projection = map::project(&self.program);
                 let profiles = super::paint_profiles(&self.program, &projection);
-                let issues: Vec<_> = super::design_rule_issues(&self.program, &projection, &profiles)
-                    .into_iter()
-                    .map(|issue| json!({"code":issue.code,"message":issue.message,"at":[issue.at.x,issue.at.y],"roads":issue.roads}))
-                    .collect();
+                let issues: Vec<_> =
+                    super::design_rule_issues(&self.program, &projection, &profiles)
+                        .into_iter()
+                        .map(|issue| {
+                            json!({
+                            "code":issue.code,
+                            "message":issue.message,
+                            "at":[issue.at.x,
+                            issue.at.y],
+                            "roads":issue.roads
+                            }
+                            )
+                        })
+                        .collect();
                 Ok(json!({"passed":issues.is_empty(),"issues":issues}))
             }
             "get_road_state" => {
@@ -375,9 +431,20 @@ impl RoadEditor {
                         map::IntersectionKind::RightTurn => "right_turn",
                         map::IntersectionKind::ThreeWay => "three_way",
                         map::IntersectionKind::FourWay => "four_way",
-                    },"road_type":intersection.road_name,"arm_road_types":intersection.arm_roads.iter().map(|(direction, name)| json!({
+
+                        }
+                        ,
+                        "road_type":intersection.road_name,
+                        "arm_road_types":intersection.arm_roads.iter().map(|(direction,
+                         name)| json!({
+
                         "direction":[direction.x,direction.y],"road_type":name
-                    })).collect::<Vec<_>>(),"position":[intersection.position.x,intersection.position.y],
+
+                        }
+                        )).collect::<Vec<_>>(),
+                        "position":[intersection.position.x,
+                        intersection.position.y],
+
                     "ports":intersection.ports.iter().map(|port| json!({
                         "point_ref":port.point_ref,"position":[port.position.x,port.position.y],
                         "direction":[port.direction.x,port.direction.y]
@@ -393,7 +460,10 @@ impl RoadEditor {
                         json!({
                             "kind":feature.kind.call_name(),"name":feature.name,
                             "points":feature.points,"elevation":feature.elevation,
-                            "height":feature.height,"terrain_height":feature.terrain_height,"model":feature.model,
+                            "height":feature.height,
+                                "terrain_height":feature.terrain_height,
+                                "model":feature.model,
+
                             "vegetation_type":feature.vegetation_type
                         })
                     })
@@ -401,10 +471,27 @@ impl RoadEditor {
                 Ok(
                     json!({"source":self.program.to_road_source(),"segments":segments,
                     "intersections":intersections,"landscape":features,
-                    "elevation_map_error":super::elevation_map::load(&self.program,self.path.as_deref().and_then(std::path::Path::parent)).err(),
-                    "elevation_map":opencity::heightmap::ElevationMapSpec::from_program(&self.program).ok().flatten().map(|map|
-                        json!({"path":map.path,"origin":map.origin,"size":map.size,"heights":map.heights,"water_level":map.water_level,"resolution":[1024,1024]})),
-                    "landscape_errors":landscape.errors.iter().map(ToString::to_string).collect::<Vec<_>>(),
+                    "elevation_map_error":super::elevation_map::load(&self.program,
+                        self.path.as_deref().and_then(std::path::Path::parent)).err(),
+
+                    "elevation_map":opencity::heightmap::ElevationMapSpec::from_program(
+                        &self.program)
+                        .ok().flatten().map(|map|
+                        json!({
+                            "path":map.path,
+                            "origin":map.origin,
+                            "size":map.size,
+                            "heights":map.heights,
+                            "water_level":map.water_level,
+                            "resolution":[1024,
+                            1024]
+                            }
+                            )),
+
+                    "landscape_errors":landscape.errors.iter()
+                        .map(ToString::to_string).collect::<Vec<_>>(),
+
+
                     "dirty":self.program != self.saved_program}),
                 )
             }
@@ -833,9 +920,11 @@ mod tests {
 
     #[test]
     fn segment_state_reports_allowed_travel() {
-        let program =
-            opencity::parse("road one_way: carlane; direction forward; end; one_way(0, 0, 1, 0);")
-                .unwrap();
+        let program = opencity::parse(
+            "road one_way: carlane; direction forward; end; one_way(0, 0, 1, \
+                0);",
+        )
+        .unwrap();
         let projection = map::project(&program);
         let state = segment_state(&projection.segments[0]);
         assert_eq!(state["direction"], "forward");

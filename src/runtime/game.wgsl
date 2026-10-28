@@ -10,6 +10,36 @@ struct Output { @builtin(position) clip: vec4<f32>, @location(0) world: vec3<f32
 @vertex fn vs(v: Input) -> Output { var o: Output; o.clip=camera.view_projection*vec4<f32>(v.position,1.0);o.world=v.position;o.normal=v.normal;o.color=v.color;o.surface=v.surface;o.fence_uv=v.surface.yz;return o; }
 fn hash(p:vec2<f32>)->f32 {let q=bitcast<vec2<u32>>(vec2<i32>(p));var h=q.x*374761393u+q.y*668265263u;h=(h^(h>>13u))*1274126177u;return f32(h^(h>>16u))/4294967295.0;}
 fn noise(p:vec2<f32>)->f32 {let i=floor(p);let f=fract(p);let u=f*f*(3.0-2.0*f);return mix(mix(hash(i),hash(i+vec2<f32>(1.0,0.0)),u.x),mix(hash(i+vec2<f32>(0.0,1.0)),hash(i+vec2<f32>(1.0,1.0)),u.x),u.y);}
+fn mortar_color(material:f32)->vec3<f32> {
+    // Explicit linear RGB counterparts of the masonry palette's mortar colors.
+    if material>14.5 {return vec3<f32>(0.2508,0.2758,0.2271);}
+    if material>13.5 {return vec3<f32>(0.4098,0.3993,0.3297);}
+    if material>12.5 {return vec3<f32>(0.5732,0.5114,0.3838);}
+    if material>11.5 {return vec3<f32>(0.4479,0.3838,0.2758);}
+    return vec3<f32>(0.5234,0.4151,0.2888);
+}
+fn mortar_integral(x:f32,gap:f32)->f32 {
+    return floor(x)*gap+min(fract(x),gap);
+}
+fn mortar_coverage(coord:f32,footprint:f32,gap:f32)->f32 {
+    let half_width=max(footprint*0.5,0.001);
+    let covered=mortar_integral(coord+half_width,gap)-mortar_integral(coord-half_width,gap);
+    return clamp(covered/(2.0*half_width),0.0,1.0);
+}
+fn masonry_color(base:vec3<f32>,uv:vec2<f32>,footprint:vec2<f32>,material:f32)->vec3<f32> {
+    let stone=step(14.5,material);
+    let gap=mix(vec2<f32>(1.0/15.0,1.0/6.0),vec2<f32>(1.0/29.0,1.0/14.0),stone);
+    let joints=vec2<f32>(mortar_coverage(uv.x,footprint.x,gap.x),mortar_coverage(uv.y,footprint.y,gap.y));
+    let coverage=1.0-(1.0-joints.x)*(1.0-joints.y);
+    let cell=floor(uv);
+    // Approximate a +/-12 sRGB-code-value clay variation in linear light.
+    let variation=(hash(cell)-0.5)*(24.0/255.0);
+    let clay_sample=max(base+variation*(vec3<f32>(0.35)+base*2.2),vec3<f32>(0.0));
+    let detail=1.0-smoothstep(0.5,2.0,max(footprint.x,footprint.y));
+    let clay=mix(base,clay_sample,detail);
+    // Integrating the joints preserves their average color when bricks become subpixel.
+    return mix(clay,mortar_color(material),coverage);
+}
 // Local panel coordinates keep line patterns attached when a prop rotates as debris.
 fn fence_coverage(uv:vec2<f32>,style:f32,footprint:vec2<f32>)->f32 {
     let p=vec2<f32>(uv.x,uv.y*0.85);
@@ -44,9 +74,11 @@ struct ShadowOutput { @builtin(position) clip:vec4<f32>, @location(0) fence_uv:v
 fn visibility(world:vec3<f32>,n:vec3<f32>)->f32 {
     let clip=camera.light_view_projection*vec4<f32>(world+n*0.00025,1.0);
     let p=clip.xyz/clip.w;let uv=vec2<f32>(p.x*0.5+0.5,0.5-p.y*0.5);
+    // Shadow samples cannot affect surfaces outside the light's clip volume.
+    if !(all(uv>vec2<f32>(0.0))&&all(uv<vec2<f32>(1.0))&&p.z>0.0&&p.z<1.0) {return 1.0;}
     var value=0.0;
     for (var x=-1;x<=1;x++) {for (var y=-1;y<=1;y++) {value+=textureSampleCompareLevel(shadow_map,shadow_sampler,uv+vec2<f32>(f32(x),f32(y))/2048.0,p.z-0.0001);}}
-    return select(1.0,value/9.0,all(uv>vec2<f32>(0.0))&&all(uv<vec2<f32>(1.0))&&p.z>0.0&&p.z<1.0);
+    return value/9.0;
 }
 // Ray exits an open-front box: two side walls, floor, ceiling and back wall.
 // Dimensions are relative to the window height; the ray needs no unit length.
@@ -83,6 +115,13 @@ fn room_interior(uv:vec2<f32>,aspect:f32,seed:f32,n:vec3<f32>,eye:vec3<f32>,occu
     let window_fill=daylight*(0.12+0.65/(1.0+hit.z*hit.z*2.0));
     return albedo*ao*(vec3<f32>(0.018,0.025,0.045)+vec3<f32>(0.65,0.78,1.0)*window_fill+warmth*power*(0.16+lambert/(0.35+lamp_distance*lamp_distance)));
 }
+// Daylight catches the sky on the glass, veiling the room even head-on.
+fn room_glass(interior:vec3<f32>,n:vec3<f32>,view:vec3<f32>,daylight:f32)->vec3<f32> {
+    let grazing=pow(1.0-clamp(dot(n,view),0.0,1.0),5.0);
+    let reflection=mix(0.04,0.58,daylight)+mix(0.65,0.30,daylight)*grazing;
+    let sky=camera.daylight_sky.yzw*mix(0.38,0.62,daylight);
+    return mix(interior,sky,reflection);
+}
 @fragment fn fs(v:Output,@builtin(front_facing) front:bool)->@location(0) vec4<f32> {
     var base=v.color;let p=v.world.xy;let kind=v.surface.x;var facade_glow=0.0;
     var facade_room=vec3<f32>(0.0);var room_mask=0.0;
@@ -94,16 +133,19 @@ fn room_interior(uv:vec2<f32>,aspect:f32,seed:f32,n:vec3<f32>,eye:vec3<f32>,occu
         if !front {n=-n;}
     }
     let detail=1.0-smoothstep(0.4,1.4,max(length(dpdx(p*1600.0)),length(dpdy(p*1600.0))));
-    let grain=mix(0.5,noise(p*1600.0),detail);let broad=noise(p*28.0)*0.65+noise(p*83.0)*0.35;
+    var grain=0.5;var broad=0.0;
+    if kind<2.5 || (kind>=4.5&&kind<5.5) {grain=mix(0.5,noise(p*1600.0),detail);}
+    if kind<1.5 {broad=noise(p*28.0)*0.65+noise(p*83.0)*0.35;}
     let grid=abs(fract(p/0.045)-0.5);let joint=1.0-smoothstep(0.46,0.49,max(grid.x,grid.y));
     let floor_position=(v.world.z-v.surface.y)/max(v.surface.z,0.001);
     let floor_aa=max(fwidth(floor_position),0.001);
     let band=1.0-smoothstep(0.025,0.025+floor_aa,min(fract(floor_position),1.0-fract(floor_position)));
     // Derivatives must be evaluated before material-dependent control flow on WebGPU.
     let brick_across=select(v.world.y,v.world.x,abs(n.y)>abs(n.x));
-    let brick_row=floor_position*45.0;
-    let brick_coord=brick_across/max(v.surface.z*0.07,0.00001)+floor(brick_row)*0.5;
-    let brick_detail=1.0-smoothstep(0.25,0.8,max(fwidth(brick_row),fwidth(brick_coord)));
+    let stone=step(14.5,v.surface.w);
+    let brick_row=floor_position*mix(44.0,18.9,stone);
+    let brick_coord=brick_across/max(v.surface.z*mix(0.058,0.112,stone),0.00001)+floor(brick_row)*0.5;
+    let brick_footprint=max(vec2<f32>(fwidth(brick_coord),fwidth(brick_row)),vec2<f32>(0.0001));
     let roof_unit=max(v.surface.y,0.000001);
     let roof_row=(p.x+p.y)/(roof_unit*0.15);
     let roof_tile=(p.y-p.x)/(roof_unit*0.32)+floor(roof_row)*0.5;
@@ -123,25 +165,16 @@ fn room_interior(uv:vec2<f32>,aspect:f32,seed:f32,n:vec3<f32>,eye:vec3<f32>,occu
         let lit_cell=step(0.45,hash(vec2<f32>(floor(across/0.025),floor(floor_position))));
         facade_glow=window*facing*lit_cell;
         if v.surface.w>10.5 {
-            // Detailed facades supply their own window geometry. Limestone uses
-            // larger courses; the other palettes use staggered brick texture.
-            let is_stone=step(14.5,v.surface.w);
-            let row=mix(brick_row,brick_row*0.45,is_stone);
-            let column=mix(brick_coord,brick_coord*0.45,is_stone);
-            let mortar=max(step(0.93,fract(row)),step(0.96,fract(column)));
-            let variation=0.92+hash(vec2<f32>(floor(column),floor(row)))*0.16;
-            base=mix(base,base*variation*(1.0-mortar*0.28),brick_detail*facing);
+            // Separate mineral-colored mortar and seeded clay tones, with larger stone courses.
+            base=mix(base,masonry_color(base,vec2<f32>(brick_coord,brick_row),brick_footprint,v.surface.w),facing);
             facade_glow=0.0;
         } else if v.surface.w<1.5 {base=mix(base,vec3<f32>(0.045,0.12,0.17),window*facing*0.65);}
         else if v.surface.w>2.5 {
-            // Mortar stays in the shader; no brick or stone is geometry.
-            let mortar=max(step(0.93,fract(brick_row)),step(0.96,fract(brick_coord)));
-            let variation=0.9+hash(vec2<f32>(floor(brick_coord),floor(brick_row)))*0.2;
-            base=mix(base,base*variation*(1.0-mortar*0.35),brick_detail);
+            base=mix(base,masonry_color(base,vec2<f32>(brick_coord,brick_row),brick_footprint,v.surface.w),facing);
         }
         if v.surface.w>1.5 && v.surface.w<10.5 {base=mix(base,vec3<f32>(0.055,0.11,0.14),window*facing*0.65);}
         if v.surface.w<10.5 {base=mix(base,vec3<f32>(0.55,0.58,0.60),band*facing*0.7);}
-        if v.surface.w<10.5 && facing>0.9 {
+        if v.surface.w<10.5 && facing>0.9 && window>0.0 {
             let fraction=fract(across/0.025);
             let axis_sign=select(-n.x,n.y,abs(n.y)>abs(n.x));
             let room_u=select((1.0-fraction)/0.78,(fraction-0.22)/0.78,axis_sign>0.0);
@@ -162,32 +195,35 @@ fn room_interior(uv:vec2<f32>,aspect:f32,seed:f32,n:vec3<f32>,eye:vec3<f32>,occu
         let gap=max(step(0.95,fract(roof_row)),step(0.97,fract(roof_tile)));
         base*=1.0-roof_detail*gap*0.3;
     }
-    let sun=camera.sun_exposure.xyz / length(camera.sun_exposure.xyz);
     let daylight=clamp(camera.daylight_sky.x,0.0,1.0);
-    let diffuse=max(dot(n,sun),0.0)*visibility(v.world,n);let hemi=mix(0.12,0.35,daylight)+mix(0.05,0.15,daylight)*max(n.z,0.0);
     let eye=camera.eye_time.xyz-v.world;let view=eye/max(length(eye),0.001);
-    let halfway=(sun+view)/max(length(sun+view),0.001);
-    var spec=pow(max(dot(n,halfway),0.0),48.0)*0.06;
-    if kind>3.5&&kind<4.5 {spec=pow(max(dot(n,halfway),0.0),120.0)*1.3;}
-    let ambient_tint=mix(vec3<f32>(0.42,0.56,0.85),vec3<f32>(1.0),daylight);
-    let sunlight=mix(vec3<f32>(0.40,0.52,0.80),vec3<f32>(1.0,0.92,0.78),daylight);
-    var lit=base*(ambient_tint*hemi+sunlight*diffuse*mix(0.12,0.95,daylight))+sunlight*spec*mix(0.15,1.0,daylight);
-    let darkness=pow(1.0-daylight,2.0);
-    lit+=vec3<f32>(0.9,0.48,0.18)*facade_glow*darkness;
-    lit=mix(lit,facade_room,room_mask);
-    if kind>7.5&&kind<8.5 {
+    var lit:vec3<f32>;
+    if kind>7.5&&kind<8.5&&v.surface.w>=16.0 {
+        // Detailed panes replace the exterior lighting with their room and glass.
         let lit_window=step(0.05,base.r);
-        if v.surface.w>=16.0 {
-            let seed=floor(v.surface.w/16.0);
-            let aspect=max(v.surface.w-seed*16.0,0.125);
-            let interior=room_interior(v.fence_uv,aspect,seed,n,eye,lit_window);
-            let fresnel=0.04+0.65*pow(1.0-max(dot(n,view),0.0),5.0);
-            lit=mix(interior,camera.daylight_sky.yzw*0.38,fresnel);
-        } else {
-            lit+=vec3<f32>(1.4,0.72,0.27)*darkness*lit_window;
+        let seed=floor(v.surface.w/16.0);
+        let aspect=max(v.surface.w-seed*16.0,0.125);
+        let interior=room_interior(v.fence_uv,aspect,seed,n,eye,lit_window);
+        lit=room_glass(interior,n,view,daylight);
+    } else {
+        let sun=camera.sun_exposure.xyz / length(camera.sun_exposure.xyz);
+        var diffuse=max(dot(n,sun),0.0);
+        if diffuse>0.0 {diffuse*=visibility(v.world,n);}
+        let hemi=mix(0.12,0.35,daylight)+mix(0.05,0.15,daylight)*max(n.z,0.0);
+        let halfway=(sun+view)/max(length(sun+view),0.001);
+        var spec=pow(max(dot(n,halfway),0.0),48.0)*0.06;
+        if kind>3.5&&kind<4.5 {spec=pow(max(dot(n,halfway),0.0),120.0)*1.3;}
+        let ambient_tint=mix(vec3<f32>(0.42,0.56,0.85),vec3<f32>(1.0),daylight);
+        let sunlight=mix(vec3<f32>(0.40,0.52,0.80),vec3<f32>(1.0,0.92,0.78),daylight);
+        lit=base*(ambient_tint*hemi+sunlight*diffuse*mix(0.12,0.95,daylight))+sunlight*spec*mix(0.15,1.0,daylight);
+        let darkness=pow(1.0-daylight,2.0);
+        lit+=vec3<f32>(0.9,0.48,0.18)*facade_glow*darkness;
+        if room_mask>0.0 {lit=mix(lit,room_glass(facade_room,n,view,daylight),room_mask);}
+        if kind>7.5&&kind<8.5 {
+            lit+=vec3<f32>(1.4,0.72,0.27)*darkness*step(0.05,base.r);
+        } else if kind>8.5&&kind<9.5 {
+            lit+=vec3<f32>(1.3,0.85,0.4)*darkness;
         }
-    } else if kind>8.5&&kind<9.5 {
-        lit+=vec3<f32>(1.3,0.85,0.4)*darkness;
     }
     let distance=length(eye);let fog=1.0-exp(-distance*0.025)*(1.0-smoothstep(5.8,7.6,distance));
     // Exposure and filmic compression. Surface target is sRGB.

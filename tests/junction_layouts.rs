@@ -1,14 +1,10 @@
 use opencity::{map, network::ComponentTemplateBody, parse, Argument, Statement};
 
-const TEMPLATE: &str = r#"
-intersection tee({ profile, min, max }: { profile: identifier, min: number, max: number }) {
-    center = map_point(0,0);
-    north = map_point(0,max);
-    east = map_point(max,0);
-    west = map_point(min,0);
-    intersection3(center,profile,north,north,east,east,west,west);
-}
-"#;
+const TEMPLATE: &str = "\nintersection tee({ profile, min, max }: { profile: identifier, \
+    min: number, max: number }) {\n    center = map_point(0,0);\n    \
+    north = map_point(0,max);\n    east = map_point(max,0);\n    west \
+    = map_point(min,0);\n    intersection3(center,profile,north,\
+    north,east,east,west,west);\n}\n";
 fn close(a: f32, b: f32) {
     assert!((a - b).abs() < 1e-5, "{a} != {b}");
 }
@@ -61,7 +57,12 @@ fn default_map_reuses_three_layouts_and_rotates_all_three_way_orientations() {
 
 #[test]
 fn cardinal_rotation_preserves_named_ports_profile_and_world_geometry() {
-    let program=parse(&format!("{TEMPLATE} road street: sidewalk carlane sidewalk; end a=tee(10,20,2,90,{{profile:street,min:-1,max:1}}); road_a=street(a.east,10,22,10,23,a.east);")).unwrap();
+    let program = parse(&format!(
+        "{TEMPLATE} road street: sidewalk carlane sidewalk; end a=tee(10,\
+            20,2,90,{{profile:street,min:-1,max:1}}); road_a=street(a.east,\
+            10,22,10,23,a.east);"
+    ))
+    .unwrap();
     let before = program.clone();
     let projection = map::project(&program);
     assert_eq!(projection.unresolved, 0);
@@ -135,7 +136,11 @@ fn invalid_layouts_and_placements_report_errors() {
         "0,0,{profile:5,min:-1,max:1}",
         "0,0,{profile:street,min:bad,max:1}",
     ] {
-        let program=parse(&format!("{TEMPLATE} road street:carlane;end bad=tee({args}); good=tee(0,0,{{profile:street,min:-1,max:1}});")).unwrap();
+        let program = parse(&format!(
+            "{TEMPLATE} road street:carlane;end bad=tee({args}); good=tee(0,0,\
+                {{profile:street,min:-1,max:1}});"
+        ))
+        .unwrap();
         let projection = map::project(&program);
         assert_eq!(projection.unresolved, 1, "{args}");
         assert_eq!(map::intersections(&program, &projection).len(), 1, "{args}");
@@ -144,7 +149,11 @@ fn invalid_layouts_and_placements_report_errors() {
 
 #[test]
 fn editor_moves_and_rotates_the_instance_while_retaining_its_shared_definition() {
-    let mut program=parse(&format!("{TEMPLATE} road street:carlane;end a=tee(10,20,{{profile:street,min:-1,max:1}}); b=tee(0,0,{{profile:street,min:-1,max:1}});")).unwrap();
+    let mut program = parse(&format!(
+        "{TEMPLATE} road street:carlane;end a=tee(10,20,{{profile:street,\
+            min:-1,max:1}}); b=tee(0,0,{{profile:street,min:-1,max:1}});"
+    ))
+    .unwrap();
     let definition = program.statements[0].clone();
     assert!(map::translate_intersection(
         &mut program,

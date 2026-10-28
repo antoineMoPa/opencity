@@ -39,8 +39,8 @@ fn narrow_barrier_beside_lane_center_is_rejected() {
 #[test]
 fn unrelated_wall_is_reported_instead_of_opened() {
     let program = parse(
-        "road pavement: carlane; end;
-        a = pavement(-1,0,1,0); b = pavement(0,-1,0,1); elevation(a,0.3); elevation(b,0.3);",
+        "road pavement: carlane; end;\n        a = pavement(-1,0,1,0); b = \
+            pavement(0,-1,0,1); elevation(a,0.3); elevation(b,0.3);",
     )
     .unwrap();
     let projection = map::project(&program);
@@ -94,7 +94,11 @@ fn merge_openings_survive_renaming_and_all_quarter_turns() {
 
 #[test]
 fn merge_role_requires_an_explicit_car_lane_attachment() {
-    let program=parse("road connector: carlane; role merge; end; a=map_point(0,0); b=map_point(1,0); c=connector(a,0.3,0,0.7,0,b);").unwrap();
+    let program = parse(
+        "road connector: carlane; role merge; end; a=map_point(0,0); \
+            b=map_point(1,0); c=connector(a,0.3,0,0.7,0,b);",
+    )
+    .unwrap();
     assert!(check_design_rules(&program)
         .iter()
         .any(|i| i.rule == DesignRule::InvalidMergeConnection));

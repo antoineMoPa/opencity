@@ -853,7 +853,11 @@ mod tests {
     }
     #[test]
     fn placement_rows_match_full_compiler_with_parent_profiles() {
-        let mut program = crate::parse("road street: carlane-carlane; end; a=street(-1,0,1,0); grade(a,0.2,0.6); b=street(0,2,1,3); grade(b,0.1,0.3);").unwrap();
+        let mut program = crate::parse(
+            "road street: carlane-carlane; end; a=street(-1,0,1,0); grade(a,\
+                0.2,0.6); b=street(0,2,1,3); grade(b,0.1,0.3);",
+        )
+        .unwrap();
         let projection = map::project(&program);
         let parent = projection.segments[0].source;
         let (reference, start) = map::create_lane_point(&mut program, parent, 0, 0.6).unwrap();
@@ -893,7 +897,11 @@ mod tests {
     }
     #[test]
     fn placement_rows_do_not_subdivide_unrelated_large_curves() {
-        let program = crate::parse("road street: carlane; end; small=street(0,0,1,0); unrelated=street(0,10,1000000,1000000,-1000000,1000000,1,10);").unwrap();
+        let program = crate::parse(
+            "road street: carlane; end; small=street(0,0,1,0); \
+                unrelated=street(0,10,1000000,1000000,-1000000,1000000,1,10);",
+        )
+        .unwrap();
         let projection = map::project(&program);
         let (rows, resolved) =
             RoadGeometry::placement_cross_sections(&program, &projection, 0).unwrap();

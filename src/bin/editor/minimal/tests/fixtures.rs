@@ -3,7 +3,8 @@ use super::*;
 pub(super) fn editor() -> RoadEditor {
     let mut editor = crate::tests::sample_editor();
     editor.program = parse(
-        "road street: carlane; end; road wide: carlane-carlane; end; main=street(-2,0,-1,0,1,0,2,0); other=street(-2,3,2,3);",
+        "road street: carlane; end; road wide: carlane-carlane; end; \
+            main=street(-2,0,-1,0,1,0,2,0); other=street(-2,3,2,3);",
     )
     .unwrap();
     editor.saved_program = editor.program.clone();

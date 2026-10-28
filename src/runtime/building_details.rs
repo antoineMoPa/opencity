@@ -120,6 +120,12 @@ impl Front {
                 self.along[1] * n[0] + self.outward[1] * n[1],
                 n[2],
             ];
+            if vertex.surface[0] == SurfaceKind::Window as u32 as f32
+                && vertex.surface[3] >= 16.
+                && self.along[0] * self.outward[1] - self.along[1] * self.outward[0] < 0.
+            {
+                vertex.surface[1] = 1. - vertex.surface[1];
+            }
         }
     }
 }
@@ -299,8 +305,8 @@ fn window(mesh: &mut Mesh, x: f32, z: f32, w: f32, h: f32, u: f32, trim: [f32; 3
     for vertex in &mut mesh.vertices[pane_start..] {
         vertex.surface = [
             SurfaceKind::Window as u32 as f32,
-            (vertex.position[0] - x) / w,
-            (vertex.position[2] - z) / h,
+            ((vertex.position[0] - x) / w).clamp(0., 1.),
+            ((vertex.position[2] - z) / h).clamp(0., 1.),
             packed_room,
         ];
     }
@@ -708,7 +714,10 @@ fn yard(
     }
     // Split the edge around the central entrance and the stair foot.
     let wall_kind = choose(&cfg.garden_edges, seed).unwrap_or(GardenEdge::Open);
-    for (x, w) in [(u * 0.1, f.width * 0.25), (f.width * 0.65, f.width * 0.33)] {
+    for (x, w) in [
+        (u * 0.1, f.width * 0.29 - u * 0.1),
+        (f.width * 0.61, f.width * 0.38),
+    ] {
         if w <= u * 0.4 {
             continue;
         }
@@ -759,6 +768,45 @@ fn yard(
             GardenEdge::Open => {}
         }
         if object_start < mesh.vertices.len() {
+            ranges.push(object_start..mesh.vertices.len());
+        }
+    }
+    if let Some(pattern) = match wall_kind {
+        GardenEdge::IronFence => Some(FencePattern::IronPickets),
+        GardenEdge::WireFence => Some(FencePattern::ChainLink),
+        _ => None,
+    } {
+        // One divider belongs to each lot; add the far return at the end of a row.
+        let neighbour = f.point(f.width + u * 0.2, -u * 0.5, 0.);
+        let shared_far_side =
+            city.building_collision([neighbour[0], neighbour[1]], u * 0.05, f.base, f.base + u);
+        for x in [u * 0.025, f.width - u * 0.025] {
+            if x > f.width * 0.5 && shared_far_side {
+                continue;
+            }
+            let clear = [u * 0.15, depth * 0.5, depth].into_iter().all(|y| {
+                let sample = f.point(x, y, 0.);
+                !city.building_collision([sample[0], sample[1]], u * 0.04, f.base, f.base + u)
+                    && city
+                        .surface_at([sample[0], sample[1]], f.base + u * 0.3)
+                        .is_none_or(|s| {
+                            s.kind == SurfaceKind::Grass && (s.height - f.base).abs() < u * 0.7
+                        })
+            });
+            if !clear {
+                continue;
+            }
+            let object_start = mesh.vertices.len();
+            fence_plane(
+                mesh,
+                [x, u * 0.1],
+                [x, depth],
+                0.,
+                u * 0.85,
+                u,
+                p.metal,
+                pattern,
+            );
             ranges.push(object_start..mesh.vertices.len());
         }
     }

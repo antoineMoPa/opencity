@@ -3,14 +3,16 @@ use opencity::parse;
 
 #[test]
 fn mixed_intersection_maps_each_arm_to_its_road_profile() {
-    let program = parse("\
-        road arterial: sidewalk-carlane-carlane-sidewalk; end; \
-        road local: sidewalk-carlane-sidewalk; end; \
-        center = map_point(0, 0); west = map_point(-1, 0); east = map_point(1, 0); north = map_point(0, 1); \
-        arterial(west, -0.7, 0, -0.3, 0, center); \
-        arterial(center, 0.3, 0, 0.7, 0, east); \
-        local(center, 0, 0.3, 0, 0.7, north); \
-        intersection3(center, arterial, north, local);").unwrap();
+    let program = parse(
+        "road arterial: sidewalk-carlane-carlane-sidewalk; end; road \
+        local: sidewalk-carlane-sidewalk; end; center = map_point(0, 0); \
+        west = map_point(-1, 0); east = map_point(1, 0); north = \
+        map_point(0, 1); arterial(west, -0.7, 0, -0.3, 0, center); \
+        arterial(center, 0.3, 0, 0.7, 0, east); local(center, 0, 0.3, 0, \
+        0.7, north); intersection3(center, arterial, north, local);",
+    )
+    .unwrap();
+
     let projection = project(&program);
     assert_eq!(projection.unresolved, 0);
     let junction = intersections(&program, &projection).pop().unwrap();
@@ -388,15 +390,13 @@ fn rotating_an_endpoint_preserves_handle_length_and_connected_tangent() {
 #[test]
 fn projected_intersections_refresh_after_translation_rotation_and_restore() {
     let mut program = parse(
-        r#"
-        road street: sidewalk-carlane-sidewalk; end;
-        intersection tee({ profile, min, max }: { profile: identifier, min: number, max: number }) {
-            center=map_point(0,0); north=map_point(0,max);
-            east=map_point(max,0); west=map_point(min,0);
-            intersection3(center,profile,north,north,east,east,west,west);
-        }
-        a=tee(1,2,0,90,{profile:street,min:-0.2,max:0.2});
-    "#,
+        "\n        road street: sidewalk-carlane-sidewalk; end;\n        \
+            intersection tee({ profile, min, max }: { profile: identifier, \
+            min: number, max: number }) {\n            center=map_point(0,0); \
+            north=map_point(0,max);\n            east=map_point(max,0); \
+            west=map_point(min,0);\n            intersection3(center,profile,\
+            north,north,east,east,west,west);\n        }\n        a=tee(1,2,\
+            0,90,{profile:street,min:-0.2,max:0.2});\n    ",
     )
     .unwrap();
     let original = program.clone();

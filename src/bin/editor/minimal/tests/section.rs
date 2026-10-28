@@ -30,7 +30,12 @@ fn cross_section_full_frame_edit_back_and_undo_share_the_document() {
 #[test]
 fn cross_section_selected_profile_rename_reorder_and_remove_preserve_references() {
     let mut editor = editor();
-    editor.program = parse("road lane: sidewalk-carlane-carlane; end; main=lane(0,0,4,0); attach=lane_point(main,2,0.4); end_point=map_point(2,1); branch=lane(attach,1,0,2,0,end_point); road other: carlane; end;").unwrap();
+    editor.program = parse(
+        "road lane: sidewalk-carlane-carlane; end; main=lane(0,0,4,0); \
+            attach=lane_point(main,2,0.4); end_point=map_point(2,1); \
+            branch=lane(attach,1,0,2,0,end_point); road other: carlane; end;",
+    )
+    .unwrap();
     editor.selected_segment = Some(map::project(&editor.program).segments[0].source);
     editor.selected_road = Some(editor.program.statements.len() - 1);
     editor.enter_section_editor();

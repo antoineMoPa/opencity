@@ -37,11 +37,28 @@ pub(crate) fn validate(calls: &[Call]) -> Result<(), String> {
                         "junction layout needs a center, road profile, and side/point pairs".into(),
                     );
                 }
-                let point = |value: &Argument| matches!(value, Argument::Identifier(name) if points.contains(name.as_str()));
+                let point = |value: &Argument| {
+                    matches!(value,
+                     Argument::Identifier(name) if points.contains(name.as_str()))
+                };
+
                 let mut sides = HashSet::new();
-                if !point(&call.args[0]) || !matches!(call.args[1], Argument::Identifier(_)) || !call.args[2..].chunks_exact(2).all(|pair| {
-                    matches!(&pair[0], Argument::Identifier(side) if matches!(side.as_str(), "north" | "east" | "south" | "west") && sides.insert(side)) && point(&pair[1])
-                }) { return Err("junction layout needs local center/port points and distinct cardinal sides".into()); }
+                if !point(&call.args[0])
+                    || !matches!(call.args[1], Argument::Identifier(_))
+                    || !call.args[2..].chunks_exact(2).all(|pair| {
+                        matches!(&pair[0],
+                         Argument::Identifier(side) if matches!(side.as_str(),
+                         "north" | "east" | "south" | "west") &&
+                         sides.insert(side))
+                            && point(&pair[1])
+                    })
+                {
+                    return Err(
+                        "junction layout needs local center/port points and distinct \
+                    cardinal sides"
+                            .into(),
+                    );
+                }
             }
             _ => {
                 return Err(

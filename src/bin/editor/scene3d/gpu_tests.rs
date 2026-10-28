@@ -84,9 +84,10 @@ fn profile_starter_camera_frames() {
     queue.submit([encoder.finish()]);
     let scene_swap = start.elapsed();
     eprintln!(
-            "starter vertices={} scene_build={build:?} cold_frame={cold:?} warm_frame={warm:?} scene_swap={scene_swap:?}",
-            scene.vertices.len(),
-        );
+        "starter vertices={} scene_build={build:?} cold_frame={cold:?} \
+            warm_frame={warm:?} scene_swap={scene_swap:?}",
+        scene.vertices.len(),
+    );
 }
 
 fn block_on<F: Future>(future: F) -> F::Output {
@@ -396,7 +397,8 @@ fn merge_pavement_renders_over_parent_verge_in_top_and_isometric_views() {
                         pixel[0] > 120
                             && (pixel[0] as i32 - pixel[1] as i32).abs() < 12
                             && (pixel[1] as i32 - pixel[2] as i32).abs() < 12,
-                        "merge must show gray pavement, not green verge/dark outline: {pixel:?}"
+                        "merge must show gray pavement, not green verge/dark outline: \
+                            {pixel:?}"
                     );
                 }
             }

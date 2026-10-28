@@ -90,9 +90,16 @@ pub fn set_road_type(program: &mut Program, source: SegmentSource, road_name: &s
         return false;
     };
     if program.statements.iter().any(|statement| match statement {
-        Statement::Call(call) if call.name == "lane_point" =>
-            matches!(call.args.first(), Some(Argument::Identifier(parent)) if parent == &segment_name)
-                && call.args.get(1).and_then(number).is_some_and(|element| element as usize >= element_count),
+        Statement::Call(call) if call.name == "lane_point" => {
+            matches!(call.args.first(),
+                 Some(Argument::Identifier(parent)) if parent == &segment_name)
+                && call
+                    .args
+                    .get(1)
+                    .and_then(number)
+                    .is_some_and(|element| element as usize >= element_count)
+        }
+
         _ => false,
     }) {
         return false;
@@ -336,7 +343,8 @@ pub fn remove(program: &mut Program, source: SegmentSource) -> bool {
                 continue;
             };
             if call.name != "lane_point"
-                || !matches!(call.args.first(), Some(Argument::Identifier(name)) if name == parent_name)
+                || !matches!(call.args.first(),
+                     Some(Argument::Identifier(name)) if name == parent_name)
             {
                 continue;
             }
@@ -376,9 +384,14 @@ pub fn remove(program: &mut Program, source: SegmentSource) -> bool {
         program.statements.retain(|statement| {
             !matches!(statement,
             Statement::Call(call) if (call.name == "lane_split" && call.args.iter().enumerate()
-                .any(|(index, arg)| index != 2 && matches!(arg, Argument::Identifier(road) if road == &name)))
+                .any(|(index,
+                     arg)| index != 2 &&
+                     matches!(arg,
+                     Argument::Identifier(road) if road == &name)))
                 || (matches!(call.name.as_str(), "elevation" | "grade")
-                    && matches!(call.args.first(), Some(Argument::Identifier(road)) if road == &name)))
+                    &&
+                         matches!(call.args.first(),
+                         Some(Argument::Identifier(road)) if road == &name)))
         });
     }
     prune_unused_points(program);
@@ -425,9 +438,14 @@ pub fn prune_unused_points(program: &mut Program) {
 
 pub fn remove_unused_point(program: &mut Program, name: &str) {
     if intersection_port_direction(program, name).is_some()
-        || program.statements.iter().any(|statement| matches!(statement,
+        || program.statements.iter().any(|statement| {
+            matches!(statement,
             Statement::Call(call) if IntersectionKind::from_call_name(&call.name).is_some()
-                && matches!(call.args.first(), Some(Argument::Identifier(center)) if center == name))) {
+                &&
+                     matches!(call.args.first(),
+                     Some(Argument::Identifier(center)) if center == name))
+        })
+    {
         return;
     }
     let used = program.statements.iter().any(|statement| match statement {

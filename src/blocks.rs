@@ -98,9 +98,10 @@ pub(crate) fn bind_placement<'a>(
         }
     };
     if !matches!(placement.len(), 2 | 3 | 4) {
-        return Err(
-                format!("{kind} placement needs x, y, optional elevation and rotation, then its parameter object"),
-            );
+        return Err(format!(
+            "{kind} placement needs x, y, optional elevation and rotation, \
+                then its parameter object"
+        ));
     }
     let x =
         finite_number(&placement[0]).ok_or_else(|| format!("{kind} x must be a finite number"))?;

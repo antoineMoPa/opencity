@@ -5,7 +5,11 @@ use opencity::{BuildingMaterial, BuildingStyle};
 fn building_selection_controls_edit_and_dismiss_in_both_views() {
     for iso in [false, true] {
         let mut editor = editor();
-        editor.program = parse("elevation(0.12); office=building(0.24,{material:glass,floor_height:0.04},-0.5,-0.5,0.5,-0.5,0.5,0.5,-0.5,0.5);").unwrap();
+        editor.program = parse(
+            "elevation(0.12); office=building(0.24,{material:glass,\
+                floor_height:0.04},-0.5,-0.5,0.5,-0.5,0.5,0.5,-0.5,0.5);",
+        )
+        .unwrap();
         editor.saved_program = editor.program.clone();
         editor.selected_segment = None;
         editor.selected_segments.clear();
@@ -117,7 +121,11 @@ fn building_selection_controls_edit_and_dismiss_in_both_views() {
 #[test]
 fn building_properties_preserve_model_footprint_elevation_and_roundtrip_undo() {
     let mut editor = editor();
-    editor.program = parse("elevation(0.12); office=building(0.24,\"office.glb\",-0.5,-0.5,0.5,-0.5,0.5,0.5,-0.5,0.5);").unwrap();
+    editor.program = parse(
+        "elevation(0.12); office=building(0.24,\"office.glb\",-0.5,-0.5,\
+            0.5,-0.5,0.5,0.5,-0.5,0.5);",
+    )
+    .unwrap();
     let before = editor.program.clone();
     let original = project_landscape_features(&before).features.remove(0);
     assert!(editor.edit_building_properties(
@@ -219,7 +227,19 @@ fn isometric_picking_prefers_visible_building_over_roof_hidden_behind_it() {
     let t = -1.5 * editor.orbit_elevation.cos() / editor.orbit_elevation.sin();
     let x = t * editor.orbit_angle.sin();
     let y = -t * editor.orbit_angle.cos();
-    editor.program = parse(&format!("front=building(2,-0.5,-0.5,0.5,-0.5,0.5,0.5,-0.5,0.5); back=building(0.5,{},{},{},{},{},{},{},{});",x-0.4,y-0.4,x+0.4,y-0.4,x+0.4,y+0.4,x-0.4,y+0.4)).unwrap();
+    editor.program = parse(&format!(
+        "front=building(2,-0.5,-0.5,0.5,-0.5,0.5,0.5,-0.5,0.5); \
+            back=building(0.5,{},{},{},{},{},{},{},{});",
+        x - 0.4,
+        y - 0.4,
+        x + 0.4,
+        y - 0.4,
+        x + 0.4,
+        y + 0.4,
+        x - 0.4,
+        y + 0.4
+    ))
+    .unwrap();
     let roof = editor.spatial_screen(rect, WorldPoint { x: 0.0, y: 0.0 }, 2.0, true);
     assert_eq!(
         editor.building_at(rect, roof, true).as_deref(),

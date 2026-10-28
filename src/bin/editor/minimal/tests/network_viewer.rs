@@ -1,5 +1,8 @@
 use super::*;
-const SOURCE:&str="intersection junction { port A.in at (-1,0) heading east; port B.out at (1,0) heading east; path through { from A.in; line to B.out; } allow vehicle A.in -> B.out via through; surface pavement along through width 0.4; } cross=junction(0,0);";
+const SOURCE: &str = "intersection junction { port A.in at (-1,0) heading east; port \
+    B.out at (1,0) heading east; path through { from A.in; line to \
+    B.out; } allow vehicle A.in -> B.out via through; surface \
+    pavement along through width 0.4; } cross=junction(0,0);";
 
 #[test]
 fn map_click_opens_read_only_viewer_and_back_restores_both_map_views() {

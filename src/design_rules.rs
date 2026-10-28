@@ -95,16 +95,33 @@ pub fn check_design_rules_with_projection(
         }
         if road.role == crate::RoadRole::Merge {
             let paved = crate::road_profiles::merge_profile_is_paved(road);
-            let lane_attachment = [segment.start_ref.as_deref(),segment.end_ref.as_deref()].into_iter().flatten().any(|reference| {
-        let Some((parent,lane,_))=map::lane_attachment(program,reference) else{return false;};
-        let Some(parent)=projection.segments.iter().find(|s|s.name.as_deref()==Some(&parent)) else{return false;};
-        program.statements.iter().any(|s|matches!(s,Statement::Road(r) if r.name==parent.road_name && r.elements.get(lane).is_some_and(|e|e.kind==RoadElementKind::CarLane)))
-    });
+            let lane_attachment = [segment.start_ref.as_deref(), segment.end_ref.as_deref()]
+                .into_iter()
+                .flatten()
+                .any(|reference| {
+                    let Some((parent, lane, _)) = map::lane_attachment(program, reference) else {
+                        return false;
+                    };
+                    let Some(parent) = projection
+                        .segments
+                        .iter()
+                        .find(|s| s.name.as_deref() == Some(&parent))
+                    else {
+                        return false;
+                    };
+
+                    program.statements.iter().any(|s| {
+                        matches!(s,
+            Statement::Road(r) if r.name==parent.road_name &&
+             r.elements.get(lane).is_some_and(|e|e.kind==RoadElementKind::CarLane))
+                    })
+                });
             if !paved || !lane_attachment {
                 issues.push(DesignIssue {
                     rule: DesignRule::InvalidMergeConnection,
                     message: format!(
-                        "{} needs a paved merge profile and an explicit attachment to a car lane",
+                        "{} needs a paved merge profile and an explicit attachment to a \
+                            car lane",
                         segment_name(segment)
                     ),
                     at: segment.start,
@@ -156,7 +173,8 @@ pub fn check_design_rules_with_projection(
                 issues.push(DesignIssue {
                     rule: DesignRule::RampAtGradeCrossing,
                     message: format!(
-                        "{ramp_name} crosses {other_name} at the same height without a junction"
+                        "{ramp_name} crosses {other_name} at the same height without a \
+                            junction"
                     ),
                     at,
                     roads: [ramp_name.to_owned(), other_name.to_owned()],
@@ -336,7 +354,8 @@ pub fn check_vehicle_lane_continuity(
                     issues.push(DesignIssue {
                         rule: DesignRule::VehicleLaneDiscontinuity,
                         message: format!(
-                            "{} car lane does not meet {} lane {} at the same position and height",
+                            "{} car lane does not meet {} lane {} at the same position and \
+                                height",
                             segment_name(segment),
                             parent_name,
                             lane_index
@@ -768,15 +787,22 @@ mod tests {
 
     #[test]
     fn connected_ramp_passes_from_road_source() {
-        let source = "road ramp: verge-carlane-verge;
-    role ramp; end; road street: carlane; end; a = map_point(0, 0); b = map_point(1, 0); c = map_point(2, 0); d = map_point(3, 0); street(a, 0.3, 0, 0.7, 0, b); exit = ramp(b, 1.3, 0, 1.7, 0, c); street(c, 2.3, 0, 2.7, 0, d);";
+        let source = "road ramp: verge-carlane-verge;\n    role ramp; end; road street: \
+            carlane; end; a = map_point(0, 0); b = map_point(1, 0); c = \
+            map_point(2, 0); d = map_point(3, 0); street(a, 0.3, 0, 0.7, 0, \
+            b); exit = ramp(b, 1.3, 0, 1.7, 0, c); street(c, 2.3, 0, 2.7, 0, \
+            d);";
+
         assert!(check_design_rules(&parse(source).unwrap()).is_empty());
     }
 
     #[test]
     fn disconnected_ramp_end_is_reported_from_road_source() {
-        let source = "road ramp: verge-carlane-verge;
-    role ramp; end; road street: carlane; end; a = map_point(0, 0); b = map_point(1, 0); near = map_point(1.02, 0); c = map_point(2, 0); exit = ramp(a, 0.3, 0, 0.7, 0, b); street(near, 1.3, 0, 1.7, 0, c);";
+        let source = "road ramp: verge-carlane-verge;\n    role ramp; end; road street: \
+            carlane; end; a = map_point(0, 0); b = map_point(1, 0); near = \
+            map_point(1.02, 0); c = map_point(2, 0); exit = ramp(a, 0.3, 0, \
+            0.7, 0, b); street(near, 1.3, 0, 1.7, 0, c);";
+
         let issues = check_design_rules(&parse(source).unwrap());
         assert!(issues
             .iter()
@@ -786,8 +812,11 @@ mod tests {
 
     #[test]
     fn same_grade_crossing_requires_height_or_junction() {
-        let source = "road ramp: verge-carlane-verge;
-    role ramp; end; road street: carlane; end; a = map_point(-2, 0); b = map_point(2, 0); c = map_point(0, -2); d = map_point(0, 2); exit = ramp(a, -0.7, 0, 0.7, 0, b); street(c, 0, -0.7, 0, 0.7, d);";
+        let source = "road ramp: verge-carlane-verge;\n    role ramp; end; road street: \
+            carlane; end; a = map_point(-2, 0); b = map_point(2, 0); c = \
+            map_point(0, -2); d = map_point(0, 2); exit = ramp(a, -0.7, 0, \
+            0.7, 0, b); street(c, 0, -0.7, 0, 0.7, d);";
+
         let issues = check_design_rules(&parse(source).unwrap());
         assert!(issues
             .iter()
@@ -800,8 +829,10 @@ mod tests {
 
     #[test]
     fn shared_endpoint_does_not_hide_a_crossing_farther_along() {
-        let source = "road ramp: verge-carlane-verge;
-    role ramp; end; road street: carlane; end; a = map_point(0, 0); b = map_point(4, 0); exit = ramp(a, 1, 2, 3, 2, b); street(a, 1, -2, 3, 4, b);";
+        let source = "road ramp: verge-carlane-verge;\n    role ramp; end; road street: \
+            carlane; end; a = map_point(0, 0); b = map_point(4, 0); exit = \
+            ramp(a, 1, 2, 3, 2, b); street(a, 1, -2, 3, 4, b);";
+
         let issues = check_design_rules(&parse(source).unwrap());
         assert!(issues
             .iter()
@@ -810,7 +841,10 @@ mod tests {
 
     #[test]
     fn car_lane_height_step_is_reported() {
-        let source = "road street: carlane; direction forward; end; a = map_point(0, 0); seam = map_point(1, 0); b = map_point(2, 0); first = street(a, 0.3, 0, 0.7, 0, seam); second = street(seam, 1.3, 0, 1.7, 0, b); elevation(second, 0.2);";
+        let source = "road street: carlane; direction forward; end; a = map_point(0, \
+            0); seam = map_point(1, 0); b = map_point(2, 0); first = \
+            street(a, 0.3, 0, 0.7, 0, seam); second = street(seam, 1.3, 0, \
+            1.7, 0, b); elevation(second, 0.2);";
         let issues = check_design_rules(&parse(source).unwrap());
         assert!(issues
             .iter()
@@ -820,7 +854,10 @@ mod tests {
 
     #[test]
     fn oncoming_car_lane_seam_is_reported() {
-        let source = "road street: carlane; direction forward; end; a = map_point(0, 0); seam = map_point(1, 0); b = map_point(2, 0); first = street(a, 0.3, 0, 0.7, 0, seam); second = street(b, 1.7, 0, 1.3, 0, seam);";
+        let source = "road street: carlane; direction forward; end; a = map_point(0, \
+            0); seam = map_point(1, 0); b = map_point(2, 0); first = \
+            street(a, 0.3, 0, 0.7, 0, seam); second = street(b, 1.7, 0, 1.3, \
+            0, seam);";
         let issues = check_design_rules(&parse(source).unwrap());
         assert!(issues
             .iter()
@@ -829,8 +866,12 @@ mod tests {
 
     #[test]
     fn car_path_through_sidewalk_is_reported() {
-        let source = "road street: sidewalk-carlane-sidewalk; end; road crossing_ramp: carlane; direction forward;
-    role ramp; end; a = map_point(-1, 0); b = map_point(1, 0); c = map_point(0, -1); d = map_point(0, 1); street(a, -0.5, 0, 0.5, 0, b); crossing_ramp(c, 0, -0.5, 0, 0.5, d);";
+        let source = "road street: sidewalk-carlane-sidewalk; end; road crossing_ramp: \
+            carlane; direction forward;\n    role ramp; end; a = \
+            map_point(-1, 0); b = map_point(1, 0); c = map_point(0, -1); d = \
+            map_point(0, 1); street(a, -0.5, 0, 0.5, 0, b); crossing_ramp(c, \
+            0, -0.5, 0, 0.5, d);";
+
         let issues = check_design_rules(&parse(source).unwrap());
         assert!(issues
             .iter()

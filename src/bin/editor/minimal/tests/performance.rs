@@ -148,10 +148,14 @@ fn default_map_first_click_menus_reuse_document_geometry() {
     }
     #[cfg(not(target_arch = "wasm32"))]
     {
-        editor.launch_action = Ok(Some(crate::external_launch::LaunchAction::parse(
-            r#"{"label":"Inspect here","program":"never-run-during-menu-test","args":["{map}","{x},{y}"]}"#,
-            std::env::temp_dir(),
-        ).unwrap()));
+        editor.launch_action = Ok(Some(
+            crate::external_launch::LaunchAction::parse(
+                "{\"label\":\"Inspect here\",\"program\":\"never-run-during-menu-t\
+                    est\",\"args\":[\"{map}\",\"{x},{y}\"]}",
+                std::env::temp_dir(),
+            )
+            .unwrap(),
+        ));
     }
     editor.camera_view = CameraView::Top;
     focus(&mut editor, segment.start);

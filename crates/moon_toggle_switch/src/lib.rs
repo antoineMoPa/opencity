@@ -21,7 +21,7 @@
 //! # });
 //! ```
 
-use egui::{Color32, CornerRadius, FontId, Galley, Rect, Response, Sense, Ui, Vec2, pos2, vec2};
+use egui::{pos2, vec2, Color32, CornerRadius, FontId, Galley, Rect, Response, Sense, Ui, Vec2};
 use std::sync::Arc;
 
 /// The colours and lettering of a switch.
@@ -180,7 +180,7 @@ fn half_response(ui: &mut Ui, rect: Rect, word: &str) -> Response {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use egui_kittest::{Harness, kittest::Queryable as _};
+    use egui_kittest::{kittest::Queryable as _, Harness};
     use std::sync::{Arc, Mutex};
 
     #[derive(Clone, Copy, PartialEq, Debug)]

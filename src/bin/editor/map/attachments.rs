@@ -72,9 +72,11 @@ pub(super) fn element_direction(
 }
 
 pub fn anchored_reference(program: &Program, name: &str) -> bool {
-    program.statements.iter().any(|statement| matches!(statement,
-        Statement::Call(call) if call.name == "lane_point" && call.assigns.first().is_some_and(|assigned| assigned == name)))
-        || intersection_port_direction(program, name).is_some()
+    program.statements.iter().any(|statement| {
+        matches!(statement,
+        Statement::Call(call) if call.name == "lane_point" &&
+             call.assigns.first().is_some_and(|assigned| assigned == name))
+    }) || intersection_port_direction(program, name).is_some()
 }
 
 pub fn lane_attachment(program: &Program, name: &str) -> Option<(String, usize, f32)> {
@@ -415,9 +417,12 @@ pub fn update_lane_attachments(
             })
             .filter_map(|segment| segment.name.as_deref())
             .collect();
-        program.statements.retain(|statement| !matches!(statement,
+        program.statements.retain(|statement| {
+            !matches!(statement,
             Statement::Call(call) if call.name == "lane_split" &&
-                matches!(call.args.get(1), Some(Argument::Identifier(ramp)) if detached_ramps.contains(ramp.as_str()))));
+                matches!(call.args.get(1),
+                     Some(Argument::Identifier(ramp)) if detached_ramps.contains(ramp.as_str())))
+        });
     }
 }
 

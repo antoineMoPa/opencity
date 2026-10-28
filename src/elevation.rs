@@ -115,7 +115,9 @@ pub fn set_elevation(program: &mut Program, name: &str, height: f32) -> bool {
     }
     let value = Argument::Number(format!("{height:.4}"));
     if let Some(Statement::Call(call)) = program.statements.iter_mut().rev().find(|statement| {
-        matches!(statement, Statement::Call(call) if call.name == "elevation" && call.args.len() == 2
+        matches!(statement,
+             Statement::Call(call) if call.name == "elevation" &&
+             call.args.len() == 2
             && matches!(call.args.first(), Some(Argument::Identifier(target)) if target == name))
     }) {
         call.args[1] = value;

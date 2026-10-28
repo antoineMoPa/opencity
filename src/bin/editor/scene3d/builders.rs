@@ -81,10 +81,16 @@ pub fn build_scene_with_model_base(
     }
     #[cfg(test)]
     if std::env::var_os("OPENCITY_SCENE_PROFILE").is_some() {
-        eprintln!("scene parts: terrain={} vertices/{:?}, roads={} vertices/{:?}, intersections={} vertices/{:?}",
-            before_roads, landscape_time,
-            before_intersections - before_roads, roads_time - landscape_time,
-            scene.vertices.len() - before_intersections, started.elapsed() - roads_time);
+        eprintln!(
+            "scene parts: terrain={} vertices/{:?}, roads={} vertices/{:?}, \
+                intersections={} vertices/{:?}",
+            before_roads,
+            landscape_time,
+            before_intersections - before_roads,
+            roads_time - landscape_time,
+            scene.vertices.len() - before_intersections,
+            started.elapsed() - roads_time
+        );
     }
     // Convert vertices while the scene builder still runs on its worker thread.
     scene.gpu_vertices();

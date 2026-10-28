@@ -134,7 +134,14 @@ fn forest_and_concrete_ground_cover_show_above_png_terrain_below_roads() {
         ),
     ] {
         let mut program = fixture.program();
-        program.statements.extend(parse(&format!("{declaration} elevation(cover,1.022); route=street(-1,0.35,1,0.35); elevation(route,1.005);")).unwrap().statements);
+        program.statements.extend(
+            parse(&format!(
+                "{declaration} elevation(cover,1.022); route=street(-1,0.35,1,\
+                    0.35); elevation(route,1.005);"
+            ))
+            .unwrap()
+            .statements,
+        );
         let scene = Arc::new(build_scene_with_model_base(
             &program,
             &map::project(&program),

@@ -109,17 +109,44 @@ pub fn export(program: &Program) -> String {
     let pixel_width = (view_width * 90.0).clamp(640.0, 4096.0).round();
     let pixel_height = (pixel_width * view_height / view_width).round();
     let mut svg = String::new();
-    writeln!(svg, "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"{pixel_width:.0}\" height=\"{pixel_height:.0}\" viewBox=\"{x:.4} {y:.4} {view_width:.4} {view_height:.4}\" role=\"img\" aria-label=\"Annotated OpenCity map\">").unwrap();
+    writeln!(
+        svg,
+        "<svg xmlns=\"http://www.w3.org/2000/svg\" \
+            width=\"{pixel_width:.0}\" height=\"{pixel_height:.0}\" \
+            viewBox=\"{x:.4} {y:.4} {view_width:.4} {view_height:.4}\" \
+            role=\"img\" aria-label=\"Annotated OpenCity map\">"
+    )
+    .unwrap();
     writeln!(svg, "<title>OpenCity annotated map</title>").unwrap();
-    writeln!(svg, "<desc>World coordinates use positive X east and positive Y north. SVG geometry maps world Y to negative SVG Y so north appears upward. Road paths run from their start point to end point; direction attributes indicate permitted travel.</desc>").unwrap();
-    writeln!(svg, "<rect x=\"{x:.4}\" y=\"{y:.4}\" width=\"{view_width:.4}\" height=\"{view_height:.4}\" fill=\"#75b7c8\" data-kind=\"water-background\"/>").unwrap();
+    writeln!(
+        svg,
+        "<desc>World coordinates use positive X east and positive Y north. \
+            SVG geometry maps world Y to negative SVG Y so north appears \
+            upward. Road paths run from their start point to end point; \
+            direction attributes indicate permitted travel.</desc>"
+    )
+    .unwrap();
+    writeln!(
+        svg,
+        "<rect x=\"{x:.4}\" y=\"{y:.4}\" width=\"{view_width:.4}\" \
+            height=\"{view_height:.4}\" fill=\"#75b7c8\" \
+            data-kind=\"water-background\"/>"
+    )
+    .unwrap();
 
     writeln!(svg, "<g id=\"landscape\">").unwrap();
     for (index, feature) in landscape.features.iter().enumerate() {
         let (fill, stroke) = area_style(feature.kind);
         let kind = feature.kind.call_name();
         let name = feature.name.as_deref().unwrap_or("");
-        write!(svg, "<g id=\"feature-{index}\" data-kind=\"{kind}\" data-name=\"{}\" data-elevation=\"{:.4}\"", xml_text(name), feature.elevation).unwrap();
+        write!(
+            svg,
+            "<g id=\"feature-{index}\" data-kind=\"{kind}\" data-name=\"{}\" \
+                data-elevation=\"{:.4}\"",
+            xml_text(name),
+            feature.elevation
+        )
+        .unwrap();
         if let Some(height) = feature.height {
             write!(svg, " data-height=\"{height:.4}\"").unwrap();
         }
@@ -143,16 +170,38 @@ pub fn export(program: &Program) -> String {
             .map(|point| format!("{:.4},{:.4}", point[0], svg_y(point[1])))
             .collect();
         if feature.kind == LandscapeKind::River {
-            writeln!(svg, "<polyline points=\"{}\" fill=\"none\" stroke=\"{stroke}\" stroke-width=\"0.14\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/>", points.join(" ")).unwrap();
+            writeln!(
+                svg,
+                "<polyline points=\"{}\" fill=\"none\" stroke=\"{stroke}\" \
+                    stroke-width=\"0.14\" stroke-linecap=\"round\" \
+                    stroke-linejoin=\"round\"/>",
+                points.join(" ")
+            )
+            .unwrap();
         } else {
-            writeln!(svg, "<polygon points=\"{}\" fill=\"{fill}\" stroke=\"{stroke}\" stroke-width=\"0.012\" stroke-linejoin=\"round\"/>", points.join(" ")).unwrap();
+            writeln!(
+                svg,
+                "<polygon points=\"{}\" fill=\"{fill}\" stroke=\"{stroke}\" \
+                    stroke-width=\"0.012\" stroke-linejoin=\"round\"/>",
+                points.join(" ")
+            )
+            .unwrap();
         }
         if !name.is_empty() && feature.kind != LandscapeKind::Building {
             let center = feature.points.iter().fold([0.0, 0.0], |sum, point| {
                 [sum[0] + point[0], sum[1] + point[1]]
             });
             let count = feature.points.len() as f32;
-            writeln!(svg, "<text x=\"{:.4}\" y=\"{:.4}\" text-anchor=\"middle\" font-family=\"sans-serif\" font-size=\"0.11\" fill=\"#273b3b\">{}</text>", center[0] / count, svg_y(center[1] / count), xml_text(name)).unwrap();
+            writeln!(
+                svg,
+                "<text x=\"{:.4}\" y=\"{:.4}\" text-anchor=\"middle\" \
+                    font-family=\"sans-serif\" font-size=\"0.11\" \
+                    fill=\"#273b3b\">{}</text>",
+                center[0] / count,
+                svg_y(center[1] / count),
+                xml_text(name)
+            )
+            .unwrap();
         }
         writeln!(svg, "</g>").unwrap();
     }
@@ -181,7 +230,21 @@ pub fn export(program: &Program) -> String {
             segment.end.x,
             svg_y(segment.end.y)
         );
-        writeln!(svg, "<g id=\"road-{index}\" data-kind=\"road\" data-name=\"{}\" data-road-type=\"{}\" data-direction=\"{}\" data-start-ref=\"{}\" data-end-ref=\"{}\" data-start-z=\"{:.4}\" data-end-z=\"{:.4}\" data-width=\"{road_width:.4}\">", xml_text(name), xml_text(&segment.road_name), segment.direction.keyword(), xml_text(segment.start_ref.as_deref().unwrap_or("")), xml_text(segment.end_ref.as_deref().unwrap_or("")), segment.start_z, segment.end_z).unwrap();
+        writeln!(
+            svg,
+            "<g id=\"road-{index}\" data-kind=\"road\" data-name=\"{}\" \
+                data-road-type=\"{}\" data-direction=\"{}\" data-start-ref=\"{}\" \
+                data-end-ref=\"{}\" data-start-z=\"{:.4}\" data-end-z=\"{:.4}\" \
+                data-width=\"{road_width:.4}\">",
+            xml_text(name),
+            xml_text(&segment.road_name),
+            segment.direction.keyword(),
+            xml_text(segment.start_ref.as_deref().unwrap_or("")),
+            xml_text(segment.end_ref.as_deref().unwrap_or("")),
+            segment.start_z,
+            segment.end_z
+        )
+        .unwrap();
         writeln!(
             svg,
             "<title>{}: {} ({})</title>",
@@ -190,8 +253,18 @@ pub fn export(program: &Program) -> String {
             segment.direction.keyword()
         )
         .unwrap();
-        writeln!(svg, "<path d=\"{path}\" fill=\"none\" stroke=\"#45535a\" stroke-width=\"{road_width:.4}\" stroke-linecap=\"round\"/>").unwrap();
-        writeln!(svg, "<path d=\"{path}\" fill=\"none\" stroke=\"#d8d4bd\" stroke-width=\"0.012\" stroke-dasharray=\"0.08 0.06\"/>").unwrap();
+        writeln!(
+            svg,
+            "<path d=\"{path}\" fill=\"none\" stroke=\"#45535a\" \
+                stroke-width=\"{road_width:.4}\" stroke-linecap=\"round\"/>"
+        )
+        .unwrap();
+        writeln!(
+            svg,
+            "<path d=\"{path}\" fill=\"none\" stroke=\"#d8d4bd\" \
+                stroke-width=\"0.012\" stroke-dasharray=\"0.08 0.06\"/>"
+        )
+        .unwrap();
         let midpoint = segment.point_at(0.5);
         let tangent = segment.tangent_at(0.5);
         let tangent_length = (tangent.x * tangent.x + tangent.y * tangent.y).sqrt();
@@ -217,11 +290,37 @@ pub fn export(program: &Program) -> String {
                 };
                 let px = midpoint.x - dy * offset / 0.095;
                 let py = svg_y(midpoint.y) + dx * offset / 0.095;
-                writeln!(svg, "<path d=\"M {:.4} {:.4} L {:.4} {:.4} M {:.4} {:.4} L {:.4} {:.4} L {:.4} {:.4}\" fill=\"none\" stroke=\"#f6e9b5\" stroke-width=\"0.018\" stroke-linecap=\"round\"/>", px - dx * direction, py - dy * direction, px + dx * direction, py + dy * direction, px + dx * direction, py + dy * direction, px - dx * direction * 0.1 - dy * 0.38, py - dy * direction * 0.1 + dx * 0.38, px - dx * direction * 0.1 + dy * 0.38, py - dy * direction * 0.1 - dx * 0.38).unwrap();
+                writeln!(
+                    svg,
+                    "<path d=\"M {:.4} {:.4} L {:.4} {:.4} M {:.4} {:.4} L {:.4} {:.4} \
+                        L {:.4} {:.4}\" fill=\"none\" stroke=\"#f6e9b5\" \
+                        stroke-width=\"0.018\" stroke-linecap=\"round\"/>",
+                    px - dx * direction,
+                    py - dy * direction,
+                    px + dx * direction,
+                    py + dy * direction,
+                    px + dx * direction,
+                    py + dy * direction,
+                    px - dx * direction * 0.1 - dy * 0.38,
+                    py - dy * direction * 0.1 + dx * 0.38,
+                    px - dx * direction * 0.1 + dy * 0.38,
+                    py - dy * direction * 0.1 - dx * 0.38
+                )
+                .unwrap();
             }
         }
         if !name.is_empty() {
-            writeln!(svg, "<text x=\"{:.4}\" y=\"{:.4}\" text-anchor=\"middle\" font-family=\"sans-serif\" font-size=\"0.10\" fill=\"#152d35\" paint-order=\"stroke\" stroke=\"#eae9db\" stroke-width=\"0.025\">{}</text>", midpoint.x, svg_y(midpoint.y) - road_width * 0.7, xml_text(name)).unwrap();
+            writeln!(
+                svg,
+                "<text x=\"{:.4}\" y=\"{:.4}\" text-anchor=\"middle\" \
+                    font-family=\"sans-serif\" font-size=\"0.10\" fill=\"#152d35\" \
+                    paint-order=\"stroke\" stroke=\"#eae9db\" \
+                    stroke-width=\"0.025\">{}</text>",
+                midpoint.x,
+                svg_y(midpoint.y) - road_width * 0.7,
+                xml_text(name)
+            )
+            .unwrap();
         }
         writeln!(svg, "</g>").unwrap();
     }
@@ -236,11 +335,20 @@ mod tests {
 
     #[test]
     fn export_contains_projected_geometry_and_inspectable_annotations() {
-        let program = parse("road one: carlane; direction reverse; end; a = map_point(0, 0); b = map_point(2, 0); route = one(a, 0.6, 0, 1.4, 0, b); shore = beach(-1, -1, 3, -1, 3, 1, -1, 1); house = building(0.4, \"models/a&b.glb\", 0, 0, 1, 0, 1, 1);").unwrap();
+        let program = parse(
+            "road one: carlane; direction reverse; end; a = map_point(0, 0); b \
+                = map_point(2, 0); route = one(a, 0.6, 0, 1.4, 0, b); shore = \
+                beach(-1, -1, 3, -1, 3, 1, -1, 1); house = building(0.4, \
+                \"models/a&b.glb\", 0, 0, 1, 0, 1, 1);",
+        )
+        .unwrap();
         let svg = export(&program);
         assert!(svg.starts_with("<svg xmlns=\"http://www.w3.org/2000/svg\""));
         assert!(svg.contains("data-kind=\"beach\" data-name=\"shore\""));
-        assert!(svg.contains("data-kind=\"road\" data-name=\"route\" data-road-type=\"one\" data-direction=\"reverse\""));
+        assert!(svg.contains(
+            "data-kind=\"road\" data-name=\"route\" data-road-type=\"one\" \
+                data-direction=\"reverse\""
+        ));
         assert!(svg.contains("data-start-ref=\"a\" data-end-ref=\"b\""));
         assert!(svg.contains("data-model=\"models/a&amp;b.glb\""));
         assert!(svg.contains("<path d=\"M 0.0000 0.0000 C"));
@@ -253,11 +361,18 @@ mod tests {
 
     #[test]
     fn positive_world_y_is_drawn_above_negative_world_y_with_upright_labels() {
-        let program = parse("road street: carlane; direction forward; end; south = map_point(0, -1); north = map_point(0, 1); climb = street(south, 0, -0.5, 0, 0.5, north); upper = land(-1, 2, 1, 2, 0, 3);").unwrap();
+        let program = parse(
+            "road street: carlane; direction forward; end; south = \
+                map_point(0, -1); north = map_point(0, 1); climb = street(south, \
+                0, -0.5, 0, 0.5, north); upper = land(-1, 2, 1, 2, 0, 3);",
+        )
+        .unwrap();
         let svg = export(&program);
         assert!(svg.contains("points=\"-1.0000,-2.0000 1.0000,-2.0000 0.0000,-3.0000\""));
-        assert!(svg
-            .contains("<path d=\"M 0.0000 1.0000 C 0.0000 0.5000 0.0000 -0.5000 0.0000 -1.0000\""));
+        assert!(svg.contains(
+            "<path d=\"M 0.0000 1.0000 C 0.0000 0.5000 0.0000 -0.5000 0.0000 \
+                -1.0000\""
+        ));
         assert!(svg.contains("<text x=\"0.0000\" y=\"-0.0315\""));
         assert!(!svg.contains("transform=\"scale(1 -1)\""));
     }

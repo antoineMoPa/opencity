@@ -220,7 +220,11 @@ fn tees_share_four_way_curves_and_match_every_approach_band() {
     for missing in 0..4 {
         for mixed in [false, true] {
             for reverse in [false, true] {
-                let mut source = String::from("road street: sidewalk carlane middle carlane sidewalk; end road wide: buildingedge sidewalk parkinglane carlane buslane middle carlane bikelane sidewalk; end c=map_point(0,0);");
+                let mut source = String::from(
+                    "road street: sidewalk carlane middle carlane sidewalk; end road \
+                        wide: buildingedge sidewalk parkinglane carlane buslane middle \
+                        carlane bikelane sidewalk; end c=map_point(0,0);",
+                );
                 let mut ports = String::new();
                 for (index, (side, x, y)) in sides.iter().enumerate() {
                     if index == missing {

@@ -10,7 +10,11 @@ impl City {
         let width = (right - x).max(0.001);
         let height = (top - y).max(0.001);
         let mut svg = format!(
-            r##"<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="{}" viewBox="{x} {y} {width} {height}"><title>OpenCity navigation map</title><rect x="{x}" y="{y}" width="{width}" height="{height}" fill="#173e55"/><g transform="translate(0,{}) scale(1,-1)">"##,
+            "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"1024\" \
+                height=\"{}\" viewBox=\"{x} {y} {width} \
+                {height}\"><title>OpenCity navigation map</title><rect x=\"{x}\" \
+                y=\"{y}\" width=\"{width}\" height=\"{height}\" \
+                fill=\"#173e55\"/><g transform=\"translate(0,{}) scale(1,-1)\">",
             1024. * height / width,
             y + top
         );
@@ -48,7 +52,13 @@ impl City {
                     .map_err(|e| e.to_string())?;
             }
             let data = base64::engine::general_purpose::STANDARD.encode(png);
-            write!(svg,r#"<image x="{x}" y="{y}" width="{width}" height="{height}" preserveAspectRatio="none" href="data:image/png;base64,{data}"/>"#).unwrap();
+            write!(
+                svg,
+                "<image x=\"{x}\" y=\"{y}\" width=\"{width}\" height=\"{height}\" \
+                    preserveAspectRatio=\"none\" href=\"data:image/png;base64,\
+                    {data}\"/>"
+            )
+            .unwrap();
         }
         for f in &self.landscape {
             let color = match f.kind {
@@ -92,7 +102,21 @@ impl City {
                     .sum();
                 let stroke = if edge { "#a7afa1" } else { "#e2e5d2" };
                 let w = if edge { full } else { travel.max(full * 0.5) };
-                write!(svg,r#"<path d="M {} {} C {} {},{} {},{} {}" fill="none" stroke="{stroke}" stroke-width="{w}" stroke-linecap="butt"/>"#,s.start.x,s.start.y,s.controls[0].x,s.controls[0].y,s.controls[1].x,s.controls[1].y,s.end.x,s.end.y).unwrap();
+                write!(
+                    svg,
+                    "<path d=\"M {} {} C {} {},{} {},{} {}\" fill=\"none\" \
+                        stroke=\"{stroke}\" stroke-width=\"{w}\" \
+                        stroke-linecap=\"butt\"/>",
+                    s.start.x,
+                    s.start.y,
+                    s.controls[0].x,
+                    s.controls[0].y,
+                    s.controls[1].x,
+                    s.controls[1].y,
+                    s.end.x,
+                    s.end.y
+                )
+                .unwrap();
             }
         }
         for component in &self.components {

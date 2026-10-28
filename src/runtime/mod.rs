@@ -36,7 +36,7 @@ pub enum SurfaceKind {
     Sand = 5,
     Marking = 6,
     Prop = 7,
-    /// A window pane, which a renderer may illuminate after dark.
+    /// A window pane; optional local UV/room metadata enables shader interiors.
     Window = 8,
     /// An artificial light source, such as a street lamp.
     Light = 9,

@@ -3,7 +3,11 @@ use super::*;
 #[test]
 fn copied_curve_preserves_grade_and_round_trips() {
     let mut editor = sample_editor();
-    editor.program = parse("road street:\n    carlane;\nend;\nroad_1 = street(0,0,1,1,2,1,3,0);\ngrade(road_1,0.25,0.75);").unwrap();
+    editor.program = parse(
+        "road street:\n    carlane;\nend;\nroad_1 = street(0,0,1,1,2,1,3,\
+            0);\ngrade(road_1,0.25,0.75);",
+    )
+    .unwrap();
     editor.selected_segment = Some(SegmentSource::TopLevel(1));
     editor.copy_selection();
     editor.paste_selection();

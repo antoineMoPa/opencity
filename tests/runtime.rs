@@ -9,7 +9,11 @@ fn city(source: &str) -> City {
 }
 #[test]
 fn structured_queries_include_footprints_directions_and_containment() {
-    let c=city("road street: sidewalk carlane sidewalk; direction forward; end named=street(-1,0,1,0); home=building(0.3,-0.2,0.2,0.2,0.2,0.2,0.6,-0.2,0.6);");
+    let c = city(
+        "road street: sidewalk carlane sidewalk; direction forward; end \
+            named=street(-1,0,1,0); home=building(0.3,-0.2,0.2,0.2,0.2,0.2,\
+            0.6,-0.2,0.6);",
+    );
     let all = c.query(Region::WholeMap);
     assert_eq!(all.roads.len(), 1);
     assert_eq!(all.buildings.len(), 1);
@@ -48,7 +52,10 @@ fn structured_queries_include_footprints_directions_and_containment() {
 }
 #[test]
 fn stacked_road_support_respects_ceiling_and_grade() {
-    let c=city("road street: carlane; end low=street(-1,0,1,0); high=street(0,-1,0,1); grade(low,0.1,0.3); elevation(high,1);");
+    let c = city(
+        "road street: carlane; end low=street(-1,0,1,0); high=street(0,-1,\
+            0,1); grade(low,0.1,0.3); elevation(high,1);",
+    );
     let lower = c.surface_at([0., 0.], 0.5).unwrap();
     let upper = c.surface_at([0., 0.], 2.).unwrap();
     assert!((lower.height - 0.2).abs() < 1e-5, "{lower:?}");
@@ -59,7 +66,10 @@ fn stacked_road_support_respects_ceiling_and_grade() {
 }
 #[test]
 fn mesh_and_support_share_surfaces_and_buildings_block_vehicle() {
-    let c=city("road street: sidewalk carlane sidewalk; end street(-1,0,1,0); home=building(0.3,-0.2,0.2,0.2,0.2,0.2,0.6,-0.2,0.6);");
+    let c = city(
+        "road street: sidewalk carlane sidewalk; end street(-1,0,1,0); \
+            home=building(0.3,-0.2,0.2,0.2,0.2,0.2,0.6,-0.2,0.6);",
+    );
     let asphalt = c.surface_at([0., 0.], 1.).unwrap();
     let sidewalk = c.surface_at([0., 0.04], 1.).unwrap();
     assert_eq!(asphalt.kind, SurfaceKind::Asphalt);

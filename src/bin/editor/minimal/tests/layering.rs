@@ -8,7 +8,8 @@ fn selected_road_geometry_and_annotations_paint_below_palette() {
         editor.map_pan.y = -120.0;
         editor.program.statements.extend(
             parse(
-                "mark=annotation_text(\"Canvas markup\",0,0); line=annotation_segment(-1,0,1,0);",
+                "mark=annotation_text(\"Canvas markup\",0,0); \
+                    line=annotation_segment(-1,0,1,0);",
             )
             .unwrap()
             .statements,
@@ -33,9 +34,16 @@ fn selected_road_geometry_and_annotations_paint_below_palette() {
             flatten(&shape.shape, &mut shapes);
         }
         // FullOutput is in final back-to-front paint order, including layers.
-        let panel = shapes.iter().position(|shape| {
-            matches!(shape, egui::Shape::Rect(r) if r.rect.contains(popup.center()) && r.rect.width() > 300.0 && r.rect.width() < 600.0 && r.fill != egui::Color32::TRANSPARENT)
-        }).expect("palette's opaque background");
+        let panel = shapes
+            .iter()
+            .position(|shape| {
+                matches!(shape,
+                 egui::Shape::Rect(r) if r.rect.contains(popup.center()) &&
+                 r.rect.width() > 300.0 &&
+                 r.rect.width() < 600.0 &&
+                 r.fill != egui::Color32::TRANSPARENT)
+            })
+            .expect("palette's opaque background");
         let mut circles = 0;
         let mut controls = 0;
         let mut lines = 0;

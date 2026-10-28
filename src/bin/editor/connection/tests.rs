@@ -39,11 +39,37 @@ fn connection_discovery_focus_and_atomic_attachment_edits() {
         .unwrap();
     let before = editor.program.clone();
     for t in [-0.1, 1.1] {
-        assert!(editor.call_mcp("edit_connection", &json!({"connection_id":item.id,"edit":"attachment","reference":reference,"lane":0,"t":t})).is_err());
+        assert!(editor
+            .call_mcp(
+                "edit_connection",
+                &json!({
+                "connection_id":item.id,
+                "edit":"attachment",
+                "reference":reference,
+                "lane":0,
+                "t":t
+                }
+                )
+            )
+            .is_err());
+
         assert_eq!(editor.program, before);
     }
     let (_, lane, t) = map::lane_attachment(&editor.program, reference).unwrap();
-    editor.call_mcp("edit_connection", &json!({"connection_id":item.id,"edit":"attachment","reference":reference,"lane":lane,"t":t * 0.9})).unwrap();
+    editor
+        .call_mcp(
+            "edit_connection",
+            &json!({
+            "connection_id":item.id,
+            "edit":"attachment",
+            "reference":reference,
+            "lane":lane,
+            "t":t * 0.9
+            }
+            ),
+        )
+        .unwrap();
+
     assert!(map::lane_attachment(&editor.program, reference).is_some());
     assert_eq!(
         parse(&editor.program.to_road_source()).unwrap(),
@@ -76,9 +102,41 @@ fn connection_handles_and_anchored_endpoints_share_validated_api() {
         .end_ref
         .as_deref()
         .is_some_and(|reference| map::lane_attachment(&editor.program, reference).is_some());
-    assert!(editor.call_mcp("edit_connection", &json!({"connection_id":item.id,"edit":if end {"end"}else{"start"},"segment":road.name,"x":1,"y":2})).is_err());
+    assert!(editor
+        .call_mcp(
+            "edit_connection",
+            &json!({
+            "connection_id":item.id,
+            "edit":if end {
+            "end"
+            }
+            else{
+            "start"
+            }
+            ,
+            "segment":road.name,
+            "x":1,
+            "y":2
+            }
+            )
+        )
+        .is_err());
+
     assert_eq!(editor.program, before);
-    editor.call_mcp("edit_connection", &json!({"connection_id":item.id,"edit":"handle1","segment":road.name,"x":road.controls[0].x + 0.01,"y":road.controls[0].y})).unwrap();
+    editor
+        .call_mcp(
+            "edit_connection",
+            &json!({
+            "connection_id":item.id,
+            "edit":"handle1",
+            "segment":road.name,
+            "x":road.controls[0].x + 0.01,
+            "y":road.controls[0].y
+            }
+            ),
+        )
+        .unwrap();
+
     assert_ne!(editor.program, before);
     let edited = editor.program.clone();
     assert!(editor
@@ -132,7 +190,12 @@ fn connection_real_port_intersection_moves_without_losing_ports() {
 
 #[test]
 fn connection_shared_endpoint_does_not_move_coincident_overpass() {
-    let mut program = parse("road lane: carlane; end; a=map_point(0,0); b=map_point(0,0); c=map_point(1,0); d=map_point(0,1); first=lane(a,0.3,0,0.7,0,c); second=lane(b,0,0.3,0,0.7,d); elevation(second,1);").unwrap();
+    let mut program = parse(
+        "road lane: carlane; end; a=map_point(0,0); b=map_point(0,0); \
+            c=map_point(1,0); d=map_point(0,1); first=lane(a,0.3,0,0.7,0,c); \
+            second=lane(b,0,0.3,0,0.7,d); elevation(second,1);",
+    )
+    .unwrap();
     let projection = map::project(&program);
     let first = projection.segments[0].source;
     let second = projection.segments[1].clone();
@@ -171,11 +234,38 @@ fn connection_three_way_profile_and_grade_edits_round_trip() {
         .collect();
     let item = connections(&editor.program).remove(0);
     let intersection = item.intersection.unwrap();
-    editor.call_mcp("edit_connection", &json!({"connection_id":item.id,"edit":"intersection","x":intersection.position.x,"y":intersection.position.y,"kind":"three_way","profile":"local_edge"})).unwrap();
+    editor
+        .call_mcp(
+            "edit_connection",
+            &json!({
+            "connection_id":item.id,
+            "edit":"intersection",
+            "x":intersection.position.x,
+            "y":intersection.position.y,
+            "kind":"three_way",
+            "profile":"local_edge"
+            }
+            ),
+        )
+        .unwrap();
+
     let item = connections(&editor.program).remove(0);
     assert_eq!(item.intersection.as_ref().unwrap().road_name, "local_edge");
     let name = item.segments[0].name.as_ref().unwrap();
-    editor.call_mcp("edit_connection", &json!({"connection_id":item.id,"edit":"grade","segment":name,"start_height":0.125,"end_height":0.25})).unwrap();
+    editor
+        .call_mcp(
+            "edit_connection",
+            &json!({
+            "connection_id":item.id,
+            "edit":"grade",
+            "segment":name,
+            "start_height":0.125,
+            "end_height":0.25
+            }
+            ),
+        )
+        .unwrap();
+
     let road = map::project(&editor.program)
         .segments
         .into_iter()

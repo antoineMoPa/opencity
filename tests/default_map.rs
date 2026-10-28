@@ -115,7 +115,8 @@ fn assert_surface_clear(terrain: &ElevationMap, vertices: &[Vertex], name: &str)
                 ];
                 assert!(
                     terrain.height_at(point).unwrap() >= terrain.spec.water_level.unwrap(),
-                    "{name} leaves dry land at {point:?}; water crossings must be explicit bridges"
+                    "{name} leaves dry land at {point:?}; water crossings must be \
+                        explicit bridges"
                 );
             }
         }
@@ -182,7 +183,8 @@ fn default_map_full_road_surfaces_clear_terrain_and_water() {
             let rise = (segment.height_at(pair[1].t) - segment.height_at(pair[0].t)).abs();
             assert!(
                 rise <= 0.20 * distance + 0.000001,
-                "{name} exceeds the default map's 20% grade budget at t={}..{}: rise {rise}, distance {distance}",
+                "{name} exceeds the default map's 20% grade budget at t={}..{}: \
+                    rise {rise}, distance {distance}",
                 pair[0].t,
                 pair[1].t
             );

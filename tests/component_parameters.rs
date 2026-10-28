@@ -17,10 +17,10 @@ fn close(actual: f32, expected: f32) {
 #[test]
 fn parameters_bind_value_positions_and_round_trip_without_mutating_templates() {
     let program = parse(&format!(
-        r#"{TEMPLATE}
-        a = link(10, 20, 3, 90, {{ length: 4, width: 0.5, direction: east, pavement: asphalt }});
-        b = link(-10, -20, {{ length: 8, width: 1, direction: west, pavement: concrete }});
-    "#
+        "{TEMPLATE}\n        a = link(10, 20, 3, 90, {{ length: 4, width: \
+            0.5, direction: east, pavement: asphalt }});\n        b = \
+            link(-10, -20, {{ length: 8, width: 1, direction: west, pavement: \
+            concrete }});\n    "
     ))
     .unwrap();
     assert_eq!(parse(&program.to_road_source()).unwrap(), program);
@@ -45,19 +45,19 @@ fn parameters_bind_value_positions_and_round_trip_without_mutating_templates() {
 
 #[test]
 fn nested_rotations_keep_roads_ports_landscape_and_heights_aligned() {
-    let program = parse(&format!(r#"{TEMPLATE}
-        road street: carlane; end
-        block leaf({{ size }}: {{ size: number }}):
-            junction = link(1, 0, 2, -90, {{ length: size, width: 0.5, direction: east, pavement: asphalt }});
-            approach = street(junction.exit.out, 0, 1, 0, 3, junction.exit.out);
-            line = street(0, 0, size, 0);
-            terrain = land(0, 0, size, 0, size, 1);
-        end
-        block group({{ size }}: {{ size: number }}):
-            leaf(2, 0, 1, 45, {{ size }});
-        end
-        group(10, 20, 3, 45, {{ size: 4 }});
-    "#)).unwrap();
+    let program = parse(&format!(
+        "{TEMPLATE}\n        road street: carlane; end\n        block \
+        leaf({{ size }}: {{ size: number }}):\n            junction = \
+        link(1, 0, 2, -90, {{ length: size, width: 0.5, direction: east, \
+        pavement: asphalt }});\n            approach = \
+        street(junction.exit.out, 0, 1, 0, 3, junction.exit.out);\n            \
+        line = street(0, 0, size, 0);\n            terrain = land(0, 0, \
+        size, 0, size, 1);\n        end\n        block group({{ size }}: \
+        {{ size: number }}):\n            leaf(2, 0, 1, 45, {{ size }});\
+        \n        end\n        group(10, 20, 3, 45, {{ size: 4 }});\n    "
+    ))
+    .unwrap();
+
     let components = network::project(&program);
     assert!(components.errors.is_empty(), "{:?}", components.errors);
     let instance = &components.instances[0];
@@ -129,7 +129,10 @@ fn invalid_instances_report_errors_and_leave_valid_placements_visible() {
         "0, 0, { length: 4, width: 1, direction: invalid, pavement: asphalt }",
         "0, 0, { length: 4, width: 1, direction: east, pavement: invalid }",
     ] {
-        let source = format!("{TEMPLATE} link({args}); link(0, 0, {{ length: 2, width: 1, direction: east, pavement: asphalt }});");
+        let source = format!(
+            "{TEMPLATE} link({args}); link(0, 0, {{ length: 2, width: 1, \
+                direction: east, pavement: asphalt }});"
+        );
         let projection = network::project(&parse(&source).unwrap());
         assert_eq!(
             projection.errors.len(),

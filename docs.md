@@ -5,22 +5,22 @@ This page contains the detailed editor and language reference.
 
 ## Road editor
 
-Clone with `git clone --recurse-submodules https://github.com/antoineMoPa/opencity.git`, or run `git
-submodule update --init --recursive` in an existing checkout. The editor uses the reusable
+Clone with `git clone --recurse-submodules https://github.com/antoineMoPa/opencity.git`, or run
+`git submodule update --init --recursive` in an existing checkout. The editor uses the reusable
 [egui_command_palette](https://github.com/antoineMoPa/egui_command_palette) submodule and the
 vendored MIT Moon toggle switch. The old docking dependency is no longer used by the application.
 
-Run the native egui editor with `cargo run`, or open a file immediately with `cargo run --
-path/to/city.road`.
+Run the native egui editor with `cargo run`, or open a file immediately with
+`cargo run -- path/to/city.road`.
 
 ### Browser build
 
 Install the `wasm32-unknown-unknown` Rust target and `wasm-bindgen-cli` version `0.2.128`, then run
-`make build` and `make serve`. Open `http://localhost:8877`; override the port with `make serve
-PORT=9000` if needed. Running `make` builds and serves in one step. The browser editor starts with
-the same editable starter city and viewport as the native app. Open uses a local `.road` file; Save
-and Save As download files through browser dialogs. The page fills the browser viewport, including
-when the window is resized. WebGPU is required.
+`make build` and `make serve`. Open `http://localhost:8877`; override the port with
+`make serve PORT=9000` if needed. Running `make` builds and serves in one step. The browser editor
+starts with the same editable starter city and viewport as the native app. Open uses a local `.road`
+file; Save and Save As download files through browser dialogs. The page fills the browser viewport,
+including when the window is resized. WebGPU is required.
 
 The workflow in `.github/workflows/pages.yml` builds and deploys `web/dist` from `main`. In the
 repository's **Settings > Pages**, choose **GitHub Actions** as the build and deployment source; the
@@ -141,12 +141,12 @@ land and under roads and buildings; separate outlines can leave open water betwe
 an area without generating trees. `terrain(height, x, y, ...)` defines an elevated map patch.
 Overlapping outlines at increasing heights form a terraced mountain; the viewport and GLB export
 draw the exposed sides between levels. `building(height, x, y, ...)` defines a footprint extruded to
-that height. A building may include a quoted GLB path after its height, for example `building(0.4,
-"assets/hall.glb", 0, 0, 1, 0, 1, 1)`. The native editor reads that GLB relative to the `.road`
-file; building assets must already be available to the runtime. The viewport fits embedded triangle
-meshes within the footprint and specified height, using material base colors and vertex colors.
-Texture images and animation are not drawn yet. GLB export currently retains the model reference as
-metadata and exports the building extrusion.
+that height. A building may include a quoted GLB path after its height, for example
+`building(0.4, "assets/hall.glb", 0, 0, 1, 0, 1, 1)`. The native editor reads that GLB relative to
+the `.road` file; building assets must already be available to the runtime. The viewport fits
+embedded triangle meshes within the footprint and specified height, using material base colors and
+vertex colors. Texture images and animation are not drawn yet. GLB export currently retains the
+model reference as metadata and exports the building extrusion.
 
 Buildings also accept a facade options object after their height (or after the optional model path):
 
@@ -195,17 +195,17 @@ shader uniform, reusing the scene mesh and cached elevation texture. Maps with w
 roughly 30 frames per second; dry maps keep their normal event-driven repaint behavior.
 
 The bundled example is an island with six scales of deterministic noise, a sea level of `0.35`, and
-black lowlands on all four PNG edges. Rebuild its 16-bit image with `cargo run --example
-generate_island`; its Rust generator only produces the raster asset, while the map and water
-declaration remain in `.road` source.
+black lowlands on all four PNG edges. Rebuild its 16-bit image with
+`cargo run --example generate_island`; its Rust generator only produces the raster asset, while the
+map and water declaration remain in `.road` source.
 
 The new [default scene](examples/default_map.road) follows the broad archipelago layout in
 `target.png`. Its unplaced `terrain_source` block contains editable coastlines (`land`), smooth hill
-footprints (`terrain`) and lake basins (`lake`). Run `cargo run --no-default-features --example
-bake_elevation` to rebuild its adjacent 16-bit PNG. The baker rounds contour corners, slopes the
-shore down into the sea, and leaves inland plains at 0.10 map units for the towns. Sea level is
-zero. This bundled PNG is also embedded for unsaved startup documents in desktop and browser builds;
-other external PNGs still require desktop file access.
+footprints (`terrain`) and lake basins (`lake`). Run
+`cargo run --no-default-features --example bake_elevation` to rebuild its adjacent 16-bit PNG. The
+baker rounds contour corners, slopes the shore down into the sea, and leaves inland plains at 0.10
+map units for the towns. Sea level is zero. This bundled PNG is also embedded for unsaved startup
+documents in desktop and browser builds; other external PNGs still require desktop file access.
 
 The terrain spans 76.8 × 51.2 map units, three times the reference layout's initial width and depth.
 Road widths and terrain heights stay fixed, leaving room for denser streets and a smaller
@@ -264,18 +264,18 @@ hall = building(0.5, "assets/hall.glb", 0, 0, 1, 0, 1, 1, 0, 1);
 elevation(pond, -0.1);
 ```
 
-Named road placements use the same `elevation(name, z)` call for a constant height. Use `grade(name,
-start_z, end_z)` to change height linearly from the road's start to its end; for example,
-`grade(exit_ramp, 0, 0.25)` rises from ground to an overpass. If both calls target a road, `grade`
-sets its heights. Ground is `0`; positive heights are above ground and negative heights below it.
-The map uses a road's midpoint height for whole-road paint order, except attached ramp mouths paint
-at their parent road's layer so the joins stay visible. Selecting a road at a crossing uses its
-height at the pointer, and selecting a ramp shows its endpoint heights. A block can contain roads
-and land or water features. Place it with `block_name(x, y)` or `block_name(x, y, z)`; the optional
-third value raises the whole instance. A named block instance can also use `elevation(instance_name,
-z)`. Road calls inside blocks use local numeric Bézier coordinates. Local `elevation` and `grade`
-calls inside a block give its component placements relative heights, which add to the instance
-height. See [interstate_crossing.road](examples/interstate_crossing.road) and
+Named road placements use the same `elevation(name, z)` call for a constant height. Use
+`grade(name, start_z, end_z)` to change height linearly from the road's start to its end; for
+example, `grade(exit_ramp, 0, 0.25)` rises from ground to an overpass. If both calls target a road,
+`grade` sets its heights. Ground is `0`; positive heights are above ground and negative heights
+below it. The map uses a road's midpoint height for whole-road paint order, except attached ramp
+mouths paint at their parent road's layer so the joins stay visible. Selecting a road at a crossing
+uses its height at the pointer, and selecting a ramp shows its endpoint heights. A block can contain
+roads and land or water features. Place it with `block_name(x, y)` or `block_name(x, y, z)`; the
+optional third value raises the whole instance. A named block instance can also use
+`elevation(instance_name, z)`. Road calls inside blocks use local numeric Bézier coordinates. Local
+`elevation` and `grade` calls inside a block give its component placements relative heights, which
+add to the instance height. See [interstate_crossing.road](examples/interstate_crossing.road) and
 [landscape_and_mobility.road](examples/landscape_and_mobility.road).
 
 Road cross sections also accept `traintrack`, `tramtrack`, and `subwaytrack` elements. The built-in
@@ -375,21 +375,21 @@ short = span(10, 20, { length: 5, height: 0.5 });
 long = span(20, 20, 1, { height: 1, length: 8 });
 ```
 
-Placement arguments are `x, y, { values }`, `x, y, elevation, { values }`, or `x, y, elevation,
-rotation_degrees, { values }`. Coordinates inside the block are local to each placement, and heights
-add to the placement's elevation. Object property order does not matter. Every declared parameter is
-required; unknown properties and values of the wrong type invalidate the placement. Parameter names
-cannot be reused for call results inside the block.
+Placement arguments are `x, y, { values }`, `x, y, elevation, { values }`, or
+`x, y, elevation, rotation_degrees, { values }`. Coordinates inside the block are local to each
+placement, and heights add to the placement's elevation. Object property order does not matter.
+Every declared parameter is required; unknown properties and values of the wrong type invalidate the
+placement. Parameter names cannot be reused for call results inside the block.
 
 Supported types are `number` (a finite number), `string` (a quoted literal), and `identifier` (a
-symbolic name, such as a road profile). An `identifier` parameter may also be called: `profile(0, 0,
-length, 0);`. Parameters work in road calls, landscape calls, elevation and grade calls, and nested
-block placements. Forward a parameter with `{ length: length }` or the shorthand `{ length }`. Each
-instance binds its own values without changing the definition or other instances. Blocks without a
-parameter declaration also accept `name(x, y, elevation, rotation_degrees)`. Rotation is
-counterclockwise about the placement origin in world coordinates (+X east, +Y north). Nested block
-origins rotate with their parent; angles add. Roads, component ports and headings, buildings,
-terrain, and other landscape footprints rotate together. Elevations and grades still add
+symbolic name, such as a road profile). An `identifier` parameter may also be called:
+`profile(0, 0, length, 0);`. Parameters work in road calls, landscape calls, elevation and grade
+calls, and nested block placements. Forward a parameter with `{ length: length }` or the shorthand
+`{ length }`. Each instance binds its own values without changing the definition or other instances.
+Blocks without a parameter declaration also accept `name(x, y, elevation, rotation_degrees)`.
+Rotation is counterclockwise about the placement origin in world coordinates (+X east, +Y north).
+Nested block origins rotate with their parent; angles add. Roads, component ports and headings,
+buildings, terrain, and other landscape footprints rotate together. Elevations and grades still add
 independently of rotation.
 
 See [parameterized_blocks.road](examples/parameterized_blocks.road) for a complete example.
@@ -456,8 +456,6 @@ Mixed-profile freeway terminals reuse the same T with larger offsets. Road endpo
 placed template's local point names. Junctions and derived ports are projected without expanding the
 saved map into repeated definitions.
 
-
-
 The palette starts with Add road, Add highway, Add interstate, Add terrain and Add concrete. These
 road commands map explicitly to neighborhood_street, divided_highway and interstate_three_lane.
 Existing definitions with those names take precedence; missing bundled profiles are added only when
@@ -496,25 +494,25 @@ explicit permitted movements, surfaces, and markings. See
 an intersection in the map and choose **Open intersection viewer** to inspect it independently
 without editing the document.
 
-Use `opencity intersection-svg INPUT.road --name NAME --output OUTPUT.svg` or `opencity
-intersection-png INPUT.road --name NAME --output OUTPUT.png` for headless exports. Both commands
-also work through `editor`, and are listed in each executable's `--help`. The guide documents all
-export options and the lightweight CLI build.
+Use `opencity intersection-svg INPUT.road --name NAME --output OUTPUT.svg` or
+`opencity intersection-png INPUT.road --name NAME --output OUTPUT.png` for headless exports. Both
+commands also work through `editor`, and are listed in each executable's `--help`. The guide
+documents all export options and the lightweight CLI build.
 
 ## Game runtime integration
 
 Enable `game-runtime` with default features disabled to query structured roads, directions, paths,
 buildings and landscape, sample physical driving surfaces, and generate procedural meshes and nearby
-street details. Optional editor/game WGSL exports let consumers reuse the visual style. See [the
-game integration guide](docs/game-runtime.md).
+street details. Optional editor/game WGSL exports let consumers reuse the visual style. See
+[the game integration guide](docs/game-runtime.md).
 
 The editor keeps intersection geometry, endpoint candidates and cross-section profiles with the
 document projection. Hovering, selecting, copying and opening menus reuse that snapshot; edits and
 undo refresh it. This avoids rebuilding the city while handling pointer events. The full default-map
-interaction regression can be run with `cargo test --bin editor
-default_map_first_click_menus_reuse_document_geometry -- --nocapture`. It checks the first
-road/building/context menus in Top and Isometric views against the actual 592-road, 268-junction,
-1,863-building map.
+interaction regression can be run with
+`cargo test --bin editor default_map_first_click_menus_reuse_document_geometry -- --nocapture`. It
+checks the first road/building/context menus in Top and Isometric views against the actual 592-road,
+268-junction, 1,863-building map.
 
 ### External launch action
 
@@ -555,12 +553,12 @@ Use `role highway;` on interstate profiles, including ground-level roads. The bu
 profiles declare this role. Highway, ramp and merge profiles have concrete edge barriers; highways
 with a `middle` band also have a median barrier. Explicit `barrier` bands produce solid walls.
 
-Other road types gain edge barriers when their pavement clears the local terrain by more than
-0.02 map units. Grass verge and median bands become paved surfaces on protected roads, retaining
-their authored widths and lane indices. Merge openings use the shared attachment geometry.
-The editor scene, GLB export and game runtime share the barrier prisms.
-Protected intersections continue these barriers around their curved exterior and closed sides,
-leaving approach mouths open. Their grass bands use pavement, matching the connected road decks.
+Other road types gain edge barriers when their pavement clears the local terrain by more than 0.02
+map units. Grass verge and median bands become paved surfaces on protected roads, retaining their
+authored widths and lane indices. Merge openings use the shared attachment geometry. The editor
+scene, GLB export and game runtime share the barrier prisms. Protected intersections continue these
+barriers around their curved exterior and closed sides, leaving approach mouths open. Their grass
+bands use pavement, matching the connected road decks.
 
 Runtime consumers can inspect `City::road_barriers` and use `City::road_barrier_contact` for circle
 contacts with a vertical interval. Barriers render as props and do not support tires; their height

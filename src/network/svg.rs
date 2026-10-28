@@ -35,7 +35,9 @@ pub fn to_svg_with_options(
     let view_x = (bounds[0] + bounds[2] - extent) / 2.;
     let view_y = (bounds[1] + bounds[3] - extent) / 2.;
     let mut out = format!(
-        r##"<svg xmlns="http://www.w3.org/2000/svg" width="{size}" height="{size}" viewBox="{} {} {} {}"><title>{}</title><rect x="{}" y="{}" width="{}" height="{}" fill="#17202b"/>"##,
+        "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"{size}\" \
+            height=\"{size}\" viewBox=\"{} {} {} {}\"><title>{}</title><rect \
+            x=\"{}\" y=\"{}\" width=\"{}\" height=\"{}\" fill=\"#17202b\"/>",
         view_x,
         view_y,
         extent,
@@ -91,7 +93,8 @@ pub fn to_svg_with_options(
         for path in &network.paths {
             let _ = write!(
                 out,
-                r##"<path data-path="{}" d="{}" fill="none" stroke="#67b9ed" stroke-width="{}" opacity="0.6"/>"##,
+                "<path data-path=\"{}\" d=\"{}\" fill=\"none\" stroke=\"#67b9ed\" \
+                    stroke-width=\"{}\" opacity=\"0.6\"/>",
                 escape(&path.name),
                 path_data(&path.points),
                 width.max(height) * 0.003
@@ -100,7 +103,9 @@ pub fn to_svg_with_options(
         for movement in &network.movements {
             let _ = write!(
                 out,
-                r##"<path data-from="{}" data-to="{}" data-class="{}" d="{}" fill="none" stroke="#72d7ad" stroke-width="{}" opacity="0.7"/>"##,
+                "<path data-from=\"{}\" data-to=\"{}\" data-class=\"{}\" d=\"{}\" \
+                    fill=\"none\" stroke=\"#72d7ad\" stroke-width=\"{}\" \
+                    opacity=\"0.7\"/>",
                 escape(&movement.movement.from),
                 escape(&movement.movement.to),
                 escape(&movement.movement.class),
@@ -120,7 +125,9 @@ pub fn to_svg_with_options(
         let heading = port.heading.vector();
         let _ = write!(
             out,
-            r#"<g data-port="{}.{}"><circle cx="{}" cy="{}" r="{radius}" fill="{color}"/><path d="M {} {} l {} {}" stroke="{color}" stroke-width="{}"/></g>"#,
+            "<g data-port=\"{}.{}\"><circle cx=\"{}\" cy=\"{}\" r=\"{radius}\" \
+                fill=\"{color}\"/><path d=\"M {} {} l {} {}\" stroke=\"{color}\" \
+                stroke-width=\"{}\"/></g>",
             escape(&port.name),
             port.role.keyword(),
             p.x,

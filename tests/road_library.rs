@@ -121,15 +121,20 @@ fn native_cloverleaf_placement_keeps_lane_attachments_and_grades() {
 fn native_pattern_joins_reject_bad_geometry_and_travel() {
     for (source, message) in [
         (
-            "place(four_way, cross, 0, 0, 0); place(three_way, tee, 0, 0, 0); join(cross, port_east, tee, port_west);",
+            "place(four_way, cross, 0, 0, 0); place(three_way, tee, 0, 0, 0); \
+                join(cross, port_east, tee, port_west);",
             "do not meet",
         ),
         (
-            "place(street_to_interstate_flat, flat, 0, 0, 0); place(street_to_interstate_elevated, raised, 6, 0, 0); join(flat, highway_e, raised, highway_w);",
+            "place(street_to_interstate_flat, flat, 0, 0, 0); \
+                place(street_to_interstate_elevated, raised, 6, 0, 0); join(flat, \
+                highway_e, raised, highway_w);",
             "different heights",
         ),
         (
-            "place(street_to_interstate_flat, first, 0, 0, 0); place(street_to_interstate_flat, second, 6, 0, 2); join(first, highway_e, second, highway_e);",
+            "place(street_to_interstate_flat, first, 0, 0, 0); \
+                place(street_to_interstate_flat, second, 6, 0, 2); join(first, \
+                highway_e, second, highway_e);",
             "point traffic the same way",
         ),
     ] {

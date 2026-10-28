@@ -2,7 +2,13 @@ use super::*;
 
 #[test]
 fn design_check_finds_a_straight_misaligned_join() {
-    let program = parse("road narrow: carlane; end; road wide: verge-carlane-verge; end; p0 = map_point(0, 0); seam = map_point(1, 0); p1 = map_point(2, 0); a = narrow(p0, 0.3, 0, 0.7, 0, seam); b = wide(seam, 1.3, 0, 1.7, 0, p1);").unwrap();
+    let program = parse(
+        "road narrow: carlane; end; road wide: verge-carlane-verge; end; \
+            p0 = map_point(0, 0); seam = map_point(1, 0); p1 = map_point(2, \
+            0); a = narrow(p0, 0.3, 0, 0.7, 0, seam); b = wide(seam, 1.3, 0, \
+            1.7, 0, p1);",
+    )
+    .unwrap();
     let projection = map::project(&program);
     let mut profiles = paint_profiles(&program, &projection);
     assert!(design_rule_issues(&program, &projection, &profiles).is_empty());
@@ -14,8 +20,14 @@ fn design_check_finds_a_straight_misaligned_join() {
 
 #[test]
 fn design_check_reports_a_ramp_that_nearly_meets_a_road() {
-    let program = parse("road ramp: verge-carlane-verge;
-role ramp; end; road street: carlane; end; a = map_point(0, 0); b = map_point(1, 0); near = map_point(1.02, 0); c = map_point(2, 0); exit = ramp(a, 0.3, 0, 0.7, 0, b); street(near, 1.3, 0, 1.7, 0, c);").unwrap();
+    let program = parse(
+        "road ramp: verge-carlane-verge;\nrole ramp; end; road street: \
+        carlane; end; a = map_point(0, 0); b = map_point(1, 0); near = \
+        map_point(1.02, 0); c = map_point(2, 0); exit = ramp(a, 0.3, 0, \
+        0.7, 0, b); street(near, 1.3, 0, 1.7, 0, c);",
+    )
+    .unwrap();
+
     let projection = map::project(&program);
     let issues = design_rule_issues(
         &program,
@@ -30,8 +42,11 @@ role ramp; end; road street: carlane; end; a = map_point(0, 0); b = map_point(1,
 
 #[test]
 fn design_check_requires_a_junction_or_height_for_a_ramp_crossing() {
-    let source = "road ramp: verge-carlane-verge;
-role ramp; end; road street: carlane; end; a = map_point(-2, 0); b = map_point(2, 0); c = map_point(0, -2); d = map_point(0, 2); exit = ramp(a, -0.7, 0, 0.7, 0, b); street(c, 0, -0.7, 0, 0.7, d);";
+    let source = "road ramp: verge-carlane-verge;\nrole ramp; end; road street: \
+        carlane; end; a = map_point(-2, 0); b = map_point(2, 0); c = \
+        map_point(0, -2); d = map_point(0, 2); exit = ramp(a, -0.7, 0, \
+        0.7, 0, b); street(c, 0, -0.7, 0, 0.7, d);";
+
     let at_grade = parse(source).unwrap();
     let projection = map::project(&at_grade);
     let issues = design_rule_issues(

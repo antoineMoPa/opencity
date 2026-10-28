@@ -64,7 +64,8 @@ mod tests {
     #[test]
     fn exported_facades_keep_materials_and_floor_bands_at_the_declared_height() {
         let program = opencity::parse(
-            "b=building(0.2,{material:brick,floor_height:0.04},0,0,1,0,1,1,0,1); elevation(b,0.1);",
+            "b=building(0.2,{material:brick,floor_height:0.04},0,0,1,0,1,1,0,\
+                1); elevation(b,0.1);",
         )
         .unwrap();
         let feature = project_landscape_features(&program).features.remove(0);

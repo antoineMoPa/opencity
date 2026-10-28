@@ -134,8 +134,15 @@ impl RoadEditor {
                         let mut suffix = 1;
                         let name = loop {
                             let candidate = format!("attached_road_{suffix}");
-                            if !projection.segments.iter().any(|s| s.name.as_deref() == Some(&candidate))
-                                && !next.statements.iter().any(|s| matches!(s, Statement::Call(c) if c.assigns.contains(&candidate))) {
+                            if !projection
+                                .segments
+                                .iter()
+                                .any(|s| s.name.as_deref() == Some(&candidate))
+                                && !next.statements.iter().any(|s| {
+                                    matches!(s,
+                                     Statement::Call(c) if c.assigns.contains(&candidate))
+                                })
+                            {
                                 break candidate;
                             }
                             suffix += 1;
@@ -350,12 +357,13 @@ mod tests {
         let mut editor = super::super::tests::sample_editor();
         editor.program = parse(
             "road highway: sidewalk-carlane-carlane; direction forward; end; \
-            road link: carlane; direction forward; role merge; end; \
-            parent = highway(0,0,2,0,4,0,6,0); grade(parent,0,1); \
-            anchor = lane_point(parent,1,0.25); \
-            far=map_point(4,2); ramp = link(anchor,2,1,3,2,far); grade(ramp,0.25,0.8); \
-            far_shared=map_point(4,-2); shared = link(anchor,2,-1,3,-2,far_shared); grade(shared,0.25,0.9); \
-            deck = highway(0,0,2,0,4,0,6,0); elevation(deck,4);",
+                road link: carlane; direction forward; role merge; end; parent = \
+                highway(0,0,2,0,4,0,6,0); grade(parent,0,1); anchor = \
+                lane_point(parent,1,0.25); far=map_point(4,2); ramp = \
+                link(anchor,2,1,3,2,far); grade(ramp,0.25,0.8); \
+                far_shared=map_point(4,-2); shared = link(anchor,2,-1,3,-2,\
+                far_shared); grade(shared,0.25,0.9); deck = highway(0,0,2,0,4,0,\
+                6,0); elevation(deck,4);",
         )
         .unwrap();
         editor.saved_program = editor.program.clone();
@@ -521,7 +529,11 @@ mod tests {
 
     #[test]
     fn spatial_reverse_lane_branch_follows_traffic_and_retains_parent_grade() {
-        let mut program=parse("road street: carlane-middle-carlane; end; parent=street(0,0,6,0); grade(parent,0.2,0.8);").unwrap();
+        let mut program = parse(
+            "road street: carlane-middle-carlane; end; parent=street(0,0,6,0); \
+                grade(parent,0.2,0.8);",
+        )
+        .unwrap();
         let projection = map::project(&program);
         let parent = &projection.segments[0];
         let road = road_for_segment(&program, parent).unwrap().clone();
@@ -554,7 +566,11 @@ mod tests {
 
     #[test]
     fn spatial_lane_pick_rejects_sidewalk_opposing_lane_and_invalid_attachment_values() {
-        let program=parse("road street: sidewalk-carlane-middle-carlane-sidewalk; end; parent=street(0,0,6,0); p=lane_point(parent,3,0.5);").unwrap();
+        let program = parse(
+            "road street: sidewalk-carlane-middle-carlane-sidewalk; end; \
+                parent=street(0,0,6,0); p=lane_point(parent,3,0.5);",
+        )
+        .unwrap();
         let projection = map::project(&program);
         let parent = &projection.segments[0];
         let road = road_for_segment(&program, parent).unwrap();

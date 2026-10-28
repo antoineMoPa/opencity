@@ -217,7 +217,7 @@ pub(super) fn from_layout(program: &Program, projection: &Projection) -> Vec<Int
             arms_by_point.entry(name).or_default().push((index, true));
         }
     }
-    let mut result:Vec<_>=program
+    let mut result: Vec<_> = program
         .statements
         .iter()
         .filter_map(|statement| {
@@ -233,7 +233,8 @@ pub(super) fn from_layout(program: &Program, projection: &Projection) -> Vec<Int
                 && call.args[2..].chunks_exact(2).all(|pair| {
                     matches!((&pair[0], &pair[1]),
                         (Argument::Identifier(side), Argument::Identifier(name))
-                        if port_direction_from_name(side).is_some() && points.contains_key(name.as_str()))
+                        if port_direction_from_name(side).is_some() &&
+                             points.contains_key(name.as_str()))
                 });
             if !placed && (call.args.len() < 2 || call.args.len() % 2 != 0) {
                 return None;
@@ -264,10 +265,17 @@ pub(super) fn from_layout(program: &Program, projection: &Projection) -> Vec<Int
             } else {
                 let mut mapped = Vec::new();
                 for pair in call.args[2..].chunks_exact(2) {
-                    let (Argument::Identifier(side), Argument::Identifier(name)) = (&pair[0], &pair[1]) else { return None };
+                    let (Argument::Identifier(side), Argument::Identifier(name)) =
+                        (&pair[0], &pair[1])
+                    else {
+                        return None;
+                    };
+
                     let direction = port_direction_from_name(side)?;
                     if !roads.contains(name.as_str())
-                        || mapped.iter().any(|(existing, _): &(WorldPoint, String)| *existing == direction)
+                        || mapped
+                            .iter()
+                            .any(|(existing, _): &(WorldPoint, String)| *existing == direction)
                     {
                         return None;
                     }
@@ -297,7 +305,7 @@ pub(super) fn from_layout(program: &Program, projection: &Projection) -> Vec<Int
                 Vec::new()
             };
             Some(Intersection {
-                footprint_half:0.,
+                footprint_half: 0.,
                 point_ref: point_ref.clone(),
                 position: point.position,
                 kind,
@@ -467,7 +475,16 @@ fn layout_placement(program: &Program, center_ref: &str) -> Option<usize> {
 
 pub fn translate_intersection(program: &mut Program, point_ref: &str, offset: WorldPoint) -> bool {
     let placement = layout_placement(program, point_ref);
-    if placement.is_none() && !program.statements.iter().any(|s| matches!(s, Statement::Call(c) if c.name == "map_point" && c.assigns.first().is_some_and(|name| name == point_ref))) { return false; }
+    if placement.is_none()
+        && !program.statements.iter().any(|s| {
+            matches!(s,
+         Statement::Call(c) if c.name == "map_point" &&
+         c.assigns.first().is_some_and(|name| name == point_ref))
+        })
+    {
+        return false;
+    }
+
     let projection = project(program);
     let Some(intersection) = intersections(program, &projection)
         .into_iter()
@@ -542,7 +559,16 @@ pub fn translate_intersection(program: &mut Program, point_ref: &str, offset: Wo
 
 pub fn rotate_intersection(program: &mut Program, point_ref: &str) -> bool {
     let placement = layout_placement(program, point_ref);
-    if placement.is_none() && !program.statements.iter().any(|s| matches!(s, Statement::Call(c) if c.name == "map_point" && c.assigns.first().is_some_and(|name| name == point_ref))) { return false; }
+    if placement.is_none()
+        && !program.statements.iter().any(|s| {
+            matches!(s,
+         Statement::Call(c) if c.name == "map_point" &&
+         c.assigns.first().is_some_and(|name| name == point_ref))
+        })
+    {
+        return false;
+    }
+
     let projection = project(program);
     let Some(intersection) = intersections(program, &projection)
         .into_iter()
@@ -593,7 +619,8 @@ pub fn rotate_intersection(program: &mut Program, point_ref: &str) -> bool {
             if call.name == "map_point" && call.assigns.first() == Some(&port.point_ref) {
                 call.args = vec![number_arg(next.x), number_arg(next.y)];
             } else if IntersectionKind::from_call_name(&call.name).is_some()
-                && matches!(call.args.first(), Some(Argument::Identifier(name)) if name == point_ref)
+                && matches!(call.args.first(),
+                     Some(Argument::Identifier(name)) if name == point_ref)
             {
                 for pair in call.args[2..].chunks_exact_mut(2) {
                     if matches!(&pair[1], Argument::Identifier(name) if name == &port.point_ref) {
@@ -630,7 +657,16 @@ pub fn rotate_intersection(program: &mut Program, point_ref: &str) -> bool {
 
 pub fn remove_placed_intersection(program: &mut Program, point_ref: &str) -> bool {
     let placement = layout_placement(program, point_ref);
-    if placement.is_none() && !program.statements.iter().any(|s| matches!(s, Statement::Call(c) if c.name == "map_point" && c.assigns.first().is_some_and(|name| name == point_ref))) { return false; }
+    if placement.is_none()
+        && !program.statements.iter().any(|s| {
+            matches!(s,
+         Statement::Call(c) if c.name == "map_point" &&
+         c.assigns.first().is_some_and(|name| name == point_ref))
+        })
+    {
+        return false;
+    }
+
     let projection = project(program);
     let Some(intersection) = intersections(program, &projection)
         .into_iter()
@@ -676,8 +712,11 @@ pub fn set_intersection(
     road_name: Option<&str>,
 ) -> Result<(), String> {
     let projection = project(program);
-    if !program.statements.iter().any(|statement| matches!(statement,
-        Statement::Call(call) if call.name == "map_point" && call.assigns.first().is_some_and(|name| name == point_ref))) {
+    if !program.statements.iter().any(|statement| {
+        matches!(statement,
+        Statement::Call(call) if call.name == "map_point" &&
+             call.assigns.first().is_some_and(|name| name == point_ref))
+    }) {
         return Err(format!("Unknown map point: {point_ref}"));
     }
     let arms = intersection_arms(&projection, point_ref).len();

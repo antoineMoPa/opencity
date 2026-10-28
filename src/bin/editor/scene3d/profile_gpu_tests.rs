@@ -143,7 +143,16 @@ fn profile_pavement_and_sidewalk_colors_match_across_ports_in_both_themes_and_vi
                                 for x in 63..65 {
                                     let pixel = &pixels[(y * 128 + x) * 4..][..4];
                                     for (channel, rgb) in [2, 1, 0].into_iter().enumerate() {
-                                        assert!((pixel[channel]as i32-expected[rgb]as i32).abs()<6,"{} {:?} theme light={} at seam factor {factor}, pixel {pixel:?}, expected {expected:?}",junction.point_ref,kind,theme==egui::Theme::Light);
+                                        assert!(
+                                            (pixel[channel] as i32 - expected[rgb] as i32).abs()
+                                                < 6,
+                                            "{} {:?} theme light={} at seam factor {factor}, \
+                                            pixel {pixel:?}, \
+                                            expected {expected:?}",
+                                            junction.point_ref,
+                                            kind,
+                                            theme == egui::Theme::Light
+                                        );
                                     }
                                 }
                             }
