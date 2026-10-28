@@ -9,6 +9,18 @@ pub(super) fn views(
         ("top-full", CameraView::Top, center, fit),
         ("iso-full", CameraView::Isometric, center, fit),
         (
+            "top-ramp-shoulders",
+            CameraView::Top,
+            WorldPoint { x: 14.95, y: 6.95 },
+            1100.0,
+        ),
+        (
+            "iso-ramp-shoulders",
+            CameraView::Isometric,
+            WorldPoint { x: 14.95, y: 6.95 },
+            1100.0,
+        ),
+        (
             "top-cloverleaf",
             CameraView::Top,
             WorldPoint { x: -13.8, y: 7.2 },

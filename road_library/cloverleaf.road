@@ -10,12 +10,12 @@ road interstate_three_lane:
 end
 
 road interstate_core:
-    carlane carlane carlane middle carlane carlane carlane;
+    verge carlane carlane carlane middle carlane carlane carlane verge;
     role highway;
 end
 
 road ramp_mouth:
-    carlane;
+    verge carlane verge;
     direction forward;
     role merge;
 end
@@ -118,37 +118,37 @@ se_connector_se_connector_seam = map_point(0.3360, -2.8290);
 se_connector_se_connector_merge_seam = map_point(2.8290, -0.3360);
 se_connector_mid = map_point(1.3125, -1.3125);
 
-nw_exit = lane_point(i_ew_03, 0, 1.0000);
+nw_exit = lane_point(i_ew_03, 1, 1.0000);
 
-nw_merge = lane_point(i_ns_04, 0, 1.0000);
+nw_merge = lane_point(i_ns_04, 1, 1.0000);
 
-sw_merge = lane_point(i_ew_03, 6, 1.0000);
+sw_merge = lane_point(i_ew_03, 7, 1.0000);
 
-sw_exit = lane_point(i_ns_02, 0, 1.0000);
+sw_exit = lane_point(i_ns_02, 1, 1.0000);
 
-ne_merge = lane_point(i_ew_05, 0, 1.0000);
+ne_merge = lane_point(i_ew_05, 1, 1.0000);
 
-ne_exit = lane_point(i_ns_04, 6, 1.0000);
+ne_exit = lane_point(i_ns_04, 7, 1.0000);
 
-se_exit = lane_point(i_ew_05, 6, 1.0000);
+se_exit = lane_point(i_ew_05, 7, 1.0000);
 
-se_merge = lane_point(i_ns_02, 6, 1.0000);
+se_merge = lane_point(i_ns_02, 7, 1.0000);
 
-nw_direct_exit = lane_point(i_ns_05, 0, 1.0000);
+nw_direct_exit = lane_point(i_ns_05, 1, 1.0000);
 
-nw_direct_merge = lane_point(i_ew_03a, 0, 0.0000);
+nw_direct_merge = lane_point(i_ew_03a, 1, 0.0000);
 
-ne_direct_exit = lane_point(i_ew_07, 0, 0.0000);
+ne_direct_exit = lane_point(i_ew_07, 1, 0.0000);
 
-ne_direct_merge = lane_point(i_ns_05, 6, 1.0000);
+ne_direct_merge = lane_point(i_ns_05, 7, 1.0000);
 
-sw_direct_exit = lane_point(i_ew_03a, 6, 0.0000);
+sw_direct_exit = lane_point(i_ew_03a, 7, 0.0000);
 
-sw_direct_merge = lane_point(i_ns_02a, 0, 0.0000);
+sw_direct_merge = lane_point(i_ns_02a, 1, 0.0000);
 
-se_direct_exit = lane_point(i_ns_02a, 6, 0.0000);
+se_direct_exit = lane_point(i_ns_02a, 7, 0.0000);
 
-se_direct_merge = lane_point(i_ew_07, 6, 0.0000);
+se_direct_merge = lane_point(i_ew_07, 7, 0.0000);
 
 i_ew_01 = interstate_three_lane(ew_w9, -7.7333, 0.0000, -6.4667, 0.0000, ew_w52);
 

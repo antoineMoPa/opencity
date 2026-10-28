@@ -110,7 +110,7 @@ fn cloverleaf_has_clear_corridors_in_every_orientation() {
 }
 
 #[test]
-fn connector_sidewalls_follow_the_taper_into_the_merge() {
+fn connector_shoulders_continue_at_full_width_into_the_merge() {
     let program = parse(include_str!("../road_library/cloverleaf.road")).unwrap();
     let projection = map::project(&program);
     let geometry = RoadGeometry::compile(&program, &projection);
@@ -150,8 +150,8 @@ fn connector_sidewalls_follow_the_taper_into_the_merge() {
             (a.point.x - b.point.x).hypot(a.point.y - b.point.y)
         };
         assert!(
-            width(&ramp_rows[0]) > width(last) + 0.05,
-            "ramp must taper toward the car-only merge"
+            (width(&ramp_rows[0]) - width(last)).abs() < 0.00001,
+            "ramp shoulders must stay full width through the merge"
         );
         for wall in geometry.walls.iter().filter(|w| w.segment == ramp) {
             for end in [wall.start, wall.end] {

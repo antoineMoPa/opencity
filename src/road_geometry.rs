@@ -83,6 +83,7 @@ struct Surface {
     rows: Vec<CrossSection>,
     forbidden: Vec<(Triangle, RoadElementKind)>,
     lanes: Vec<Triangle>,
+    pavement: Vec<Triangle>,
     edges: [Vec<Vertex>; 2],
 }
 pub struct RoadGeometry {
@@ -282,6 +283,20 @@ fn attached_parent(
             }
             if p.name == b.name {
                 return true;
+            }
+            if let Some(road) = definition(program, p).filter(|_| p.road_name == b.road_name) {
+                let index = projection
+                    .segments
+                    .iter()
+                    .position(|s| std::ptr::eq(s, p))
+                    .unwrap();
+                if crate::road_profiles::attachment_footprint(projection, index, road)
+                    .segments
+                    .iter()
+                    .any(|s| s.source == b.source)
+                {
+                    return true;
+                }
             }
             let seam = if t < 0.001 {
                 p.start_ref.as_deref()
@@ -550,6 +565,7 @@ impl RoadGeometry {
                         rows: vec![],
                         forbidden: vec![],
                         lanes: vec![],
+                        pavement: vec![],
                         edges: [vec![], vec![]],
                     };
                 };
@@ -563,6 +579,7 @@ impl RoadGeometry {
                 ];
                 let mut lanes = Vec::new();
                 let mut forbidden = Vec::new();
+                let mut pavement = Vec::new();
                 for (band, element) in road.elements.iter().enumerate() {
                     for pair in rows.windows(2) {
                         let [a, b, c, d] = [
@@ -579,6 +596,12 @@ impl RoadGeometry {
                                 vertices: [a, c, d],
                             },
                         ] {
+                            if element.kind == RoadElementKind::CarLane
+                                || (road.role != RoadRole::Ordinary
+                                    && element.kind == RoadElementKind::Verge)
+                            {
+                                pavement.push(triangle);
+                            }
                             if element.kind == RoadElementKind::CarLane {
                                 lanes.push(triangle);
                             } else {
@@ -591,17 +614,16 @@ impl RoadGeometry {
                     rows,
                     forbidden,
                     lanes,
+                    pavement,
                     edges,
                 }
             })
             .collect();
         let mut connections = vec![Vec::new(); surfaces.len()];
+        let joins = crate::road_profiles::road_joins(projection);
         for (mouth, segment) in projection.segments.iter().enumerate() {
             if !definition(program, segment).is_some_and(|r| {
-                r.role == RoadRole::Merge
-                    && r.elements
-                        .iter()
-                        .all(|e| e.kind == RoadElementKind::CarLane)
+                r.role == RoadRole::Merge && crate::road_profiles::merge_profile_is_paved(r)
             }) {
                 continue;
             }
@@ -609,8 +631,34 @@ impl RoadGeometry {
                 if parent != mouth && attached_parent(program, projection, mouth, parent) {
                     connections[parent].push(mouth);
                     connections[mouth].push(parent);
+                    // A shoulder can still overlap the parent just past the
+                    // shared mouth/ramp seam. Clip against that continuous
+                    // pavement too, so no parent wall ends inside the shoulder.
+                    for &(incoming, outgoing) in &joins {
+                        let ramp = if incoming == mouth {
+                            outgoing
+                        } else if outgoing == mouth {
+                            incoming
+                        } else {
+                            continue;
+                        };
+                        if definition(program, &projection.segments[ramp])
+                            .is_some_and(|r| r.role == RoadRole::Ramp)
+                            && crate::road_profiles::straight_join(
+                                &projection.segments[incoming],
+                                &projection.segments[outgoing],
+                            )
+                        {
+                            connections[parent].push(ramp);
+                            connections[ramp].push(parent);
+                        }
+                    }
                 }
             }
+        }
+        for connected in &mut connections {
+            connected.sort_unstable();
+            connected.dedup();
         }
         let mut walls = Vec::new();
         for (index, surface) in surfaces.iter().enumerate() {
@@ -619,7 +667,7 @@ impl RoadGeometry {
                     let (a, b) = (pair[0], pair[1]);
                     let mut cuts = Vec::new();
                     for &other in &connections[index] {
-                        for triangle in &surfaces[other].lanes {
+                        for triangle in &surfaces[other].pavement {
                             if let Some(interval) =
                                 clip(a, b, *triangle, HEIGHT_TOLERANCE, HEIGHT_TOLERANCE)
                             {
@@ -684,7 +732,13 @@ impl RoadGeometry {
                 let is_merge = definition(program, &projection.segments[lane])
                     .is_some_and(|r| r.role == RoadRole::Merge)
                     && attached_parent(program, projection, lane, other);
+                let is_merge_shoulder = definition(program, &projection.segments[other])
+                    .is_some_and(|r| r.role == RoadRole::Merge)
+                    && attached_parent(program, projection, other, lane);
                 'pair: for &(band, kind) in &obstacle.forbidden {
+                    if is_merge_shoulder && kind == RoadElementKind::Verge {
+                        continue;
+                    }
                     if is_merge && kind != RoadElementKind::Barrier {
                         continue;
                     }

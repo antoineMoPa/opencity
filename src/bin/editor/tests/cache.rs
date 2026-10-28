@@ -78,7 +78,7 @@ fn design_analysis_discards_old_results_and_checks_latest_document() {
 }
 
 #[test]
-fn placed_car_only_merge_mouth_receives_parent_profile() {
+fn placed_merge_mouth_with_shoulders_receives_parent_profile() {
     let program = parse("place(cloverleaf, sample, 0, 0, 0);").unwrap();
     let projection = map::project(&program);
     let profiles = paint_profiles(&program, &projection);
@@ -92,7 +92,7 @@ fn placed_car_only_merge_mouth_receives_parent_profile() {
         .iter()
         .position(|segment| segment.name.as_deref() == Some("sample_i_ns_02"))
         .unwrap();
-    assert_eq!(profiles[mouth_index].merge_alignment, Some(0));
+    assert_eq!(profiles[mouth_index].merge_alignment, Some(1));
     assert!(profiles[mouth_index].end_parent.is_some());
     let order = road_paint_order(&program, &projection, &profiles);
     assert!(

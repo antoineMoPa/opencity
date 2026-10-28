@@ -255,3 +255,71 @@ fn real_diamond_bridge_intersection_has_connected_corner_barriers() {
         "elevated grass at the diamond bridge junction"
     );
 }
+
+#[test]
+fn ramp_mouth_shoulders_are_paved_and_clear_for_vehicle_width() {
+    for source in [
+        "place(cloverleaf, c, 0, 0, 0);",
+        "place(street_to_interstate_flat, c, 0, 0, 0);",
+        "place(street_to_interstate_elevated, c, 0, 0, 0);",
+        include_str!("../examples/default_map.road"),
+    ] {
+        let program = parse(source).unwrap();
+        let projection = opencity::map::project(&program);
+        let geometry = opencity::road_geometry::RoadGeometry::compile(&program, &projection);
+        let city = City::from_program(
+            &program,
+            Some(std::path::Path::new(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/examples"
+            ))),
+        )
+        .unwrap();
+        let mut mouths = 0;
+        for (id, segment) in projection.segments.iter().enumerate() {
+            let road = opencity::road_profiles::road_for_segment(&program, segment).unwrap();
+            if road.role != opencity::RoadRole::Merge {
+                continue;
+            }
+            mouths += 1;
+            for row in geometry.cross_sections(id) {
+                let a = row.boundaries[0];
+                let b = *row.boundaries.last().unwrap();
+                let width = (a.point.x - b.point.x).hypot(a.point.y - b.point.y);
+                let expected =
+                    opencity::map::element_world_width(opencity::RoadElementKind::CarLane)
+                        + 2. * opencity::map::element_world_width(opencity::RoadElementKind::Verge);
+                assert!(
+                    (width - expected).abs() < 0.00001,
+                    "{:?}: shoulders pinch at t={}",
+                    segment.name,
+                    row.t
+                );
+                // Both shoulders and the lane must admit a vehicle, rather than
+                // merely opening the barrier along the centerline.
+                for fraction in [0.2, 0.5, 0.8] {
+                    let p = [
+                        a.point.x + (b.point.x - a.point.x) * fraction,
+                        a.point.y + (b.point.y - a.point.y) * fraction,
+                    ];
+                    let contact =
+                        city.road_barrier_contact(p, 0.0092, a.height + 0.003, a.height + 0.01);
+                    assert!(contact.is_none(),
+                        "{:?}: blocked shoulder at t={}, fraction={fraction}, point={p:?}, contact={contact:?}",
+                        segment.name, row.t);
+                    // An entry on a ground street may also overlap its existing sidewalk.
+                    assert!(
+                        matches!(
+                            city.surface_at(p, a.height + 0.005).unwrap().kind,
+                            SurfaceKind::Asphalt | SurfaceKind::Sidewalk
+                        ),
+                        "{:?}: unpaved shoulder at t={}",
+                        segment.name,
+                        row.t
+                    );
+                }
+            }
+        }
+        assert!(mouths > 0);
+    }
+}

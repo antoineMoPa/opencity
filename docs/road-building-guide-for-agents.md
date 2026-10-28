@@ -65,8 +65,8 @@ and four outer direct connectors for right turns. For each movement:
 
 The library's [`cloverleaf.road`](../road_library/cloverleaf.road) names its short through-road
 pieces `i_ew_*` and `i_ns_*`, loop pieces `*_loop_*`, and direct connectors `*_connector*`. Build
-each ramp port on a short `interstate_core` piece with the outer car lane exposed; taper the verges
-on the approach stubs outside the interchange. No long through segment should run beneath a merge.
+each ramp port on a short `interstate_core` piece, keeping both highway shoulders continuous
+through the interchange. Merge pavement opens the parent wall across the lane and shoulders.
 Its east-west and north-south center points are separate; the latter deck is raised. The
 [`flat`](../road_library/street_to_interstate_flat.road) and
 [`elevated`](../road_library/street_to_interstate_elevated.road) street ramps demonstrate a
@@ -83,7 +83,7 @@ adapting one.
   direction. Check street profiles against their intersection edges in the editor's **Check design
   rules** view.
 - For every ramp, follow references from entry to merge. Verify point order, one-way direction,
-  parent lane travel, exact shared seam references, and equal heights at each seam. Use a car-only
+  parent lane travel, exact shared seam references, and equal heights at each seam. Use a paved
   `ramp_mouth` at each intentional edge crossing so the merge has a drivable surface. Check that an
   exit never feeds into opposing traffic.
 - Inspect top and isometric views after every local join and again at the final target zoom. Look
@@ -102,25 +102,28 @@ project-specific specifications and visual QA.
 
 ## 5. Declare connection semantics and check compiled geometry
 
-Road names are labels. Declare `role ramp;` on ramp profiles and `role merge;` on car-only
+Road names are labels. Declare `role ramp;` on ramp profiles and `role merge;` on paved
 entry/merge profiles. The default is `role ordinary;`. A name such as `ramp_mouth` no longer grants
 a merge exception. Both `role` and `direction` survive saving, template expansion, translation, and
 rotation.
 
 ```text
 road connector:
-    carlane;
+    verge carlane verge;
     direction forward;
     role merge;
 end
 ```
+
+Carry `verge carlane verge` continuously through ramp mouths so shoulders do not taper away at
+the highway entrance. Merge verges are paved; sidewalks and barriers are invalid merge bands.
 
 A merge must have an explicit `lane_point` attachment to a parent **car lane**. Its other end
 connects to the ramp with a shared point reference. Match elevation and travel direction. Changing a
 label or declaring a merge cannot authorize a crossing of an unrelated road or an explicit barrier.
 
 The shared Rust `road_geometry::RoadGeometry` compiler subdivides Bézier centerlines, builds
-full-width lane triangles, and clips elevated sidewalls against the attached merge/parent lane
+full-width lane triangles, and clips elevated sidewalls against the attached merge/parent pavement
 surfaces. It opens both sides of the connection: the parent wall across the mouth and the mouth wall
 inside the parent pavement. The editor and GLB exporter consume these same wall pieces. Never add
 camera-dependent wall hiding or enlarge a proximity radius to repair an obstruction.
@@ -128,7 +131,7 @@ camera-dependent wall hiding or enlarge a proximity radius to repair an obstruct
 Run `check_design_rules` after every geometry or profile edit. Treat **all** issues as failures
 before adding a template to the library:
 
-- `invalid_merge_connection`: supply a car-only merge profile and an explicit parent car-lane
+- `invalid_merge_connection`: supply a paved merge profile and an explicit parent car-lane
   attachment.
 - `vehicle_path_obstructed`: a remaining elevated wall enters another lane's clearance corridor. Fix
   topology or provide enough vertical separation; unrelated walls are not automatically removed.

@@ -12,7 +12,7 @@ road on_ramp:
     role ramp;
 end
 road ramp_mouth:
-    carlane;
+    verge carlane verge;
     direction forward;
     role merge;
 end

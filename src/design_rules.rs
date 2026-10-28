@@ -94,17 +94,22 @@ pub fn check_design_rules_with_projection(
             continue;
         }
         if road.role == crate::RoadRole::Merge {
-            let car_only = road
-                .elements
-                .iter()
-                .all(|e| e.kind == RoadElementKind::CarLane);
+            let paved = crate::road_profiles::merge_profile_is_paved(road);
             let lane_attachment = [segment.start_ref.as_deref(),segment.end_ref.as_deref()].into_iter().flatten().any(|reference| {
         let Some((parent,lane,_))=map::lane_attachment(program,reference) else{return false;};
         let Some(parent)=projection.segments.iter().find(|s|s.name.as_deref()==Some(&parent)) else{return false;};
         program.statements.iter().any(|s|matches!(s,Statement::Road(r) if r.name==parent.road_name && r.elements.get(lane).is_some_and(|e|e.kind==RoadElementKind::CarLane)))
     });
-            if !car_only || !lane_attachment {
-                issues.push(DesignIssue{rule:DesignRule::InvalidMergeConnection,message:format!("{} needs a car-only merge profile and an explicit attachment to a car lane",segment_name(segment)),at:segment.start,roads:[segment_name(segment).into(),String::new()]});
+            if !paved || !lane_attachment {
+                issues.push(DesignIssue {
+                    rule: DesignRule::InvalidMergeConnection,
+                    message: format!(
+                        "{} needs a paved merge profile and an explicit attachment to a car lane",
+                        segment_name(segment)
+                    ),
+                    at: segment.start,
+                    roads: [segment_name(segment).into(), String::new()],
+                });
             }
         }
         for (reference, position, side) in [
@@ -482,8 +487,7 @@ fn mouth_overlays_parent(
     projection: &map::Projection,
 ) -> bool {
     if road_network_role(source_road) != RoadNetworkRole::RampMouth
-        || source_road.elements.len() != 1
-        || source_road.elements[0].kind != RoadElementKind::CarLane
+        || !crate::road_profiles::merge_profile_is_paved(source_road)
     {
         return false;
     }
@@ -503,6 +507,22 @@ fn mouth_overlays_parent(
             };
             if std::ptr::eq(parent, other) {
                 return true;
+            }
+            if let Some(road) = crate::road_profiles::road_for_segment(program, parent)
+                .filter(|_| parent.road_name == other.road_name)
+            {
+                let index = projection
+                    .segments
+                    .iter()
+                    .position(|s| std::ptr::eq(s, parent))
+                    .unwrap();
+                if crate::road_profiles::attachment_footprint(projection, index, road)
+                    .segments
+                    .iter()
+                    .any(|s| s.source == other.source)
+                {
+                    return true;
+                }
             }
             let seam = if parent_t < 0.001 {
                 parent.start_ref.as_deref()
@@ -641,7 +661,14 @@ pub fn check_vehicle_lane_intrusions(
                     for element in &other_road.elements {
                         let band_width = map::element_world_width(element.kind);
                         let inside = offset > edge + 0.003 && offset < edge + band_width - 0.003;
-                        if inside && element.kind != RoadElementKind::CarLane {
+                        let paved_merge_shoulder = element.kind == RoadElementKind::Verge
+                            && mouth_overlays_parent(
+                                other, other_road, source, program, projection,
+                            );
+                        if inside
+                            && element.kind != RoadElementKind::CarLane
+                            && !paved_merge_shoulder
+                        {
                             reported.insert((source_index, lane, other_index));
                             issues.push(DesignIssue {
                                 rule: DesignRule::VehicleLaneCrossesNonCarBand,

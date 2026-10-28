@@ -302,7 +302,7 @@ fn lowering_an_elevated_merge_mouth_is_rejected() {
 }
 
 #[test]
-fn cloverleaf_core_uses_short_car_lane_patches_at_every_ramp_port() {
+fn cloverleaf_core_keeps_shoulders_at_every_ramp_port() {
     let (program, projection) = asset(include_str!("../road_library/cloverleaf.road"));
     let core: Vec<_> = projection
         .segments
@@ -346,10 +346,8 @@ fn cloverleaf_core_uses_short_car_lane_patches_at_every_ramp_port() {
             })
             .unwrap();
         assert_eq!(road.elements[lane].kind, RoadElementKind::CarLane);
-        assert!(!road
-            .elements
-            .iter()
-            .any(|element| element.kind == RoadElementKind::Verge));
+        assert_eq!(road.elements.first().unwrap().kind, RoadElementKind::Verge);
+        assert_eq!(road.elements.last().unwrap().kind, RoadElementKind::Verge);
     }
 }
 

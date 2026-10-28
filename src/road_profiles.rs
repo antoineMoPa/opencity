@@ -143,6 +143,23 @@ pub fn ramp_element_at_attachment(
     if element_index >= parent_road.elements.len() || ramp_road.elements.is_empty() {
         return None;
     }
+    // Merge mouths carry their paved shoulders across the parent's edge,
+    // rather than copying the parent's outward cross-section.
+    if parent_road.elements[element_index].kind == RoadElementKind::CarLane
+        && ramp_road.role == crate::RoadRole::Merge
+        && merge_profile_is_paved(ramp_road)
+        && ramp_road
+            .elements
+            .iter()
+            .filter(|e| e.kind == RoadElementKind::CarLane)
+            .count()
+            == 1
+    {
+        return ramp_road
+            .elements
+            .iter()
+            .position(|e| e.kind == RoadElementKind::CarLane);
+    }
     if parent_road.elements[element_index].kind == RoadElementKind::CarLane
         && ramp_road.elements.len() == 1
         && ramp_road.elements[0].kind == RoadElementKind::CarLane
@@ -159,6 +176,17 @@ pub fn ramp_element_at_attachment(
     } else {
         None
     }
+}
+
+/// Merge surfaces may include shoulders, but never sidewalks or barriers.
+pub fn merge_profile_is_paved(road: &RoadDefinition) -> bool {
+    road.elements
+        .iter()
+        .any(|e| e.kind == RoadElementKind::CarLane)
+        && road
+            .elements
+            .iter()
+            .all(|e| matches!(e.kind, RoadElementKind::CarLane | RoadElementKind::Verge))
 }
 
 pub fn road_profiles(program: &Program, projection: &map::Projection) -> Vec<RoadProfile> {
