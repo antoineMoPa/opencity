@@ -42,7 +42,8 @@ pub fn build_scene_with_model_base(
     let profiles = paint_profiles(program, projection);
     let mut geometry = opencity::road_geometry::RoadGeometry::compile(program, projection);
     geometry.configure_safety(program, projection, heightmap.as_deref());
-    let mut features = project_landscape_features(program).features;
+    let expanded = super::super::frontage::scaffold_program(program, model_base);
+    let mut features = project_landscape_features(expanded.as_ref().unwrap_or(program)).features;
     if heightmap.is_none()
         && !features
             .iter()
@@ -133,7 +134,9 @@ impl WebSceneBuild {
         let mut geometry = opencity::road_geometry::RoadGeometry::compile(&program, &projection);
         let road_order = road_paint_order(&program, &projection, &profiles);
         let intersections = map::intersections(&program, &projection);
-        let mut landscape = project_landscape_features(&program).features;
+        let expanded = super::super::frontage::scaffold_program(&program, None);
+        let mut landscape =
+            project_landscape_features(expanded.as_ref().unwrap_or(&program)).features;
         let mut scene = Scene::default();
         let heightmap = super::super::elevation_map::load(&program, None)
             .ok()

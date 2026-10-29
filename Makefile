@@ -13,10 +13,11 @@ serve:
 .PHONY: fmt lint hooks
 
 fmt:
-	node scripts/lint.cjs --fix
+	cargo fmt
+	cargo fmt --manifest-path xtask/Cargo.toml
 
 lint:
-	node scripts/lint.cjs
+	cargo xtask
 
 hooks:
 	@current=$$(git config --get core.hooksPath || true); \
@@ -27,4 +28,4 @@ hooks:
 
 .PHONY: test-lint
 test-lint:
-	node scripts/lint.test.cjs
+	cargo test --manifest-path xtask/Cargo.toml

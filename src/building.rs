@@ -2,6 +2,39 @@
 
 use crate::Argument;
 
+/// Generic occupancy intent, independent of appearance or procedural recipes.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum BuildingUse {
+    #[default]
+    Unspecified,
+    Residential,
+    Commercial,
+    MixedUse,
+}
+impl BuildingUse {
+    pub fn from_keyword(keyword: &str) -> Option<Self> {
+        match keyword {
+            "unspecified" => Some(Self::Unspecified),
+            "residential" => Some(Self::Residential),
+            "commercial" => Some(Self::Commercial),
+            "mixed_use" => Some(Self::MixedUse),
+            _ => None,
+        }
+    }
+    pub fn keyword(self) -> &'static str {
+        match self {
+            Self::Unspecified => "unspecified",
+            Self::Residential => "residential",
+            Self::Commercial => "commercial",
+            Self::MixedUse => "mixed_use",
+        }
+    }
+    /// Legacy unspecified shells keep residential detail behavior.
+    pub fn allows_residential_details(self) -> bool {
+        matches!(self, Self::Unspecified | Self::Residential)
+    }
+}
+
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum BuildingMaterial {
     #[default]
@@ -118,8 +151,12 @@ impl Default for BuildingStyle {
 }
 
 impl BuildingStyle {
-    pub(crate) fn parse_options(properties: &[(String, Argument)]) -> Result<Self, String> {
+    pub(crate) fn parse_options(
+        properties: &[(String, Argument)],
+    ) -> Result<(Self, BuildingUse, Option<usize>), String> {
         let mut style = Self::default();
+        let mut building_use = BuildingUse::default();
+        let mut front_edge = None;
         for (index, (key, value)) in properties.iter().enumerate() {
             if properties[..index]
                 .iter()
@@ -128,6 +165,22 @@ impl BuildingStyle {
                 return Err(format!("duplicate building option '{key}'"));
             }
             match key.as_str() {
+                "use" => {
+                    let Argument::Identifier(keyword) = value else {
+                        return Err("unknown building use".into());
+                    };
+                    building_use =
+                        BuildingUse::from_keyword(keyword).ok_or("unknown building use")?;
+                }
+                "front_edge" => {
+                    let Argument::Number(text) = value else {
+                        return Err("building front_edge must be a nonnegative integer".into());
+                    };
+                    front_edge = Some(
+                        text.parse::<usize>()
+                            .map_err(|_| "building front_edge must be a nonnegative integer")?,
+                    );
+                }
                 "material" => {
                     let Argument::Identifier(keyword) = value else {
                         return Err("unknown building material".into());
@@ -148,6 +201,6 @@ impl BuildingStyle {
                 _ => return Err(format!("unknown building option '{key}'")),
             }
         }
-        Ok(style)
+        Ok((style, building_use, front_edge))
     }
 }

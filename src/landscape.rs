@@ -77,6 +77,10 @@ pub struct LandscapeFeature {
     pub height: Option<f32>,
     /// Facade material and procedural floor spacing, present only on buildings.
     pub building_style: Option<BuildingStyle>,
+    /// Generic occupancy intent; unspecified for legacy buildings and other features.
+    pub building_use: crate::BuildingUse,
+    /// Edge i connects footprint point i to (i + 1) % n.
+    pub front_edge: Option<usize>,
     /// Terrain patch height relative to its containing block.
     pub terrain_height: Option<f32>,
     /// Optional quoted GLB path attached to a building.
@@ -234,6 +238,8 @@ fn feature(
     let mut height = None;
     let mut model = None;
     let mut building_style = None;
+    let mut building_use = crate::BuildingUse::default();
+    let mut front_edge = None;
     let mut vegetation_type = None;
     match kind {
         LandscapeKind::Building => {
@@ -255,15 +261,21 @@ fn feature(
                 model = Some(path.to_owned());
                 offset += 1;
             }
-            building_style = Some(
-                if let Some(Argument::Object(properties)) = call.args.get(offset) {
-                    offset += 1;
-                    BuildingStyle::parse_options(properties)
-                        .map_err(|message| error(call, message))?
-                } else {
-                    BuildingStyle::default()
-                },
-            );
+            let (style, use_kind, edge) = if let Some(Argument::Object(properties)) =
+                call.args.get(offset)
+            {
+                offset += 1;
+                BuildingStyle::parse_options(properties).map_err(|message| error(call, message))?
+            } else {
+                (
+                    BuildingStyle::default(),
+                    crate::BuildingUse::default(),
+                    None,
+                )
+            };
+            building_style = Some(style);
+            building_use = use_kind;
+            front_edge = edge;
         }
         LandscapeKind::Terrain => {
             let value = call
@@ -306,6 +318,25 @@ fn feature(
         }
         points.push(point);
     }
+    if let Some(edge) = front_edge {
+        if edge >= points.len() {
+            return Err(error(call, "building front_edge is outside its footprint"));
+        }
+        let a = points[edge];
+        let b = points[(edge + 1) % points.len()];
+        let area: f32 = points
+            .iter()
+            .zip(points.iter().cycle().skip(1))
+            .take(points.len())
+            .map(|(a, b)| a[0] * b[1] - b[0] * a[1])
+            .sum();
+        if (b[0] - a[0]).hypot(b[1] - a[1]) <= 1e-6 || area.abs() <= 1e-10 || !area.is_finite() {
+            return Err(error(
+                call,
+                "building front_edge needs a nondegenerate polygon and edge",
+            ));
+        }
+    }
     Ok(LandscapeFeature {
         kind,
         name: call.assigns.first().cloned(),
@@ -329,6 +360,8 @@ fn feature(
         },
         model,
         building_style,
+        building_use,
+        front_edge,
         vegetation_type,
     })
 }

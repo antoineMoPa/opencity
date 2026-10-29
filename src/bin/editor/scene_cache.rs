@@ -22,8 +22,21 @@ impl RoadEditor {
                 return Arc::clone(projection);
             }
         }
-        let projection = Arc::new(project_landscape_features(&self.program));
-        self.landscape_cache = Some((self.program.clone(), Arc::clone(&projection)));
+        let expanded = frontage::cached_scaffold_program(
+            &self.program,
+            self.path.as_deref().and_then(Path::parent),
+        );
+        let projection = Arc::new(project_landscape_features(
+            expanded.as_ref().unwrap_or(&self.program),
+        ));
+        let zoned = self.program.statements.iter().any(|s| match s {
+            Statement::Call(c) => matches!(c.name.as_str(), "frontage_zone" | "residential_area"),
+            _ => false,
+        });
+        if expanded.is_some() || !zoned {
+            self.landscape_cache = Some((self.program.clone(), Arc::clone(&projection)));
+        }
+
         projection
     }
 

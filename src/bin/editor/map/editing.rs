@@ -37,7 +37,7 @@ pub fn set_name(program: &mut Program, source: SegmentSource, name: String) -> b
             let Statement::Call(call) = statement else {
                 continue;
             };
-            if call.name == "lane_point" {
+            if matches!(call.name.as_str(), "lane_point" | "frontage_zone") {
                 if let Some(Argument::Identifier(parent)) = call.args.first_mut() {
                     if *parent == old_name {
                         *parent = name.clone();

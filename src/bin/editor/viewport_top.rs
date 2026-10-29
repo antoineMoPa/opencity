@@ -97,8 +97,9 @@ impl RoadEditor {
             let annotation_block = self.annotation_input(ui, &response, rect);
             let box_block = self.box_select_input(ui, &response, rect, &before, false);
             let network_block = self.network_map_ui(ui, &response, rect, &before, false);
-            let building_block =
-                network_block || self.building_options_ui(ui, &response, rect, false);
+            let building_block = network_block
+                || self.zone_options_ui(ui, &response, rect, false)
+                || self.building_options_ui(ui, &response, rect, false);
 
             let point_block =
                 building_block || self.point_options_ui(ui, &response, rect, &before, false);
@@ -817,6 +818,7 @@ impl RoadEditor {
                 ),
             ));
             self.paint_selection_overlay(&painter, rect, &projection, palette, CameraView::Top);
+            self.paint_frontage_zones(ui, rect, false);
             self.paint_annotations(ui, rect);
             self.paint_network_overlays(ui, rect, false);
             self.paint_intersection_preview(ui, rect);

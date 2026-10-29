@@ -5,6 +5,11 @@ mod bridges;
 mod geometry;
 use crate::junction_mesh;
 mod building_details;
+mod building_frontage;
+pub mod scaffold;
+mod scaffold_frontage;
+mod scaffold_residential;
+pub use building_frontage::BuildingFrontage;
 mod mesh;
 mod svg;
 use crate::{
@@ -19,9 +24,15 @@ pub use mesh::{Mesh, StreetFeature, StreetFeatureKind, Vertex};
 use std::{collections::HashMap, path::Path};
 
 /// Optional standalone wgpu shader: Z-up positions, linear RGB, surface metadata.
-/// Group 0 binding 0: view-projection, light view-projection, eye/time, sun/exposure, daylight/sky.
+/// Group 0: 288-byte camera/lighting/star uniform (see docs/game-runtime.md).
 /// Group 1: 2048² shadow depth texture and comparison sampler (see shader).
-pub const GAME_SHADER: &str = include_str!("game.wgsl");
+pub const GAME_SHADER: &str = concat!(
+    include_str!("sky_stars.wgsl"),
+    "\n",
+    include_str!("game.wgsl")
+);
+/// Native-resolution world-fixed stellar detail, shared with consumer sky backgrounds.
+pub const SKY_STARS_SHADER: &str = include_str!("sky_stars.wgsl");
 /// Original editor shader, for consumers implementing its documented bindings.
 pub const EDITOR_SHADER: &str = include_str!("../bin/editor/shaders/scene.wgsl");
 
@@ -134,10 +145,13 @@ struct Triangle {
     road: Option<usize>,
     color: [f32; 3],
     data: [f32; 3],
+    paving_distance: Option<[f32; 3]>,
 }
 /// Compiled snapshot. IDs are indices stable for this snapshot, never source-file offsets.
 pub struct City {
     pub roads: Vec<Road>,
+    /// Authored neutral reservations; no geometry is generated automatically.
+    pub frontage_zones: Vec<crate::FrontageZone>,
     pub road_barriers: Vec<crate::road_geometry::Wall>,
     pub paths: Vec<RoutePath>,
     pub landscape: Vec<LandscapeFeature>,
@@ -182,12 +196,17 @@ impl City {
         if !landscape.errors.is_empty() {
             return Err(format!("landscape: {:?}", landscape.errors));
         }
+        let frontages = crate::project_frontage_zones(program);
+        if !frontages.errors.is_empty() {
+            return Err(format!("frontage: {:?}", frontages.errors));
+        }
         let components = network::project(program);
         if !components.errors.is_empty() {
             return Err(components.errors.join("; "));
         }
         let mut city = Self {
             roads: Vec::new(),
+            frontage_zones: frontages.zones,
             road_barriers: Vec::new(),
             paths: Vec::new(),
             landscape: landscape.features,
@@ -201,6 +220,26 @@ impl City {
         };
         geometry::compile(&mut city, program, &projection)?;
         Ok(city)
+    }
+    /// Resolve a zone's named placement in this immutable snapshot.
+    pub fn frontage_road(&self, zone: &crate::FrontageZone) -> Option<&Road> {
+        let mut roads = self
+            .roads
+            .iter()
+            .filter(|r| r.segment.name.as_ref() == Some(&zone.road_placement));
+        let road = roads.next()?;
+        roads.next().is_none().then_some(road)
+    }
+    /// Generic facade frame honoring an explicit front edge before road proximity.
+    pub fn building_frontage(
+        &self,
+        feature: &LandscapeFeature,
+        road_reach: f32,
+    ) -> Option<BuildingFrontage> {
+        if feature.kind != LandscapeKind::Building || !road_reach.is_finite() || road_reach < 0.0 {
+            return None;
+        }
+        building_frontage::front_for(self, feature, road_reach)
     }
     /// Radius tests use road footprints, path segments and polygons (including containment).
     /// Invalid directly-constructed radius regions produce an empty result.

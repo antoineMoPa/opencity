@@ -150,20 +150,18 @@ chain-link. The packed vertex stride is unchanged. Render planes double-sided, w
 alpha-to-coverage enabled in the scene pipeline to soften line edges without sorting transparent
 objects.
 
-Group 0 binding 0 is a 176-byte uniform: column-major view-projection matrix, column-major light
-view-projection matrix, eye XYZ + time seconds, sun XYZ + exposure, daylight (0–1) + sky RGB.
-Matrices use wgpu's 0..1 clip depth. Group 1 binding 0 is a 2048² depth texture, binding 1 a
-comparison sampler. `vs_shadow`/`fs_shadow` write sunlight depth and discard fence gaps; `vs`/`fs`
-render the scene to an sRGB target. Create a depth-only shadow pipeline with a fragment stage, no
-color targets and just group 0, and the scene pipeline with both groups. The shader provides
-procedural surface noise, facade details, animated water, PCF sunlight shadows, fog and exposure
-compression. `SurfaceKind::Window` supports five-face parallax interiors with seeded lighting and
-edge AO. Detailed panes store `[Window, U, V, 16 * (1 + seed % 256) + aspect]`, with aspect clamped
-to 0.125..15. UVs interpolate across the pane, U along `(normal.y, -normal.x, 0)` and V upward; the
-packed seed/aspect stays flat. The vertex layout is unchanged. Pane red values below 0.05 select an
-unoccupied room. Zero metadata keeps legacy glass glow. Procedural facade windows use the same
-five-face rooms. `SurfaceKind::Light` glows at night; `SurfaceKind::Roof` stores its texture unit in
-`surface.y`. Games can replace the shader or bind an all-lit depth texture to omit shadowing.
+See the [runtime shader contract](../docs.md#runtime-shader-contract) for uniforms, sky/shadow
+bindings, pipeline setup and sidewalk metadata. The shader provides procedural surfaces, animated
+water, PCF shadows, fog and exposure compression.
+
+`SurfaceKind::Window` supports five-face parallax interiors with seeded
+lighting and edge AO. Detailed panes store `[Window, U, V, 16 * (1 + seed % 256) + aspect]`, with
+aspect clamped to 0.125..15. UVs interpolate across the pane, U along `(normal.y, -normal.x, 0)` and
+V upward; the packed seed/aspect stays flat. The vertex layout is unchanged. Pane red values below
+0.05 select an unoccupied room. Zero metadata keeps legacy glass glow. Procedural facade windows use
+the same five-face rooms. `SurfaceKind::Light` glows at night; `SurfaceKind::Roof` stores its
+texture unit in `surface.y`. Games can replace the shader or bind an all-lit depth texture to omit
+shadowing.
 
 Validate the library with `cargo test --no-default-features --features game-runtime`. Runtime
 integration tests cover structured selection, one-way lanes, polygon containment, stacked

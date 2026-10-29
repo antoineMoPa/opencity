@@ -163,3 +163,40 @@ fn invalid_building_options_are_reported_without_geometry() {
         assert!(projection.features.is_empty(), "{height}");
     }
 }
+
+#[test]
+fn occupancy_and_explicit_front_edge_are_validated_and_roundtrip() {
+    use opencity::BuildingUse;
+    let program = parse("b=building(0.1,{use:mixed_use,front_edge:2},0,0,1,0,1,1,0,1);").unwrap();
+    let saved = parse(&program.to_road_source()).unwrap();
+    assert_eq!(saved, program);
+    let projected = project_landscape_features(&saved);
+    assert!(projected.errors.is_empty());
+    assert_eq!(projected.features[0].building_use, BuildingUse::MixedUse);
+    assert_eq!(projected.features[0].front_edge, Some(2));
+    for options in [
+        "front_edge:4",
+        "front_edge:-1",
+        "front_edge:1.5",
+        "use:retail",
+    ] {
+        let source = format!("b=building(0.1,{{{options}}},0,0,1,0,1,1,0,1);");
+        let projected = project_landscape_features(&parse(&source).unwrap());
+        assert!(projected.features.is_empty(), "{source}");
+        assert_eq!(projected.errors.len(), 1);
+    }
+    let degenerate = parse("b=building(0.1,{front_edge:0},0,0,0,0,1,1);").unwrap();
+    assert_eq!(project_landscape_features(&degenerate).errors.len(), 1);
+    for (use_kind, eligible) in [
+        (BuildingUse::Unspecified, true),
+        (BuildingUse::Residential, true),
+        (BuildingUse::Commercial, false),
+        (BuildingUse::MixedUse, false),
+    ] {
+        assert_eq!(use_kind.allows_residential_details(), eligible);
+        assert_eq!(
+            BuildingUse::from_keyword(use_kind.keyword()),
+            Some(use_kind)
+        );
+    }
+}

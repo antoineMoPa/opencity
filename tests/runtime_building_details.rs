@@ -41,6 +41,78 @@ fn city() -> City {
 }
 
 #[test]
+fn entrance_paving_is_one_supported_quad_aligned_to_ground_door() {
+    for angle in [0_f32, 0.7, 1.57, 3.14] {
+        let (sin, cos) = angle.sin_cos();
+        let point = |x: f32, y: f32| (cos * x - sin * y, sin * x + cos * y);
+        let road = [point(-1., 0.), point(1., 0.)];
+        let corners = [
+            point(-0.04, 0.08),
+            point(0.04, 0.08),
+            point(0.04, 0.19),
+            point(-0.04, 0.19),
+        ];
+        let source = format!(
+            "road street: sidewalk carlane sidewalk; end street({},{},{},{}); \
+            ground=land(-2,-2,2,-2,2,2,-2,2); elevation(ground,0.02); \
+            home=building(0.07,{{floor_height:0.035,front_edge:0}},{}); elevation(home,0.002);",
+            road[0].0,
+            road[0].1,
+            road[1].0,
+            road[1].1,
+            corners
+                .iter()
+                .map(|p| format!("{},{}", p.0, p.1))
+                .collect::<Vec<_>>()
+                .join(",")
+        );
+        let city = City::from_program(&parse(&source).unwrap(), None).unwrap();
+        let paths = |mesh: opencity::runtime::Mesh| {
+            mesh.vertices
+                .into_iter()
+                .filter(|v| {
+                    v.surface[0] == SurfaceKind::Sidewalk as u32 as f32 && v.surface[3] == 1.
+                })
+                .collect::<Vec<_>>()
+        };
+        let (mesh, props) = city.building_detail_parts(Region::WholeMap, &config());
+        let path = paths(mesh);
+        assert_eq!(path.len(), 6, "one quad at angle {angle}");
+        assert!(
+            props.into_iter().all(|p| paths(p).is_empty()),
+            "path is static"
+        );
+        let feature = city.query(Region::WholeMap).buildings[0].1;
+        let frame = city.building_frontage(feature, 0.5).unwrap();
+        let expected = frame.point(frame.width * 0.46 + 0.0095 * 0.5, 0., 0.00015);
+        let start = [
+            (path[0].position[0] + path[1].position[0]) * 0.5,
+            (path[0].position[1] + path[1].position[1]) * 0.5,
+        ];
+        assert!((start[0] - expected[0]).hypot(start[1] - expected[1]) < 1e-6);
+        let end = path[2].position;
+        assert_eq!(
+            city.surface_at([end[0], end[1]], 0.01).unwrap().kind,
+            SurfaceKind::Sidewalk
+        );
+        assert!(path.iter().all(|v| v.normal[2] > 0.99));
+        assert!(
+            (path[0].position[2] - 0.00015).abs() < 1e-6,
+            "paving starts at ground, not the raised home base"
+        );
+        assert!(
+            (end[2] - 0.00165).abs() < 1e-6,
+            "paving meets the raised sidewalk"
+        );
+        for replacement in ["lake(-2,-2,2,-2,2,2,-2,2)", "concrete(-2,-2,2,-2,2,2,-2,2)"] {
+            let blocked = source.replace("land(-2,-2,2,-2,2,2,-2,2)", replacement);
+            let city = City::from_program(&parse(&blocked).unwrap(), None).unwrap();
+            assert!(paths(city.building_detail_mesh(Region::WholeMap, &config())).is_empty());
+        }
+    }
+}
+
+#[test]
 fn room_panes_keep_uvs_aspect_and_tangent_through_facade_rotation() {
     for (dx, dy) in [(1., 0.), (0., 1.), (0.6, 0.8), (-1., 0.)] {
         let point = |x: f32, y: f32| (x * dx - y * dy, x * dy + y * dx);
@@ -437,4 +509,48 @@ fn stairs_fences_and_garden_furniture_are_separate_removable_objects() {
     choices.patterns[0].facade = FacadeKind::Cottage;
     let (_, gallery) = city.building_detail_parts(Region::WholeMap, &choices);
     assert_eq!(gallery.len(), 4, "canopy, two posts and stair are separate");
+}
+
+#[test]
+fn commercial_and_mixed_use_shells_never_receive_residential_details() {
+    for (keyword, eligible) in [
+        ("unspecified", true),
+        ("residential", true),
+        ("commercial", false),
+        ("mixed_use", false),
+    ] {
+        let source = format!(
+            "road street: sidewalk carlane sidewalk; end street(-1,0,1,0);\
+            b=building(0.07,{{use:{keyword},floor_height:0.035}},\
+            -0.04,0.1,0.04,0.1,0.04,0.21,-0.04,0.21);"
+        );
+        let city = City::from_program(&parse(&source).unwrap(), None).unwrap();
+        let (details, props) = city.building_detail_parts(Region::WholeMap, &config());
+        assert_eq!(!details.vertices.is_empty(), eligible, "{keyword}");
+        if !eligible {
+            assert!(props.is_empty());
+        }
+    }
+}
+
+#[test]
+fn explicit_facade_edge_overrides_nearest_road_and_respects_winding() {
+    for (points, expected) in [
+        ("0,0,1,0,1,1,0,1", [0.0, 1.0]),
+        ("0,0,0,1,1,1,1,0", [1.0, 0.0]),
+        // Concave footprint, where a centroid-based outside test can be wrong.
+        ("0,0,3,0,3,3,2,3,2,1,1,1,1,3,0,3", [0.0, 1.0]),
+    ] {
+        let source = format!(
+            "road street: carlane; end street(-1,-0.1,4,-0.1);\
+            b=building(0.07,{{use:commercial,front_edge:2}}, {points});"
+        );
+        let city = City::from_program(&parse(&source).unwrap(), None).unwrap();
+        let building = city.query(Region::WholeMap).buildings[0].1;
+        let frame = city.building_frontage(building, 0.5).unwrap();
+        assert_eq!(frame.origin, building.points[2]);
+        assert_eq!(frame.outward, expected);
+        assert_eq!(frame.base, building.elevation);
+        assert!(city.building_frontage(building, f32::NAN).is_none());
+    }
 }

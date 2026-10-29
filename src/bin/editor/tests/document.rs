@@ -459,3 +459,78 @@ fn renaming_a_road_updates_calls_in_blocks() {
         editor.program
     );
 }
+
+#[test]
+fn frontage_zones_survive_style_edit_save_undo_redo_and_road_rename() {
+    let mut editor = sample_editor();
+    editor.program = parse(include_str!("../../../../examples/frontage_zones.road")).unwrap();
+    let before = editor.program.clone();
+    let cached = editor.projected_frontages();
+    assert_eq!(cached.zones.len(), 3);
+    assert!(Arc::ptr_eq(&cached, &editor.projected_frontages()));
+    assert!(editor.edit_building_properties(
+        "example_building",
+        0.14,
+        opencity::BuildingStyle::default(),
+    ));
+    editor.record_history(before.clone(), false);
+    let saved = parse(&editor.program.to_road_source()).unwrap();
+    assert_eq!(saved, editor.program);
+    let building = project_landscape_features(&saved).features.remove(0);
+    assert_eq!(building.building_use, opencity::BuildingUse::MixedUse);
+    assert_eq!(building.front_edge, Some(0));
+    assert_eq!(opencity::project_frontage_zones(&saved).zones.len(), 3);
+    assert!(editor.restore_history(true));
+    assert_eq!(editor.program, before);
+    assert!(editor.restore_history(false));
+    assert_eq!(editor.program, saved);
+    let road = editor
+        .projected_map()
+        .segments
+        .iter()
+        .find(|s| s.name.as_deref() == Some("main_street"))
+        .unwrap()
+        .source;
+    assert!(map::set_name(
+        &mut editor.program,
+        road,
+        "renamed_street".into()
+    ));
+    let zones = editor.projected_frontages();
+    assert!(!Arc::ptr_eq(&cached, &zones));
+    assert!(zones.errors.is_empty());
+    assert_eq!(zones.zones[0].road_placement, "renamed_street");
+}
+
+#[test]
+fn zone_form_edit_roundtrips_history_and_preview_matches_shared_runtime() {
+    let mut editor = sample_editor();
+    editor.program = parse(
+        "road local: sidewalk carlane sidewalk; end
+        road_a=local(-2,0,2,0);ground=land(-3,-2,3,-2,3,2,-3,2);elevation(ground,0.02);
+        z=frontage_zone(road_a,{use:residential,side:both,start:0.1,end:0.9,depth:0.16,seed:42});",
+    )
+    .unwrap();
+    let before = editor.program.clone();
+    let mut form = opencity::ZoneForm::default();
+    form.form = opencity::BuildingForm::CityCentre;
+    form.height_min = 0.3;
+    form.height_max = 0.5;
+    form.density = 0.7;
+    assert!(editor.edit_zone("z", opencity::BuildingUse::MixedUse, form, 0.2));
+    editor.record_history(before.clone(), false);
+    assert_eq!(
+        editor.program,
+        parse(&editor.program.to_road_source()).unwrap()
+    );
+    let preview = frontage::scaffold_program(&editor.program, None).unwrap();
+    let (shared, _) = opencity::runtime::scaffold::expand(&editor.program, |p| {
+        opencity::runtime::City::from_program(p, None)
+    })
+    .unwrap();
+    assert_eq!(preview, shared);
+    assert!(editor.restore_history(true));
+    assert_eq!(editor.program, before);
+    assert!(editor.restore_history(false));
+    assert_eq!(editor.projected_frontages().zones[0].form, form);
+}

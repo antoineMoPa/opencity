@@ -49,6 +49,8 @@ impl RoadEditor {
             projection_cache: None,
             interaction_cache: None,
             landscape_cache: None,
+            selected_zone: None,
+            frontage_cache: None,
             scene_cache: None,
             #[cfg(target_arch = "wasm32")]
             web_scene_build: None,

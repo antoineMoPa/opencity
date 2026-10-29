@@ -30,5 +30,3 @@ clients. Reusable junction, ramp, and cloverleaf assets live in the
 [road pattern library](road_library/README.md); the
 [agent road-building guide](docs/road-building-guide-for-agents.md) explains how to trace a
 reference map without impossible joins.
-
-See [FORMATTING.md](FORMATTING.md) for formatting, lint checks and Git hook setup.

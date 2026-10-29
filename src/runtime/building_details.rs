@@ -2,6 +2,7 @@
 //!
 //! The consumer supplies the patterns and seed. This module makes no assumptions
 //! about a city's identity, neighbourhoods, or map-unit scale.
+use super::building_frontage::{front_for, Front};
 use super::{geometry, City, Mesh, Region, SurfaceKind, Vertex};
 use crate::{LandscapeFeature, LandscapeKind};
 
@@ -93,43 +94,6 @@ pub struct BuildingDetailConfig {
     pub garden_props: Vec<(GardenProp, u16)>,
 }
 
-#[derive(Clone, Copy, Debug)]
-struct Front {
-    origin: [f32; 2],
-    along: [f32; 2],
-    outward: [f32; 2],
-    width: f32,
-    depth: f32,
-    base: f32,
-}
-impl Front {
-    fn point(self, x: f32, y: f32, z: f32) -> [f32; 3] {
-        [
-            self.origin[0] + self.along[0] * x + self.outward[0] * y,
-            self.origin[1] + self.along[1] * x + self.outward[1] * y,
-            self.base + z,
-        ]
-    }
-    fn rotate(self, mesh: &mut Mesh, start: usize) {
-        for vertex in &mut mesh.vertices[start..] {
-            let p = vertex.position;
-            vertex.position = self.point(p[0], p[1], p[2]);
-            let n = vertex.normal;
-            vertex.normal = [
-                self.along[0] * n[0] + self.outward[0] * n[1],
-                self.along[1] * n[0] + self.outward[1] * n[1],
-                n[2],
-            ];
-            if vertex.surface[0] == SurfaceKind::Window as u32 as f32
-                && vertex.surface[3] >= 16.
-                && self.along[0] * self.outward[1] - self.along[1] * self.outward[0] < 0.
-            {
-                vertex.surface[1] = 1. - vertex.surface[1];
-            }
-        }
-    }
-}
-
 fn seed_for(feature: &LandscapeFeature, seed: u64) -> u64 {
     let mut hash = seed ^ 0xcbf29ce484222325;
     // Hash coordinates instead of collection indices, so region queries and map
@@ -148,85 +112,6 @@ fn random(seed: &mut u64) -> f32 {
         .wrapping_mul(6364136223846793005)
         .wrapping_add(1442695040888963407);
     ((*seed >> 40) as u32) as f32 / 16_777_216.
-}
-fn dist2(p: [f32; 2], a: [f32; 2], b: [f32; 2]) -> f32 {
-    let d = [b[0] - a[0], b[1] - a[1]];
-    let t = (((p[0] - a[0]) * d[0] + (p[1] - a[1]) * d[1])
-        / (d[0] * d[0] + d[1] * d[1]).max(1e-12))
-    .clamp(0., 1.);
-    (p[0] - a[0] - d[0] * t).powi(2) + (p[1] - a[1] - d[1] * t).powi(2)
-}
-fn front_for(city: &City, feature: &LandscapeFeature, reach: f32) -> Option<Front> {
-    let count = feature.points.len();
-    if count < 3 {
-        return None;
-    }
-    let center = feature.points.iter().fold([0., 0.], |acc, p| {
-        [acc[0] + p[0] / count as f32, acc[1] + p[1] / count as f32]
-    });
-    let mut best: Option<(f32, f32, [f32; 2], [f32; 2])> = None;
-    for (&a, &b) in feature
-        .points
-        .iter()
-        .zip(feature.points.iter().cycle().skip(1))
-        .take(count)
-    {
-        let width = (b[0] - a[0]).hypot(b[1] - a[1]);
-        if width < 1e-6 {
-            continue;
-        }
-        let mid = [(a[0] + b[0]) * 0.5, (a[1] + b[1]) * 0.5];
-        let mut closest = f32::INFINITY;
-        for road in &city.roads {
-            let bounds = road.bounds;
-            if mid[0] < bounds[0] - reach
-                || mid[0] > bounds[2] + reach
-                || mid[1] < bounds[1] - reach
-                || mid[1] > bounds[3] + reach
-            {
-                continue;
-            }
-            let mut prev = road.segment.point_at(0.);
-            for step in 1..=12 {
-                let t = step as f32 / 12.;
-                let next = road.segment.point_at(t);
-                // Avoid facing a highway deck far above or below this footprint.
-                if (road.segment.height_at(t) - feature.elevation).abs() <= reach {
-                    closest = closest.min(dist2(mid, [prev.x, prev.y], [next.x, next.y]));
-                }
-                prev = next;
-            }
-        }
-        // With no nearby road, prefer the longest facade rather than relying on polygon order.
-        let score = if closest.is_finite() {
-            closest
-        } else {
-            reach * reach + 1. / width
-        };
-        if best.as_ref().is_none_or(|old| score < old.0) {
-            best = Some((score, width, a, b));
-        }
-    }
-    let (_, width, a, b) = best?;
-    let along = [(b[0] - a[0]) / width, (b[1] - a[1]) / width];
-    let mut outward = [-along[1], along[0]];
-    let mid = [(a[0] + b[0]) * 0.5, (a[1] + b[1]) * 0.5];
-    if (center[0] - mid[0]) * outward[0] + (center[1] - mid[1]) * outward[1] > 0. {
-        outward = [-outward[0], -outward[1]];
-    }
-    let depth = feature
-        .points
-        .iter()
-        .map(|p| -((p[0] - a[0]) * outward[0] + (p[1] - a[1]) * outward[1]))
-        .fold(0., f32::max);
-    Some(Front {
-        origin: a,
-        along,
-        outward,
-        width,
-        depth,
-        base: feature.elevation,
-    })
 }
 fn pattern<'a>(
     config: &'a BuildingDetailConfig,
@@ -689,6 +574,113 @@ fn roof(mesh: &mut Mesh, f: Front, height: f32, kind: RoofKind, u: f32, p: &Buil
         }
     }
 }
+// A single applied paving quad, aligned with the actual ground-floor door.
+// Require a supported, unobstructed grass run ending at a sidewalk. Never bridge
+// a road, water, another building, or a large change in ground elevation.
+fn entrance_path(city: &City, mesh: &mut Mesh, f: Front, cfg: &BuildingDetailConfig) {
+    let u = cfg.unit;
+    if cfg.garden_depth <= 0. {
+        return;
+    }
+    let door_x = f.width * 0.46;
+    let width = (u * 1.2).min(f.width * 0.18);
+    let center = door_x + (u * 0.95).min(f.width * 0.18) * 0.5;
+    let start_point = f.point(center, u * 0.1, 0.);
+    let Some(ground) = city.surface_at([start_point[0], start_point[1]], f.base + u * 0.3) else {
+        return;
+    };
+    if ground.kind != SurfaceKind::Grass || (ground.height - f.base).abs() > u * 0.7 {
+        return;
+    }
+    let max_depth = (cfg.garden_depth + u * 6.).min(cfg.road_reach);
+    let nearby: Vec<_> = city
+        .landscape
+        .iter()
+        .filter(|b| {
+            b.kind == LandscapeKind::Building
+                && b.elevation < f.base + u
+                && b.elevation + b.height.unwrap_or(0.) > f.base
+                && geometry::polygon_region(
+                    &b.points,
+                    Region::Radius {
+                        center: [start_point[0], start_point[1]],
+                        radius: max_depth + width,
+                    },
+                )
+        })
+        .collect();
+    let mut end = None;
+    let mut support = Vec::new();
+    for step in 1..=64 {
+        let y = max_depth * step as f32 / 64.;
+        let mut sidewalk = true;
+        for x in [center - width * 0.5, center, center + width * 0.5] {
+            let p = f.point(x, y, 0.);
+            let Some(s) = city.surface_at([p[0], p[1]], f.base + u) else {
+                return;
+            };
+            if (s.height - ground.height).abs() > u * 0.8
+                || !matches!(s.kind, SurfaceKind::Grass | SurfaceKind::Sidewalk)
+                || nearby.iter().any(|b| {
+                    geometry::polygon_region(
+                        &b.points,
+                        Region::Radius {
+                            center: [p[0], p[1]],
+                            radius: u * 0.02,
+                        },
+                    )
+                })
+            {
+                return;
+            }
+            support.push((y, s.height));
+            sidewalk &= s.kind == SurfaceKind::Sidewalk;
+        }
+        if sidewalk {
+            if step > 2 {
+                let p = f.point(center, y, 0.);
+                end = city
+                    .surface_at([p[0], p[1]], f.base + u)
+                    .map(|s| (y, s.height));
+            }
+            break;
+        }
+    }
+    let Some((depth, end_height)) = end else {
+        return;
+    };
+    if (end_height - ground.height).abs() / depth > 0.15 {
+        return;
+    }
+    // A single plane may cover a mild graded verge, but cannot bridge a dip or
+    // cut through a mound. Keep it within 0.25 units of its ground support.
+    if support.iter().any(|&(y, height)| {
+        let plane = ground.height + (end_height - ground.height) * y / depth;
+        plane - height > u * 0.25 || height - plane > u * 0.03
+    }) {
+        return;
+    }
+    let start = mesh.vertices.len();
+    let left = center - width * 0.5;
+    let z = ground.height - f.base + u * 0.015;
+    let end_z = end_height - f.base + u * 0.015;
+    mesh.quad(
+        [
+            [left, 0., z],
+            [left + width, 0., z],
+            [left + width, depth, end_z],
+            [left, depth, end_z],
+        ],
+        [0.48, 0.46, 0.40],
+        SurfaceKind::Sidewalk,
+    );
+    for v in &mut mesh.vertices[start..] {
+        // Local paving coordinates in consumer units; w=1 selects small slabs.
+        v.surface[1] = (v.position[0] - left) / u;
+        v.surface[2] = v.position[1] / u;
+        v.surface[3] = 1.;
+    }
+}
 fn yard(
     city: &City,
     mesh: &mut Mesh,
@@ -1095,6 +1087,7 @@ fn make_details(
             p.roof
         };
     roof(mesh, f, height, roof_kind, u, p);
+    entrance_path(city, mesh, f, cfg);
     yard(city, mesh, f, p, seed, cfg, &mut ranges);
     f.rotate(mesh, start);
     for range in ranges.into_iter().rev() {
@@ -1152,6 +1145,7 @@ impl City {
         for feature in self.landscape.iter().filter(|f| {
             f.kind == LandscapeKind::Building
                 && f.model.is_none()
+                && f.building_use.allows_residential_details()
                 && geometry::polygon_region(&f.points, region)
         }) {
             let height = feature.height.unwrap_or(0.);

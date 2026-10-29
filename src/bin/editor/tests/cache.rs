@@ -1,6 +1,32 @@
 use super::*;
 
 #[test]
+#[ignore = "manual default-map startup timing; run with --nocapture"]
+fn profile_default_startup() {
+    let started = std::time::Instant::now();
+    let program = boot_program();
+    let parsed = started.elapsed();
+    let projection = map::project(&program);
+    let projected = started.elapsed();
+    let scene = scene3d::build_scene(
+        &program,
+        &projection,
+        editor_palette(egui::Theme::Dark),
+        &[],
+        None,
+    );
+    eprintln!(
+        "default startup: parse={parsed:?}, projection={:?}, scene={:?}, total={:?}, vertices={}",
+        projected - parsed,
+        started.elapsed() - projected,
+        started.elapsed(),
+        scene.vertices.len(),
+    );
+    assert!(projection.unresolved == 0);
+    assert!(!scene.vertices.is_empty());
+}
+
+#[test]
 fn first_scene_build_returns_loading_scene_without_waiting() {
     let mut editor = sample_editor();
     editor.program = parse("road lane: carlane; end; lane(0,0,1,0);").unwrap();

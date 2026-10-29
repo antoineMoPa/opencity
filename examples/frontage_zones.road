@@ -1,0 +1,8 @@
+# Neutral zoning reservations do not generate buildings.
+road street: sidewalk carlane carlane sidewalk; end
+main_street = street(-1, 0, 1, 0);
+curved_street = street(1, 0, 1.6, 0, 1.8, 0.6, 1.8, 1.2);
+main_frontage = frontage_zone(main_street, {use: commercial, side: both, start: 0.1, end: 0.9, depth: 0.16, seed: 2147});
+curve_frontage = frontage_zone(curved_street, {use: mixed_use, side: right, start: 0.15, end: 0.85, depth: 0.12, seed: 998});
+residential_frontage = frontage_zone(curved_street, {use: residential, side: left, start: 0.2, end: 0.8, depth: 0.12, seed: 999});
+example_building = building(0.105, {material: red_brick, floor_height: 0.035, use: mixed_use, front_edge: 0}, -0.4, 0.12, -0.2, 0.12, -0.2, 0.24, -0.4, 0.24);

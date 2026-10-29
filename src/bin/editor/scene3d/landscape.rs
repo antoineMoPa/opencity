@@ -208,6 +208,22 @@ pub(super) fn append_landscape_feature(
     selected_landscape: Option<&str>,
     model_base: Option<&Path>,
 ) {
+    if let Some(scaffold) = opencity::runtime::scaffold::BuildingScaffold::from_feature(feature) {
+        for vertex in scaffold.mesh().vertices {
+            let shade = 0.72 + 0.28 * vertex.normal[2].abs();
+            scene.vertices.push(WorldVertex {
+                point: WorldPoint {
+                    x: vertex.position[0],
+                    y: vertex.position[1],
+                },
+                height: vertex.position[2],
+                depth_bias: 0.,
+                color: Color32::from_gray((160. * shade) as u8),
+                surface: [0.; 4],
+            });
+        }
+        return;
+    }
     // Flat landscape features frequently overlap at the same elevation. A
     // depth-only offset keeps their screen position fixed while giving the
     // fill a stable order regardless of triangle interpolation or draw order.

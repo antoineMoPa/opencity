@@ -125,6 +125,7 @@ pub(super) fn push(
         road,
         color: color(rgb),
         data,
+        paving_distance: None,
     });
 }
 fn quad(city: &mut City, p: [[f32; 3]; 4], kind: SurfaceKind, road: Option<usize>, rgb: [u8; 3]) {
@@ -199,7 +200,8 @@ pub(super) fn compile(
         let rows = geometry.cross_sections(id);
         let start = city.triangles.len();
         let mut distance = 0.;
-        for pair in rows.windows(2) {
+        let mut paving_distances = vec![0.; road.elements.len()];
+        for (row_index, pair) in rows.windows(2).enumerate() {
             for (band, e) in road.elements.iter().enumerate() {
                 let effective = geometry.surface_element(id, e.kind);
                 let k = kind(effective);
@@ -215,7 +217,26 @@ pub(super) fn compile(
                     pair[0].boundaries[band + 1],
                 ]
                 .map(|v| [v.point.x, v.point.y, v.height + raised]);
+                let start = city.triangles.len();
                 quad(city, p, k, Some(id), network::road_color(effective, false));
+                if k == SurfaceKind::Sidewalk {
+                    let a = [(p[0][0] + p[3][0]) * 0.5, (p[0][1] + p[3][1]) * 0.5];
+                    let b = [(p[1][0] + p[2][0]) * 0.5, (p[1][1] + p[2][1]) * 0.5];
+                    let length = (b[0] - a[0]).hypot(b[1] - a[1]);
+                    if row_index == 0 && length > 1e-8 {
+                        // World-anchored phase also matches split/reversed straight roads.
+                        paving_distances[band] =
+                            (a[0] * (b[0] - a[0]) + a[1] * (b[1] - a[1])) / length;
+                    }
+                    let d = paving_distances[band];
+                    for (t, ids) in city.triangles[start..]
+                        .iter_mut()
+                        .zip([[0, 1, 2], [0, 2, 3]])
+                    {
+                        t.paving_distance = Some(ids.map(|i| [d, d + length, d + length, d][i]));
+                    }
+                    paving_distances[band] += length;
+                }
                 // Vertical curb faces share the pavement's subdivision and slopes.
                 if k == SurfaceKind::Sidewalk {
                     for (a, b) in [(p[0], p[1]), (p[3], p[2])] {
@@ -535,6 +556,28 @@ pub(super) fn compile(
             } else {
                 0.
             };
+            // Interpolate the original band's distance through clipping, so
+            // painter-style junction cuts cannot reset or rotate the joints.
+            let paving: Vec<_> = patch
+                .points
+                .iter()
+                .map(|p| {
+                    let q = patch.source_quad;
+                    let d = [
+                        patch.distance[0],
+                        patch.distance[1],
+                        patch.distance[1],
+                        patch.distance[0],
+                    ];
+                    [[0, 1, 2], [0, 2, 3]]
+                        .into_iter()
+                        .find_map(|ids| {
+                            triangle_height(ids.map(|i| [q[i].x, q[i].y, d[i]]), [p.x, p.y])
+                                .map(|(v, _)| v)
+                        })
+                        .unwrap_or(d[0])
+                })
+                .collect();
             let points: Vec<_> = patch
                 .points
                 .into_iter()
@@ -552,6 +595,10 @@ pub(super) fn compile(
                     patch.material.rgb(),
                     [0.; 3],
                 );
+                if k == SurfaceKind::Sidewalk {
+                    city.triangles.last_mut().unwrap().paving_distance =
+                        Some([paving[0], paving[i], paving[i + 1]]);
+                }
             }
         }
     }
@@ -667,6 +714,7 @@ pub(super) fn compile(
             road: None,
             color: triangle[0].color,
             data: [0.; 3],
+            paving_distance: None,
         });
     }
     Ok(())

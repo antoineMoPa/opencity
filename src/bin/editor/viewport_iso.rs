@@ -69,8 +69,9 @@ impl RoadEditor {
             let annotation_block = self.annotation_input(ui, &response, rect);
             let box_block = self.box_select_input(ui, &response, rect, &projection, true);
             let network_block = self.network_map_ui(ui, &response, rect, &projection, true);
-            let building_block =
-                network_block || self.building_options_ui(ui, &response, rect, true);
+            let building_block = network_block
+                || self.zone_options_ui(ui, &response, rect, true)
+                || self.building_options_ui(ui, &response, rect, true);
 
             let point_block =
                 building_block || self.point_options_ui(ui, &response, rect, &projection, true);
@@ -919,6 +920,7 @@ impl RoadEditor {
                 CameraView::Isometric,
             );
 
+            self.paint_frontage_zones(ui, rect, true);
             self.paint_annotations(ui, rect);
             self.paint_network_overlays(ui, rect, true);
             self.paint_intersection_preview(ui, rect);

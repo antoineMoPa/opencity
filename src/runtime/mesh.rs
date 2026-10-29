@@ -6,6 +6,8 @@ use std::collections::HashSet;
 /// Room panes use [Window, U, V, 16 * (1 + seed % 256) + width / height].
 /// UVs are interpolated, with U increasing along (normal.y, -normal.x, 0).
 /// Aspect is clamped to 0.125..15; zero metadata retains legacy glass rendering.
+/// Entrance paving uses [Sidewalk, local X / unit, local Y / unit, 1].
+/// Road and junction sidewalk tops use [Sidewalk, distance along band, 0, 2].
 #[derive(Clone, Copy, Debug)]
 #[repr(C)]
 pub struct Vertex {
@@ -159,7 +161,13 @@ impl City {
         for i in ids {
             let t = &self.triangles[i];
             if geometry::polygon_region(&t.points.map(|p| [p[0], p[1]]), region) {
+                let start = mesh.vertices.len();
                 mesh.triangle(t.points, t.color, t.kind, t.data);
+                if let Some(distance) = t.paving_distance {
+                    for (v, d) in mesh.vertices[start..].iter_mut().zip(distance) {
+                        v.surface[1..].copy_from_slice(&[d, 0., 2.]);
+                    }
+                }
             }
         }
         if let Some(e) = &self.elevation {

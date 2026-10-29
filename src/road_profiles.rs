@@ -4,7 +4,7 @@ use std::collections::HashMap;
 #[path = "road_profiles/intersections.rs"]
 mod intersections;
 
-#[derive(Default)]
+#[derive(Clone, Debug, Default)]
 pub struct RoadProfile {
     pub start_clip: Option<f32>,
     pub end_clip: Option<f32>,
@@ -16,7 +16,7 @@ pub struct RoadProfile {
     pub end_parent: Option<AttachmentFootprint>,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct AttachmentFootprint {
     pub segments: Vec<map::Segment>,
     pub half_width: f32,

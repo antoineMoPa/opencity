@@ -13,6 +13,12 @@ vendored MIT Moon toggle switch. The old docking dependency is no longer used by
 Run the native egui editor with `cargo run`, or open a file immediately with
 `cargo run -- path/to/city.road`.
 
+Dev builds optimize scene generation; native preparation runs on a worker. Profile without a GPU:
+`OPENCITY_SCENE_PROFILE=1 cargo test --bin editor profile_default_startup -- --ignored --nocapture`.
+
+`make fmt` formats; `make lint` checks formatting and source limits; `make hooks` enables the
+pre-commit check. Limits: 100 columns for Markdown/Rust and 1,200 lines per Rust file.
+
 ### Browser build
 
 Install the `wasm32-unknown-unknown` Rust target and `wasm-bindgen-cli` version `0.2.128`, then run
@@ -485,6 +491,50 @@ blocks it; choose another endpoint or press Escape. First-click geometry and mis
 definitions remain drafts until a valid placement commits; profile, road and grade changes share one
 undo step.
 
+### Frontage zoning and building scaffolds
+
+```road
+road street: sidewalk carlane carlane sidewalk; end
+main_street = street(-1, 0, 1, 0);
+market = frontage_zone(main_street, {
+    use: commercial, side: both, start: 0.1, end: 0.9, depth: 0.16, seed: 2147
+});
+```
+
+All six options are required. Uses: `residential`, `commercial`, `mixed_use`; sides:
+`left`, `right`, `both`, relative to authored road direction. `start`/`end` are cubic parameters
+with `0 <= start < end <= 1`; positive `depth` starts outside the full road cross-section.
+Distances use map units; `seed` is an exact unsigned 64-bit integer.
+
+Zone names must be globally unique and reference one uniquely named top-level road placement.
+Block-local/generated roads are unsupported. Editor renames update references; source edits must
+update them explicitly. Unknown/duplicate options and invalid references are errors.
+
+Optional controls: `form: street|city_centre`, `density` (0..1), `height_min`, `height_max`,
+`frontage_min`, `frontage_max`, `setback`. Street defaults: height 0.034..0.21, frontage
+0.085..0.255, setback 0.004; city-centre: 0.24..0.70, 0.17..0.34, 0.012. Density defaults to 1
+and retains stable slots; changing frontage repartitions them.
+
+`project_frontage_zones(&Program)` returns valid zones plus diagnostics. `frame_at(side, t)` and
+`strip_quads(subdivisions)` expose approximate reservations, not guaranteed buildable land.
+`City::frontage_zones` requires `game-runtime`; City compilation rejects zone errors.
+
+`runtime::scaffold::expand(source, raw_compile)` returns the shared expanded Program and City;
+pass `City::from_program` as the raw compiler. `scaffold::buildings` exposes stable IDs, footprints,
+elevations, uses and roofs. Editor and game share this layout; consumers own regional dressing.
+Expansion checks surfaces, reservation bounds and occupancy in stable zone-name order. Models,
+typed buildings and authored shells taller than 0.16 are protected. Legacy `residential_area(...)`
+uses the same pipeline; new maps should use named zones. Generated buildings are not saved.
+
+Building options accept `use: unspecified|residential|commercial|mixed_use` and zero-based
+`front_edge`. An explicit edge overrides nearest-road frontage selection;
+`City::building_frontage(feature, road_reach)` provides a placement frame. Residential details
+apply only to unspecified/residential buildings.
+
+Click a zone or generated volume in Top/Isometric to edit its use, form and dimensions with
+save/undo support. Author road references, sides and intervals in source. Labels appear at close
+zoom. See [frontage_zones.road](examples/frontage_zones.road) for a complete example.
+
 ### Explicit intersections, interchanges, and inspection
 
 The [intersection language guide](docs/intersections.md) covers reusable `intersection`,
@@ -513,6 +563,27 @@ interaction regression can be run with
 `cargo test --bin editor default_map_first_click_menus_reuse_document_geometry -- --nocapture`. It
 checks the first road/building/context menus in Top and Isometric views against the actual 592-road,
 268-junction, 1,863-building map.
+
+### Runtime shader contract
+
+`GAME_SHADER` uses a 288-byte group-0/binding-0 uniform, ordered as: view-projection and light
+view-projection matrices; eye XYZ/time; sun XYZ/exposure; daylight/three reserved floats; inverse
+view-projection matrix; sun RGB/intensity; star density/size/brightness/angular pixel footprint;
+star RGB/solar visibility. Matrices are column-major with 0..1 clip depth. Angular footprint is
+vertical field of view divided by target height.
+
+Group 1 binds a 2048² shadow depth texture and comparison sampler; group 2 binds the consumer's
+linear HDR sky cube and filtering sampler. Background, glass and fog share the cube and exposure.
+`SKY_STARS_SHADER` supplies `sky_stars(ray, star_params, star_color)`: add it before exposure for
+background and reflected glass rays; fog uses only the atmosphere along the outgoing view ray.
+
+Scene pipelines use all three groups and an sRGB target. Shadow pipelines use group 0:
+`vs_shadow`/`fs_shadow` discard fence gaps; opaque casters can omit the fragment stage.
+Fences retain alpha-to-coverage. `fs_opaque` has no discard.
+
+Sidewalk metadata `[Sidewalk, distance, 0, 2]` preserves distance through junction clipping;
+the shader draws transverse gaps every 0.015 units, width 0.00015, with derivative filtering.
+Entrance paths use local depth (`surface.w = 1`); curb faces and plain concrete have no joints.
 
 ### External launch action
 

@@ -26,6 +26,8 @@ mod building_options;
 mod connection;
 #[path = "editor/elevation_map.rs"]
 mod elevation_map;
+#[path = "editor/frontage.rs"]
+mod frontage;
 #[path = "editor/glb.rs"]
 mod glb;
 #[cfg(not(target_arch = "wasm32"))]
@@ -222,6 +224,8 @@ struct RoadEditor {
     projection_cache: Option<(Program, Arc<map::Projection>)>,
     interaction_cache: Option<Arc<scene_cache::InteractionGeometry>>,
     landscape_cache: Option<(Program, Arc<opencity::LandscapeProjection>)>,
+    selected_zone: Option<String>,
+    frontage_cache: Option<(Program, Arc<opencity::FrontageProjection>)>,
     scene_cache: Option<SceneCache>,
     #[cfg(target_arch = "wasm32")]
     web_scene_build: Option<scene3d::WebSceneBuild>,

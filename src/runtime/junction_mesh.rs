@@ -8,6 +8,8 @@ pub struct Patch {
     pub points: Vec<Point>,
     pub material: Material,
     pub kind: BandKind,
+    pub source_quad: [Point; 4],
+    pub distance: [f32; 2],
 }
 fn area(poly: &[Point]) -> f64 {
     poly.iter()
@@ -130,7 +132,16 @@ pub fn patches(geometry: &Resolved, half: Option<f32>) -> Vec<Patch> {
     });
     let mut patches = Vec::new();
     for band in &geometry.bands {
-        for quad in geometry.band_quads(band) {
+        let mut distance = 0.;
+        for (index, quad) in geometry.band_quads(band).into_iter().enumerate() {
+            let a = [(quad[0].x + quad[3].x) * 0.5, (quad[0].y + quad[3].y) * 0.5];
+            let b = [(quad[1].x + quad[2].x) * 0.5, (quad[1].y + quad[2].y) * 0.5];
+            let length = (b[0] - a[0]).hypot(b[1] - a[1]);
+            if index == 0 && length > 1e-8 {
+                distance = (a[0] * (b[0] - a[0]) + a[1] * (b[1] - a[1])) / length;
+            }
+            let interval = [distance, distance + length];
+            distance += length;
             let points = if let Some(boundary) = &boundary {
                 intersection(quad.to_vec(), boundary)
             } else {
@@ -141,6 +152,8 @@ pub fn patches(geometry: &Resolved, half: Option<f32>) -> Vec<Patch> {
                     points,
                     material: band.material,
                     kind: band.kind,
+                    source_quad: quad,
+                    distance: interval,
                 });
             }
         }
@@ -176,6 +189,8 @@ pub fn patches(geometry: &Resolved, half: Option<f32>) -> Vec<Patch> {
             points,
             material: patch.material,
             kind: patch.kind,
+            source_quad: patch.source_quad,
+            distance: patch.distance,
         }));
     }
     result

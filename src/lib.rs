@@ -26,6 +26,7 @@ pub mod cli;
 mod design_rules;
 mod elevation;
 mod error;
+mod frontage;
 pub mod heightmap;
 #[doc(hidden)]
 pub mod junction_layouts;
@@ -54,7 +55,7 @@ pub use ast::{
     RoadDirection, RoadElement, RoadElementKind, RoadRole, Statement,
 };
 pub use blocks::BlockInstance;
-pub use building::{BuildingMaterial, BuildingStyle};
+pub use building::{BuildingMaterial, BuildingStyle, BuildingUse};
 pub use design_rules::{
     check_design_rules, check_design_rules_with_projection, check_vehicle_lane_continuity,
     check_vehicle_lane_intrusions, DesignIssue, DesignRule,
@@ -74,3 +75,8 @@ pub use parser::{parse, parse_road_file};
 /// Spatial game queries, procedural meshes and optional renderer shaders.
 #[cfg(feature = "game-runtime")]
 pub mod runtime;
+
+pub use frontage::{
+    project_frontage_zones, BuildingForm, FrontageError, FrontageFrame, FrontageProjection,
+    FrontageSide, FrontageZone, ZoneForm,
+};

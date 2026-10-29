@@ -1,10 +1,13 @@
 // Optional standalone shader. Z up, map units. Vertex layout is runtime::Vertex.
-// Group 0 binding 0: column-major view_projection, light_view_projection, eye.xyz/time, sun.xyz/exposure, daylight/sky.rgb.
+// Group 0 binding 0: matrices, eye/time, sun/exposure, daylight/reserved, inverse view, sun RGB/intensity.
 // Group 1: 2048-square depth shadow texture (0), comparison sampler (1).
-struct Camera { view_projection: mat4x4<f32>, light_view_projection: mat4x4<f32>, eye_time: vec4<f32>, sun_exposure: vec4<f32>, daylight_sky: vec4<f32> };
+struct Camera { view_projection: mat4x4<f32>, light_view_projection: mat4x4<f32>, eye_time: vec4<f32>, sun_exposure: vec4<f32>, daylight_sky: vec4<f32>, inverse_view_projection: mat4x4<f32>, sun_color: vec4<f32>, star_params: vec4<f32>, star_color: vec4<f32> };
 @group(0) @binding(0) var<uniform> camera: Camera;
 @group(1) @binding(0) var shadow_map: texture_depth_2d;
 @group(1) @binding(1) var shadow_sampler: sampler_comparison;
+// Group 2: shared linear HDR atmosphere cube and filtering sampler.
+@group(2) @binding(0) var sky_environment: texture_cube<f32>;
+@group(2) @binding(1) var sky_sampler: sampler;
 struct Input { @location(0) position: vec3<f32>, @location(1) normal: vec3<f32>, @location(2) color: vec3<f32>, @location(3) surface: vec4<f32> };
 struct Output { @builtin(position) clip: vec4<f32>, @location(0) world: vec3<f32>, @location(1) normal: vec3<f32>, @location(2) color: vec3<f32>, @location(3) @interpolate(flat) surface: vec4<f32>, @location(4) fence_uv: vec2<f32> };
 @vertex fn vs(v: Input) -> Output { var o: Output; o.clip=camera.view_projection*vec4<f32>(v.position,1.0);o.world=v.position;o.normal=v.normal;o.color=v.color;o.surface=v.surface;o.fence_uv=v.surface.yz;return o; }
@@ -115,32 +118,31 @@ fn room_interior(uv:vec2<f32>,aspect:f32,seed:f32,n:vec3<f32>,eye:vec3<f32>,occu
     let window_fill=daylight*(0.12+0.65/(1.0+hit.z*hit.z*2.0));
     return albedo*ao*(vec3<f32>(0.018,0.025,0.045)+vec3<f32>(0.65,0.78,1.0)*window_fill+warmth*power*(0.16+lambert/(0.35+lamp_distance*lamp_distance)));
 }
-// Daylight catches the sky on the glass, veiling the room even head-on.
-fn room_glass(interior:vec3<f32>,n:vec3<f32>,view:vec3<f32>,daylight:f32)->vec3<f32> {
+// Smoked glass stays dark head-on, with a stronger sky sheen at grazing angles.
+fn glass_reflectance(n:vec3<f32>,view:vec3<f32>,daylight:f32)->f32 {
     let grazing=pow(1.0-clamp(dot(n,view),0.0,1.0),5.0);
-    let reflection=mix(0.04,0.58,daylight)+mix(0.65,0.30,daylight)*grazing;
-    let sky=camera.daylight_sky.yzw*mix(0.38,0.62,daylight);
+    return mix(0.04,0.16,daylight)+mix(0.65,0.50,daylight)*grazing;
+}
+fn room_glass(interior:vec3<f32>,n:vec3<f32>,view:vec3<f32>,daylight:f32)->vec3<f32> {
+    let reflection=glass_reflectance(n,view,daylight);
+    let ray=reflect(-view,n);
+    let sky=textureSampleLevel(sky_environment,sky_sampler,ray,0.0).rgb
+        +sky_stars(ray,camera.star_params,camera.star_color);
     return mix(interior,sky,reflection);
 }
-@fragment fn fs(v:Output,@builtin(front_facing) front:bool)->@location(0) vec4<f32> {
-    var base=v.color;let p=v.world.xy;let kind=v.surface.x;var facade_glow=0.0;
-    var facade_room=vec3<f32>(0.0);var room_mask=0.0;
-    var n=v.normal / max(length(v.normal),0.00001);
-    let fence_footprint=fwidth(v.fence_uv);
-    var coverage=1.0;
-    if kind>10.5&&kind<11.5 {
-        coverage=fence_coverage(v.fence_uv,v.surface.w,fence_footprint);
-        if !front {n=-n;}
-    }
+// Evaluate derivative-based footprints before any mask-dependent discard.
+struct SurfaceData {
+    normal:vec3<f32>, detail:f32, floor_position:f32, band:f32,
+    brick_row:f32, brick_coord:f32, brick_footprint:vec2<f32>,
+    roof_row:f32, roof_tile:f32, roof_detail:f32, paving_footprint:vec2<f32>,
+};
+fn prepare_surface(v:Output)->SurfaceData {
+    let p=v.world.xy;
+    let n=v.normal / max(length(v.normal),0.00001);
     let detail=1.0-smoothstep(0.4,1.4,max(length(dpdx(p*1600.0)),length(dpdy(p*1600.0))));
-    var grain=0.5;var broad=0.0;
-    if kind<2.5 || (kind>=4.5&&kind<5.5) {grain=mix(0.5,noise(p*1600.0),detail);}
-    if kind<1.5 {broad=noise(p*28.0)*0.65+noise(p*83.0)*0.35;}
-    let grid=abs(fract(p/0.045)-0.5);let joint=1.0-smoothstep(0.46,0.49,max(grid.x,grid.y));
     let floor_position=(v.world.z-v.surface.y)/max(v.surface.z,0.001);
     let floor_aa=max(fwidth(floor_position),0.001);
     let band=1.0-smoothstep(0.025,0.025+floor_aa,min(fract(floor_position),1.0-fract(floor_position)));
-    // Derivatives must be evaluated before material-dependent control flow on WebGPU.
     let brick_across=select(v.world.y,v.world.x,abs(n.y)>abs(n.x));
     let stone=step(14.5,v.surface.w);
     let brick_row=floor_position*mix(44.0,18.9,stone);
@@ -150,14 +152,53 @@ fn room_glass(interior:vec3<f32>,n:vec3<f32>,view:vec3<f32>,daylight:f32)->vec3<
     let roof_row=(p.x+p.y)/(roof_unit*0.15);
     let roof_tile=(p.y-p.x)/(roof_unit*0.32)+floor(roof_row)*0.5;
     let roof_detail=1.0-smoothstep(0.25,0.8,max(fwidth(roof_row),fwidth(roof_tile)));
+    return SurfaceData(n,detail,floor_position,band,brick_row,brick_coord,brick_footprint,roof_row,roof_tile,roof_detail,fwidth(v.fence_uv));
+}
+@fragment fn fs(v:Output,@builtin(front_facing) front:bool)->@location(0) vec4<f32> {
+    let fence_footprint=fwidth(v.fence_uv);
+    let surface=prepare_surface(v);
+    var coverage=1.0;
+    if v.surface.x>10.5&&v.surface.x<11.5 {
+        coverage=fence_coverage(v.fence_uv,v.surface.w,fence_footprint);
+    }
     if coverage<0.01 {discard;}
+    return shade_surface(v,front,coverage,surface);
+}
+// This entrypoint has no reachable discard, allowing hidden opaque surfaces to
+// be rejected before the procedural material and shadow calculations run.
+@fragment fn fs_opaque(v:Output,@builtin(front_facing) front:bool)->@location(0) vec4<f32> {
+    return shade_surface(v,front,1.0,prepare_surface(v));
+}
+fn shade_surface(v:Output,front:bool,coverage:f32,surface:SurfaceData)->vec4<f32> {
+    var base=v.color;let p=v.world.xy;let kind=v.surface.x;var facade_glow=0.0;
+    var facade_room=vec3<f32>(0.0);var room_mask=0.0;
+    var n=surface.normal;
+    if kind>10.5&&kind<11.5&&!front {n=-n;}
+    let detail=surface.detail;let floor_position=surface.floor_position;let band=surface.band;
+    let brick_row=surface.brick_row;let brick_coord=surface.brick_coord;let brick_footprint=surface.brick_footprint;
+    let roof_row=surface.roof_row;let roof_tile=surface.roof_tile;let roof_detail=surface.roof_detail;
+    var grain=0.5;var broad=0.0;
+    if kind<2.5 || (kind>=4.5&&kind<5.5) {grain=mix(0.5,noise(p*1600.0),detail);}
+    if kind<1.5 {broad=noise(p*28.0)*0.65+noise(p*83.0)*0.35;}
     if kind<0.5 { // Asphalt aggregate, weathering, occasional repaired cracks.
         let crack=pow(1.0-abs(sin(p.x*307.0+noise(p*16.0)*14.0)),32.0)*0.16;
         base*=0.35*(0.80+0.20*grain+0.15*broad-crack);
     } else if kind<1.5 { // Multi-scale grass cover, soil and blades.
         base=mix(base,vec3<f32>(0.18,0.22,0.15),0.45);
         base=mix(base*0.72,base*1.22,broad)*(0.90+0.18*grain);
-    } else if kind<2.5 {base*=mix(0.65,1.0,joint)*(0.90+grain*0.16);}
+    } else if kind<2.5 {
+        // Only authored top surfaces carry joints. Curb faces stay plain.
+        var joint_coverage=0.0;
+        if v.surface.w==2.0 {
+            // A single distance coordinate makes every gap cross the full band;
+            // there is no across-width repetition to create longitudinal lines.
+            joint_coverage=mortar_coverage(v.fence_uv.x/0.015+0.005,surface.paving_footprint.x/0.015,0.01);
+        } else if v.surface.w==1.0 {
+            // Entrance paths also use full-width slabs along their local depth.
+            joint_coverage=mortar_coverage(v.fence_uv.y/0.75+0.005,surface.paving_footprint.y/0.75,0.01);
+        }
+        base*=mix(1.0,0.65,joint_coverage)*(0.90+grain*0.16);
+    }
     else if kind<3.5 { // Editor facade palette/floor spacing with game lighting.
         let across=select(v.world.y,v.world.x,abs(n.y)>abs(n.x));
         let window=step(0.22,fract(across/0.025))*step(0.35,fract(floor_position))*step(fract(floor_position),0.85);
@@ -214,7 +255,7 @@ fn room_glass(interior:vec3<f32>,n:vec3<f32>,view:vec3<f32>,daylight:f32)->vec3<
         var spec=pow(max(dot(n,halfway),0.0),48.0)*0.06;
         if kind>3.5&&kind<4.5 {spec=pow(max(dot(n,halfway),0.0),120.0)*1.3;}
         let ambient_tint=mix(vec3<f32>(0.42,0.56,0.85),vec3<f32>(1.0),daylight);
-        let sunlight=mix(vec3<f32>(0.40,0.52,0.80),vec3<f32>(1.0,0.92,0.78),daylight);
+        let sunlight=mix(vec3<f32>(0.40,0.52,0.80),camera.sun_color.rgb*camera.sun_color.w,daylight);
         lit=base*(ambient_tint*hemi+sunlight*diffuse*mix(0.12,0.95,daylight))+sunlight*spec*mix(0.15,1.0,daylight);
         let darkness=pow(1.0-daylight,2.0);
         lit+=vec3<f32>(0.9,0.48,0.18)*facade_glow*darkness;
@@ -228,5 +269,6 @@ fn room_glass(interior:vec3<f32>,n:vec3<f32>,view:vec3<f32>,daylight:f32)->vec3<
     let distance=length(eye);let fog=1.0-exp(-distance*0.025)*(1.0-smoothstep(5.8,7.6,distance));
     // Exposure and filmic compression. Surface target is sRGB.
     lit*=camera.sun_exposure.w;lit=lit/(lit+vec3<f32>(1.0));
-    return vec4<f32>(mix(lit,camera.daylight_sky.yzw,fog),coverage);
+    let sky=textureSampleLevel(sky_environment,sky_sampler,-view,0.0).rgb*camera.sun_exposure.w;
+return vec4<f32>(mix(lit,sky/(sky+vec3<f32>(1.0)),fog),coverage);
 }

@@ -232,7 +232,17 @@ impl Parser {
             self.bump();
             let mut properties = Vec::<(String, Argument)>::new();
             while !self.at(TokenKind::CloseBrace) {
-                let name = self.expect(TokenKind::Identifier)?;
+                // `end` remains a structural keyword outside object property keys.
+                let name = if self.at(TokenKind::End) {
+                    let name = self.bump();
+                    if !self.at(TokenKind::Colon) {
+                        return Err(self.error("reserved object keys require a value".into()));
+                    }
+                    name
+                } else {
+                    self.expect(TokenKind::Identifier)?
+                };
+
                 if properties.iter().any(|(key, _)| key == &name.text) {
                     return Err(SyntaxError {
                         span: name.span,

@@ -284,7 +284,7 @@ impl RoadEditor {
         } else {
             1
         };
-        let options = Argument::Object(vec![
+        let mut properties = vec![
             (
                 "material".into(),
                 Argument::Identifier(style.material.keyword().into()),
@@ -293,7 +293,16 @@ impl RoadEditor {
                 "floor_height".into(),
                 Argument::Number(style.floor_height.to_string()),
             ),
-        ]);
+        ];
+        if let Some(Argument::Object(existing)) = call.args.get(offset) {
+            properties.extend(
+                existing
+                    .iter()
+                    .filter(|(key, _)| matches!(key.as_str(), "use" | "front_edge"))
+                    .cloned(),
+            );
+        }
+        let options = Argument::Object(properties);
         if matches!(call.args.get(offset), Some(Argument::Object(_))) {
             call.args[offset] = options;
         } else {
