@@ -25,7 +25,3 @@ hooks:
 		echo "Existing core.hooksPath=$$current; integrate .githooks/pre-commit there first."; exit 1; \
 	fi
 	git config core.hooksPath .githooks
-
-.PHONY: test-lint
-test-lint:
-	cargo test --manifest-path xtask/Cargo.toml

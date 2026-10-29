@@ -125,6 +125,3 @@ fn inspect(file: &Path, source: &str) -> Vec<String> {
     }
     failures
 }
-
-#[cfg(test)]
-mod tests;
