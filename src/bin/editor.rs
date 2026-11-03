@@ -106,6 +106,8 @@ enum CameraView {
 struct CopiedSegment {
     road_name: String,
     name: Option<String>,
+    label_path: Vec<String>,
+    route_labels: Vec<String>,
     points: [WorldPoint; 4],
     start_z: f32,
     end_z: f32,
@@ -343,6 +345,9 @@ use picking::*;
 #[path = "editor/road_paint.rs"]
 mod road_paint;
 use road_paint::*;
+
+#[path = "editor/road_hover.rs"]
+mod road_hover;
 
 #[cfg(not(target_arch = "wasm32"))]
 #[path = "editor/design_rules.rs"]

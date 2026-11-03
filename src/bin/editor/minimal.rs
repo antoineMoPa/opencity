@@ -278,6 +278,7 @@ impl RoadEditor {
         }
         self.map_rect = None;
         self.map_canvas(root);
+        self.paint_hovered_road_name(root);
     }
 }
 

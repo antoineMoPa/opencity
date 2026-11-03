@@ -235,10 +235,20 @@ fn project_layout(program: &Program) -> Projection {
         .count();
     projection.intersections = super::intersections::from_layout(program, &projection);
     projection.unresolved += defined - projection.intersections.len();
+    opencity::road_labels::resolve_names(program, &mut projection);
     projection
 }
 
 fn project_with_points(program: &Program, points: &[MapPoint]) -> Projection {
+    let top_calls: Vec<_> = program
+        .statements
+        .iter()
+        .filter_map(|statement| match statement {
+            Statement::Call(call) => Some(call),
+            _ => None,
+        })
+        .collect();
+    let mut name_boundaries = opencity::road_labels::boundaries_in_calls(&top_calls);
     let mut port_heights: HashMap<_, _> = component_ports(program)
         .into_iter()
         .map(|(point, z)| (point.name, z))
@@ -332,6 +342,19 @@ fn project_with_points(program: &Program, points: &[MapPoint]) -> Projection {
                 segments.push(Segment {
                     source: SegmentSource::TopLevel(index),
                     name: call.assigns.first().cloned(),
+                    label_anchor: call.assigns.first().is_some_and(|name| {
+                        !opencity::road_labels::path_in_calls(&top_calls, name).is_empty()
+                    }),
+                    route_labels: call
+                        .assigns
+                        .first()
+                        .map(|name| opencity::road_labels::routes_in_calls(&top_calls, name))
+                        .unwrap_or_default(),
+                    label_path: call
+                        .assigns
+                        .first()
+                        .map(|name| opencity::road_labels::path_in_calls(&top_calls, name))
+                        .unwrap_or_default(),
                     road_name: call.name.clone(),
                     direction,
                     start,
@@ -351,14 +374,7 @@ fn project_with_points(program: &Program, points: &[MapPoint]) -> Projection {
         if !blocks.iter().any(|(_, block)| block.name == call.name) {
             continue;
         }
-        let top_calls: Vec<_> = program
-            .statements
-            .iter()
-            .filter_map(|statement| match statement {
-                Statement::Call(call) => Some(call),
-                _ => None,
-            })
-            .collect();
+
         let mut stack = Vec::new();
         let mut next_nested_call = 0;
         project_block_road_calls(
@@ -369,6 +385,10 @@ fn project_with_points(program: &Program, points: &[MapPoint]) -> Projection {
             &blocks,
             &roads,
             &top_calls,
+            &[],
+            false,
+            &[],
+            &mut name_boundaries,
             WorldPoint { x: 0.0, y: 0.0 },
             0.0,
             0.0,
@@ -380,6 +400,10 @@ fn project_with_points(program: &Program, points: &[MapPoint]) -> Projection {
     }
     Projection {
         segments,
+        road_names: opencity::road_labels::ResolvedRoadNames {
+            boundaries: name_boundaries,
+            ..Default::default()
+        },
         points: points.to_vec(),
         unresolved,
         intersections: Vec::new(),
@@ -395,6 +419,10 @@ fn project_block_road_calls(
     blocks: &[(usize, &opencity::BlockDefinition)],
     roads: &HashMap<&str, RoadDirection>,
     parent_calls: &[&Call],
+    parent_path: &[String],
+    parent_anchor: bool,
+    parent_routes: &[String],
+    name_boundaries: &mut Vec<String>,
     parent_origin: WorldPoint,
     parent_elevation: f32,
     parent_rotation: f32,
@@ -410,6 +438,20 @@ fn project_block_road_calls(
         return;
     };
     let local_name = placement.assigns.first().unwrap_or(&placement.name);
+    let mut label_path = parent_path.to_vec();
+    let labels = opencity::road_labels::path_in_calls(parent_calls, local_name);
+    let has_anchor = parent_anchor || !labels.is_empty();
+    let mut routes = parent_routes.to_vec();
+    for route in opencity::road_labels::routes_in_calls(parent_calls, local_name) {
+        if !routes.contains(&route) {
+            routes.push(route);
+        }
+    }
+    if labels.is_empty() {
+        label_path.push(local_name.clone());
+    } else {
+        label_path.extend(labels);
+    }
     let qualified = if namespace.is_empty() {
         local_name.clone()
     } else {
@@ -451,6 +493,9 @@ fn project_block_road_calls(
     }
     stack.push(block_index);
     let local_calls: Vec<_> = bound.calls.iter().collect();
+    for boundary in opencity::road_labels::boundaries_in_calls(&local_calls) {
+        name_boundaries.push(format!("{qualified}.{boundary}"));
+    }
     let local_program = Program {
         statements: program
             .statements
@@ -541,6 +586,29 @@ fn project_block_road_calls(
                         call: source_call,
                     },
                     name: inner.assigns.first().cloned(),
+                    label_anchor: has_anchor
+                        || inner.assigns.first().is_some_and(|name| {
+                            !opencity::road_labels::path_in_calls(&local_calls, name).is_empty()
+                        }),
+                    route_labels: {
+                        let mut labels = routes.clone();
+                        if let Some(name) = inner.assigns.first() {
+                            for route in opencity::road_labels::routes_in_calls(&local_calls, name)
+                            {
+                                if !labels.contains(&route) {
+                                    labels.push(route);
+                                }
+                            }
+                        }
+                        labels
+                    },
+                    label_path: {
+                        let mut path = label_path.clone();
+                        if let Some(name) = inner.assigns.first() {
+                            path.extend(opencity::road_labels::path_in_calls(&local_calls, name));
+                        }
+                        path
+                    },
                     road_name: inner.name.clone(),
                     direction,
                     start: transform(start).translated(origin),
@@ -567,6 +635,10 @@ fn project_block_road_calls(
                 blocks,
                 roads,
                 &local_calls,
+                &label_path,
+                has_anchor,
+                &routes,
+                name_boundaries,
                 origin,
                 elevation,
                 rotation,

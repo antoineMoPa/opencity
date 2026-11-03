@@ -3,6 +3,7 @@ use super::*;
 mod annotations;
 mod canvas;
 mod fixtures;
+mod hover;
 mod palette;
 mod rename;
 mod view_switch;

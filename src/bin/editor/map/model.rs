@@ -100,6 +100,10 @@ impl SegmentSource {
 pub struct Segment {
     pub source: SegmentSource,
     pub name: Option<String>,
+    /// Explicit route/road labels and containing placement hierarchy; excludes the leaf ID.
+    pub label_path: Vec<String>,
+    pub label_anchor: bool,
+    pub route_labels: Vec<String>,
     pub road_name: String,
     pub direction: RoadDirection,
     pub start: WorldPoint,
@@ -151,6 +155,7 @@ impl Segment {
 #[derive(Clone)]
 pub struct Projection {
     pub segments: Vec<Segment>,
+    pub road_names: opencity::road_labels::ResolvedRoadNames,
     pub points: Vec<MapPoint>,
     pub unresolved: usize,
     // Intersection geometry belongs to the same immutable document projection.

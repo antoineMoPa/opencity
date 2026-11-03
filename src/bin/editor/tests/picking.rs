@@ -172,6 +172,9 @@ fn map_hit_testing_respects_pan_and_zoom() {
     let segment = map::Segment {
         source: SegmentSource::TopLevel(1),
         name: Some("road_1".into()),
+        label_path: Vec::new(),
+        label_anchor: false,
+        route_labels: Vec::new(),
         road_name: "neighborhood_street".into(),
         direction: RoadDirection::Both,
         start: world,

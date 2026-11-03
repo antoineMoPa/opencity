@@ -346,7 +346,9 @@ pub fn check_vehicle_lane_continuity(
                         && tangent_match(
                             ramp_travel,
                             parent_travel,
-                            road.lane_direction(lane) == Some(RoadDirection::Both),
+                            road.lane_direction(lane) == Some(RoadDirection::Both)
+                                || parent_road.lane_direction(lane_index)
+                                    == Some(RoadDirection::Both),
                         )
                 }) && (segment.height_at(t) - parent.height_at(parent_t)).abs()
                     <= 0.005;
@@ -784,6 +786,35 @@ fn segment_crossing_at_grade(a: &map::Segment, b: &map::Segment) -> Option<map::
 mod tests {
     use super::*;
     use crate::parse;
+
+    #[test]
+    fn reverse_lane_attachment_respects_bidirectional_and_one_way_parents() {
+        for (direction, disconnected) in [("", false), ("forward", true), ("reverse", false)] {
+            let declaration = if direction.is_empty() {
+                String::new()
+            } else {
+                format!("direction {direction};")
+            };
+            let source = format!(
+                "road street: carlane; {declaration} end
+                 road mouth: carlane; direction forward; role merge; end
+                 a = map_point(0, 0); b = map_point(3, 0); c = map_point(0.5, 0);
+                 parent = street(a, 1, 0, 2, 0, b);
+                 entry = lane_point(parent, 0, 0.5);
+                 ramp = mouth(entry, 1.2, 0, 0.9, 0, c);"
+            );
+            let program = parse(&source).unwrap();
+            let projection = map::project(&program);
+            let issues = check_vehicle_lane_continuity(&program, &projection);
+            assert_eq!(
+                issues
+                    .iter()
+                    .any(|i| i.rule == DesignRule::VehicleLaneDiscontinuity),
+                disconnected,
+                "parent direction {direction:?}: {issues:?}"
+            );
+        }
+    }
 
     #[test]
     fn connected_ramp_passes_from_road_source() {

@@ -9,10 +9,18 @@ fn copied_curve_preserves_grade_and_round_trips() {
     )
     .unwrap();
     editor.selected_segment = Some(SegmentSource::TopLevel(1));
+    let hierarchy = vec!["Route 7".into(), "River Bridge".into()];
+    opencity::road_labels::set_road_path(&mut editor.program, "road_1", &hierarchy).unwrap();
+    let routes = vec!["Route 7".into(), "Route 8".into()];
+    opencity::road_labels::set_road_routes(&mut editor.program, "road_1", &routes).unwrap();
     editor.copy_selection();
     editor.paste_selection();
     let segments = map::project(&editor.program).segments;
     assert_eq!(segments.len(), 2);
+    assert_eq!(segments[0].label_path, hierarchy);
+    assert_eq!(segments[1].label_path, hierarchy);
+    assert_eq!(segments[0].route_labels, routes);
+    assert_eq!(segments[1].route_labels, routes);
     assert!((segments[1].start.x - 1.0).abs() < 0.0001);
     assert!((segments[1].start.y + 1.0).abs() < 0.0001);
     assert!((segments[1].controls[0].x - 2.0).abs() < 0.0001);

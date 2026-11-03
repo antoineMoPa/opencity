@@ -16,6 +16,8 @@ impl RoadEditor {
             .map(|segment| CopiedSegment {
                 road_name: segment.road_name.clone(),
                 name: segment.name.clone(),
+                label_path: segment.label_path.clone(),
+                route_labels: segment.route_labels.clone(),
                 points: [
                     segment.start,
                     segment.controls[0],
@@ -59,6 +61,16 @@ impl RoadEditor {
                 .and_then(|item| item.name.clone())
             {
                 set_grade(&mut self.program, &name, segment.start_z, segment.end_z);
+                let _ = opencity::road_labels::set_road_path(
+                    &mut self.program,
+                    &name,
+                    &segment.label_path,
+                );
+                let _ = opencity::road_labels::set_road_routes(
+                    &mut self.program,
+                    &name,
+                    &segment.route_labels,
+                );
             }
             pasted.push(source);
         }

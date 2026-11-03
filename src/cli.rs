@@ -2,17 +2,29 @@
 use crate::{network, parse_road_file, Statement};
 use std::{ffi::OsString, path::PathBuf};
 
+#[cfg(all(feature = "geodata", not(target_arch = "wasm32")))]
+mod calibration;
+#[cfg(all(feature = "geodata", not(target_arch = "wasm32")))]
+mod geodata;
+
 pub const HELP: &str = "OpenCity — road and intersection tools
 
 USAGE:
   opencity intersection-svg INPUT.road --name NAME --output OUTPUT.svg [OPTIONS]
   opencity intersection-png INPUT.road --name NAME --output OUTPUT.png [OPTIONS]
+  opencity fetch-street --name NAME --bbox W,S,E,N --output STREET.geojson
+  opencity lookup-place --name NAME --bbox W,S,E,N --output PLACES.geojson
+  opencity map-coordinates --calibration MAP.json --lonlat LONGITUDE,LATITUDE
+  opencity map-coordinates --calibration MAP.json --input SOURCE.geojson --output WORLD.json
   editor [INPUT.road]
   editor mcp
 
 COMMANDS:
   intersection-svg   Export a standalone intersection SVG
   intersection-png   Export a standalone intersection PNG
+  fetch-street       Fetch one named street's full coordinate detail inside a crop
+  lookup-place       Look up named places or a structured address inside a crop
+  map-coordinates    Map WGS84 coordinates into a calibrated game map, or back
   mcp                Run the editor automation bridge (editor executable)
 
 OPTIONS:
@@ -34,6 +46,22 @@ pub fn run(args: Vec<OsString>) -> Option<Result<(), String>> {
     if matches!(first, "--help" | "-h" | "help") {
         println!("{HELP}");
         return Some(Ok(()));
+    }
+    if first == "map-coordinates" {
+        #[cfg(all(feature = "geodata", not(target_arch = "wasm32")))]
+        return Some(calibration::run(&args));
+        #[cfg(not(all(feature = "geodata", not(target_arch = "wasm32"))))]
+        return Some(Err(
+            "Coordinate mapping requires a native build with --features geodata".into(),
+        ));
+    }
+    if matches!(first, "fetch-street" | "lookup-place") {
+        #[cfg(all(feature = "geodata", not(target_arch = "wasm32")))]
+        return Some(geodata::run(&args));
+        #[cfg(not(all(feature = "geodata", not(target_arch = "wasm32"))))]
+        return Some(Err(
+            "Geographic lookup requires a native build with --features geodata".into(),
+        ));
     }
     if !matches!(first, "intersection-svg" | "intersection-png") {
         return None;

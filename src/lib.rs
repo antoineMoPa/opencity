@@ -39,6 +39,7 @@ pub mod network;
 mod parser;
 mod patterns;
 pub mod road_geometry;
+pub mod road_labels;
 pub mod road_profiles;
 mod writer;
 

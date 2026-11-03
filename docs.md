@@ -2,12 +2,36 @@
 
 ## Road editor
 
+Hover a road to see its hierarchy in tiny text at the viewport bottom right:
+`Route 7 > River Bridge > segment_id`. Declare semantic parents with
+`road_path(segment_id, "River Bridge");` and `road_routes(segment_id, "Route 7");`
+on one segment of a connected road. Labels remain data; the editor infers their
+extent from the connection graph, rather than guessing names from IDs. Containing block placements
+add
+their own hierarchy, with scoped labels when supplied. Rename and copy preserve
+the path. Unnamed roads fall back to their profile name. Long paths wrap inside
+the viewport. The readout works in all three camera views and hides under modals.
+
+Road groups follow shared endpoint references and opposite native-junction ports.
+Continuations require compatible travel modes, lane counts, directions, road roles,
+endpoint heights and tangents. Sidewalk/profile width changes are allowed. Ramps
+stay separate from mainlines; lane attachments remain branches, and coordinate
+crossings alone do not connect roads. Near-equal forks stop propagation.
+
+Use `road_boundary(point_id);` where a straight road changes its semantic name or
+section. Multiple `road_routes` anchors within a group add concurrent route names.
+Conflicting `road_path` anchors are reported as an ambiguous road name on hover;
+they do not overwrite unanchored segments. The projected `road_names` report exposes
+groups, anchor indices, ambiguous nodes and unused boundary markers. Boundaries and
+anchors inside blocks use instance-local references. Groups are cached with the
+document projection and rebuilt after edits; hovering only reads that cache.
+
 ```sh
 git submodule update --init --recursive
 cargo run                       # bundled map
 cargo run -- path/to/city.road
-make fmt                        # format Rust
-make lint                       # formatting and source limits
+make fmt                        # format Rust and wrap Markdown prose
+make lint                       # read-only formatting and source limits
 make hooks                      # enable pre-commit checks
 cargo test
 ```
@@ -103,6 +127,10 @@ height, cross-section, tangent and direction. Saving writes expanded editable ro
 [composition.example.road](road_library/composition.example.road).
 
 ## Use the crate
+
+For bounded street/address lookup and reversible geographic-to-world mapping,
+see the [agent geographic-data workflow](docs/geodata-agent-workflow.md). The CLI preserves
+coordinate detail; simplification and game-map placement stay with the agent.
 
 ```toml
 [dependencies]
