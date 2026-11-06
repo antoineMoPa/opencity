@@ -44,8 +44,12 @@ fn hovered_road_name_is_tiny_at_bottom_right_and_clears_when_pointer_leaves() {
                 _ => None,
             })
             .unwrap_or_else(|| panic!("hover label missing: {:?}", labels(&output)));
-        let corner = label.pos + label.galley.size();
+        let text_bounds = label.galley.rect.translate(label.pos.to_vec2());
+        let corner = text_bounds.right_bottom();
         assert!(corner.distance(rect.right_bottom() - egui::vec2(8.0, 8.0)) < 0.1);
+        assert!(output.shapes.iter().any(|shape| matches!(&shape.shape,
+            egui::Shape::Rect(background)
+                if background.rect == text_bounds.expand(2.0))));
         assert!(label.galley.size().y <= 12.0);
         assert_eq!(editor.program, program);
         assert_eq!(editor.selected_segment, selected);
@@ -105,8 +109,17 @@ fn hover_shows_semantic_hierarchy_then_leaf_and_wraps_inside_a_narrow_viewport()
         })
         .expect("full semantic path should be visible");
     assert!(text.galley.rows.len() > 1);
-    assert!(text.pos.x >= 8.0);
-    assert!((text.pos + text.galley.size()).distance(size.to_pos2() - egui::vec2(8.0, 8.0)) < 0.1);
+    let text_bounds = text.galley.rect.translate(text.pos.to_vec2());
+    assert!(text_bounds.left() >= 8.0);
+    assert!(
+        text_bounds
+            .right_bottom()
+            .distance(size.to_pos2() - egui::vec2(8.0, 8.0))
+            < 0.1
+    );
+    assert!(output.shapes.iter().any(|shape| matches!(&shape.shape,
+        egui::Shape::Rect(background)
+            if background.rect == text_bounds.expand(2.0))));
 }
 
 #[test]

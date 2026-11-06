@@ -65,7 +65,10 @@ impl RoadEditor {
             galley.size(),
         );
         painter.rect_filled(bounds.expand(2.0), 2.0, ui.visuals().window_fill());
-        painter.galley(bounds.min, galley, color);
+        // Right-aligned galleys extend left of their origin; align their rect,
+        // rather than placing the origin at the background's left edge.
+        let origin = bounds.min - galley.rect.min.to_vec2();
+        painter.galley(origin, galley, color);
     }
 }
 
