@@ -229,9 +229,26 @@ impl City {
                     .clamp(0., 1023.) as usize,
             ];
             for x in (lo[0]..hi[0]).step_by(stride) {
-                for y in (lo[1]..hi[1]).step_by(stride) {
+                let mut y = lo[1];
+                while y < hi[1] {
                     let right = (x + stride).min(1023);
-                    let top = (y + stride).min(1023);
+                    let mut top = (y + stride).min(1023);
+                    let level = e.point(x, y)[2];
+                    // Merge only exactly horizontal runs. Their plane and water
+                    // coverage are identical to every original support triangle;
+                    // sloping cells retain the PNG boundaries and diagonal.
+                    if [e.point(right, y), e.point(x, top), e.point(right, top)]
+                        .iter()
+                        .all(|p| p[2] == level)
+                    {
+                        while top < hi[1] {
+                            let next = (top + stride).min(1023);
+                            if e.point(x, next)[2] != level || e.point(right, next)[2] != level {
+                                break;
+                            }
+                            top = next;
+                        }
+                    }
                     let p = [
                         e.point(x, y),
                         e.point(right, y),
@@ -248,6 +265,7 @@ impl City {
                             );
                         }
                     }
+                    y = top;
                 }
             }
         }

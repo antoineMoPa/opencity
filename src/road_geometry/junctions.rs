@@ -31,6 +31,43 @@ impl RoadGeometry {
                 let coordinate = if horizontal { p.x } else { p.y };
                 (coordinate - sign * junction.footprint_half).abs() < 0.00005
             })
+        }) || seams.iter().any(|(_, a, b)| {
+            // A rotated/curved approach can cross a rounded boundary before
+            // reaching its cardinal mouth. Keep that actual pavement open too.
+            let center = WorldPoint {
+                x: (a.point.x + b.point.x) / 2.,
+                y: (a.point.y + b.point.y) / 2.,
+            };
+            let across = WorldPoint {
+                x: b.point.x - a.point.x,
+                y: b.point.y - a.point.y,
+            };
+            let width = across.x.hypot(across.y);
+            if width < 0.000001 {
+                return false;
+            }
+            let outward = WorldPoint {
+                x: center.x - junction.position.x,
+                y: center.y - junction.position.y,
+            };
+            let midpoint = WorldPoint {
+                x: (edge[0].x + edge[1].x) / 2.,
+                y: (edge[0].y + edge[1].y) / 2.,
+            };
+            let center = local(center);
+            let across = map::junction_local_direction(across, rotation);
+            let outward = map::junction_local_direction(outward, rotation);
+            let d = WorldPoint {
+                x: midpoint.x - center.x,
+                y: midpoint.y - center.y,
+            };
+            let lateral = (d.x * across.x + d.y * across.y).abs() / width;
+            let length = outward.x.hypot(outward.y).max(0.000001);
+            let along = (d.x * outward.x + d.y * outward.y) / length;
+            midpoint.x * outward.x + midpoint.y * outward.y > 0.
+                && lateral < width / 2. - 0.005
+                && along <= 0.02
+                && along >= -junction.footprint_half * 2.1
         })
     }
 

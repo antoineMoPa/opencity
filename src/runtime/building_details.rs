@@ -1104,21 +1104,13 @@ fn w_adjust(wide: bool, ww: f32) -> f32 {
     }
 }
 impl City {
-    /// Additional configurable facade and frontage geometry; leaves the authored
-    /// building footprints, surfaces, and collision queries unchanged.
-    pub fn building_detail_mesh(&self, region: Region, cfg: &BuildingDetailConfig) -> Mesh {
-        let (mut mesh, props) = self.building_detail_parts(region, cfg);
-        for prop in props {
-            mesh.vertices.extend(prop.vertices);
-        }
-        mesh
-    }
-
-    /// Facade geometry and independently removable balconies, stairs, and frontage objects.
-    pub fn building_detail_parts(
+    /// Let a consumer reserve fine frontage geometry for selected building groups.
+    /// All buildings retain their original surfaces and collision footprints.
+    pub fn building_detail_parts_matching(
         &self,
         region: Region,
         cfg: &BuildingDetailConfig,
+        include: impl Fn(&LandscapeFeature) -> bool,
     ) -> (Mesh, Vec<Mesh>) {
         let mut mesh = Mesh::default();
         let mut props = Vec::new();
@@ -1146,6 +1138,7 @@ impl City {
             f.kind == LandscapeKind::Building
                 && f.model.is_none()
                 && f.building_use.allows_residential_details()
+                && include(f)
                 && geometry::polygon_region(&f.points, region)
         }) {
             let height = feature.height.unwrap_or(0.);

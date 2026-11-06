@@ -6,14 +6,11 @@ const MIN_CLEARANCE: f32 = 0.02;
 const PIER_SPACING: f32 = 0.24;
 const CONCRETE: [f32; 3] = [0.32, 0.34, 0.33];
 
-fn ground(city: &City, p: [f32; 2]) -> f32 {
+fn ground(city: &City, features: &[&crate::LandscapeFeature], p: [f32; 2]) -> f32 {
     let terrain = city.elevation.as_ref().and_then(|e| e.height_at(p));
-    city.landscape
+    features
         .iter()
-        .filter(|f| {
-            !matches!(f.kind, LandscapeKind::Building | LandscapeKind::Vegetation)
-                && super::geometry::contains(&f.points, p)
-        })
+        .filter(|f| super::geometry::contains(&f.points, p))
         .map(|f| f.elevation - 0.02 + f.height.unwrap_or(0.))
         .chain(terrain)
         .max_by(f32::total_cmp)
@@ -23,14 +20,21 @@ fn edges(row: &CrossSection) -> [[f32; 3]; 2] {
     [row.boundaries[0], *row.boundaries.last().unwrap()]
         .map(|v| [v.point.x, v.point.y, v.height - 0.0002])
 }
-fn elevated(city: &City, row: &CrossSection) -> bool {
+fn elevated(city: &City, features: &[&crate::LandscapeFeature], row: &CrossSection) -> bool {
     edges(row)
         .iter()
-        .all(|p| p[2] - ground(city, [p[0], p[1]]) > MIN_CLEARANCE)
+        .all(|p| p[2] - ground(city, features, [p[0], p[1]]) > MIN_CLEARANCE)
 }
 
 pub(super) fn mesh(city: &City, geometry: &RoadGeometry) -> Mesh {
     let mut mesh = Mesh::default();
+    // Ground never depends on building shells. Filter them once rather than
+    // visiting every building for each adaptive deck-edge sample.
+    let features: Vec<_> = city
+        .landscape
+        .iter()
+        .filter(|f| !matches!(f.kind, LandscapeKind::Building | LandscapeKind::Vegetation))
+        .collect();
     for id in 0..city.roads.len() {
         let rows = geometry.cross_sections(id);
         let mut since_pier = PIER_SPACING;
@@ -42,7 +46,7 @@ pub(super) fn mesh(city: &City, geometry: &RoadGeometry) -> Mesh {
             let p = center(a, b);
             let q = center(c, d);
             since_pier += (q[0] - p[0]).hypot(q[1] - p[1]);
-            if !elevated(city, &pair[0]) || !elevated(city, &pair[1]) {
+            if !elevated(city, &features, &pair[0]) || !elevated(city, &features, &pair[1]) {
                 continue;
             }
             let bottom = |mut p: [f32; 3]| {
@@ -64,7 +68,7 @@ pub(super) fn mesh(city: &City, geometry: &RoadGeometry) -> Mesh {
                 continue;
             }
             let top = p[2] - DEPTH;
-            let foot = ground(city, [p[0], p[1]]);
+            let foot = ground(city, &features, [p[0], p[1]]);
             // Leave lower roads, footpaths and buildings clear. Try again on the
             // next adaptive row when a planned pier lands in a crossing.
             let blocked = [-0.014, 0., 0.014].into_iter().any(|x| {

@@ -163,6 +163,7 @@ pub struct City {
     triangles: Vec<Triangle>,
     cells: HashMap<(i32, i32), Vec<usize>>,
     barrier_cells: HashMap<(i32, i32), Vec<usize>>,
+    building_cells: HashMap<(i32, i32), Vec<usize>>,
 }
 impl City {
     pub fn load(path: impl AsRef<Path>) -> Result<Self, String> {
@@ -218,7 +219,23 @@ impl City {
             triangles: Vec::new(),
             cells: HashMap::new(),
             barrier_cells: HashMap::new(),
+            building_cells: HashMap::new(),
         };
+        for (i, feature) in city
+            .landscape
+            .iter()
+            .enumerate()
+            .filter(|(_, f)| f.kind == LandscapeKind::Building)
+        {
+            let b = geometry::bounds(feature.points.iter().copied());
+            let lo = geometry::cell([b[0], b[1]]);
+            let hi = geometry::cell([b[2], b[3]]);
+            for x in lo.0..=hi.0 {
+                for y in lo.1..=hi.1 {
+                    city.building_cells.entry((x, y)).or_default().push(i);
+                }
+            }
+        }
         geometry::compile(&mut city, program, &projection)?;
         Ok(city)
     }
@@ -407,9 +424,25 @@ impl City {
         }
         best
     }
+    /// Additional configurable facades; authored surfaces and collision stay unchanged.
+    pub fn building_detail_mesh(&self, region: Region, cfg: &BuildingDetailConfig) -> Mesh {
+        let (mut mesh, props) = self.building_detail_parts(region, cfg);
+        for prop in props {
+            mesh.vertices.extend(prop.vertices);
+        }
+        mesh
+    }
+    /// Facade geometry and independently removable balconies, stairs, and frontage objects.
+    pub fn building_detail_parts(
+        &self,
+        region: Region,
+        cfg: &BuildingDetailConfig,
+    ) -> (Mesh, Vec<Mesh>) {
+        self.building_detail_parts_matching(region, cfg, |_| true)
+    }
     /// Circle/footprint overlap plus vertical interval for vehicle collision checks.
     pub fn building_collision(&self, point: [f32; 2], radius: f32, bottom: f32, top: f32) -> bool {
-        self.landscape.iter().any(|f| {
+        let collides = |f: &LandscapeFeature| {
             f.kind == LandscapeKind::Building
                 && f.elevation < top
                 && f.elevation + f.height.unwrap_or(0.) > bottom
@@ -420,6 +453,29 @@ impl City {
                         radius,
                     },
                 )
-        })
+        };
+        let lo = geometry::cell([point[0] - radius, point[1] - radius]);
+        let hi = geometry::cell([point[0] + radius, point[1] + radius]);
+        // Retain the full query for unusual/broad circles rather than visiting
+        // an unbounded number of empty cells.
+        if !radius.is_finite()
+            || radius < 0.
+            || hi.0 as i64 - lo.0 as i64 > 64
+            || hi.1 as i64 - lo.1 as i64 > 64
+        {
+            return self.landscape.iter().any(collides);
+        }
+        for x in lo.0..=hi.0 {
+            for y in lo.1..=hi.1 {
+                if self
+                    .building_cells
+                    .get(&(x, y))
+                    .is_some_and(|ids| ids.iter().any(|&i| collides(&self.landscape[i])))
+                {
+                    return true;
+                }
+            }
+        }
+        false
     }
 }

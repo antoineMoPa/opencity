@@ -160,5 +160,75 @@ fn full_resolution_terrain_mesh_matches_png_support_triangles() {
             checked += 1;
         }
     }
-    assert!(checked > 30);
+    assert!(checked > 0);
+}
+
+#[test]
+fn flat_terrain_runs_shrink_without_changing_sloped_support() {
+    let p = opencity::parse("elevation_map(\"test.png\",0,0,10,10,0,1);").unwrap();
+    let mut samples = vec![10000_u16; 1024 * 1024];
+    samples[512 * 1024 + 512] = 30000;
+    let bytes: Vec<_> = samples.iter().flat_map(|v| v.to_be_bytes()).collect();
+    let mut png = Vec::new();
+    {
+        let mut encoder = png::Encoder::new(&mut png, 1024, 1024);
+        encoder.set_color(png::ColorType::Grayscale);
+        encoder.set_depth(png::BitDepth::Sixteen);
+        encoder
+            .write_header()
+            .unwrap()
+            .write_image_data(&bytes)
+            .unwrap();
+    }
+    let spec = opencity::heightmap::ElevationMapSpec::from_program(&p)
+        .unwrap()
+        .unwrap();
+    let terrain = opencity::heightmap::ElevationMap::from_png(spec, &png).unwrap();
+    let c = City::from_program_with_elevation_loader(&p, |_| Ok(terrain.clone())).unwrap();
+    let mesh = c.mesh(Region::WholeMap, 0.005).unwrap();
+    assert!(mesh.vertices.len() < 10_000);
+    for tri in mesh.vertices.chunks_exact(3) {
+        let p: [f32; 3] =
+            std::array::from_fn(|axis| tri.iter().map(|v| v.position[axis]).sum::<f32>() / 3.);
+        let h = terrain.surface_height_at([p[0], p[1]]).unwrap();
+        assert!(
+            (p[2] - h).abs() < 0.0001,
+            "mesh/support disagree: {p:?} vs {h}"
+        );
+    }
+    let peak = terrain.point(512, 512);
+    let fine = c
+        .mesh(Region::radius([peak[0], peak[1]], 0.06).unwrap(), 0.005)
+        .unwrap();
+    assert!(fine.vertices.iter().any(|v| v.position[2] > 0.2));
+}
+
+#[test]
+fn building_collision_index_matches_footprint_queries_across_cells_and_heights() {
+    let c = city(
+        "wide=building(0.2,-1,-0.6,1,-0.6,1,0.6,-1,0.6);
+        high=building(0.3,1.45,-0.1,1.55,-0.1,1.55,0.1,1.45,0.1); elevation(high,0.5);
+        corner=building(0.1,-0.6,1.4,-0.4,1.4,-0.4,1.6,-0.6,1.6);",
+    );
+    for x in -20..=20 {
+        for y in -20..=20 {
+            let point = [x as f32 * 0.1 + 0.003, y as f32 * 0.1 + 0.007];
+            for radius in [0., 0.01, 0.3, 0.7, 40.] {
+                for (bottom, top) in [(0., 0.15), (0.25, 0.45), (0.6, 0.7)] {
+                    let expected = c
+                        .query(Region::radius(point, radius).unwrap())
+                        .buildings
+                        .iter()
+                        .any(|(_, f)| {
+                            f.elevation < top && f.elevation + f.height.unwrap_or(0.) > bottom
+                        });
+                    assert_eq!(
+                        c.building_collision(point, radius, bottom, top),
+                        expected,
+                        "point={point:?}, radius={radius}, height={bottom}..{top}"
+                    );
+                }
+            }
+        }
+    }
 }

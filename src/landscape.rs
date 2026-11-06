@@ -4,9 +4,8 @@
 //! least two. Coordinates inside a block are local to its placement:
 //! `block_name(x, y)` translates them by `(x, y)`.
 
-use std::fmt;
+use std::{collections::HashMap, fmt};
 
-use crate::elevation::{elevation_in_calls, elevation_of};
 use crate::{Argument, BlockDefinition, BuildingStyle, Call, Program, Statement};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -366,11 +365,25 @@ fn feature(
     })
 }
 
+fn elevation_index<'a>(calls: impl Iterator<Item = &'a Call>) -> HashMap<String, f32> {
+    let mut heights = HashMap::new();
+    for call in calls.filter(|c| c.name == "elevation") {
+        if let [Argument::Identifier(name), Argument::Number(value)] = call.args.as_slice() {
+            if let Ok(height) = value.parse::<f32>() {
+                if height.is_finite() {
+                    heights.insert(name.clone(), height);
+                }
+            }
+        }
+    }
+    heights
+}
+
 fn visit_call(
     call: &Call,
-    program: &Program,
+    global_elevations: &HashMap<String, f32>,
     blocks: &[&BlockDefinition],
-    local_calls: &[&Call],
+    local_elevations: &HashMap<String, f32>,
     origin: [f32; 2],
     elevation: f32,
     rotation: f32,
@@ -382,7 +395,10 @@ fn visit_call(
             .assigns
             .first()
             .and_then(|name| {
-                elevation_in_calls(local_calls, name).or_else(|| elevation_of(program, name))
+                local_elevations
+                    .get(name)
+                    .or_else(|| global_elevations.get(name))
+                    .copied()
             })
             .unwrap_or(0.0);
         match feature(call, kind, origin, elevation + feature_elevation, rotation) {
@@ -418,17 +434,20 @@ fn visit_call(
         .assigns
         .first()
         .and_then(|name| {
-            elevation_in_calls(local_calls, name).or_else(|| elevation_of(program, name))
+            local_elevations
+                .get(name)
+                .or_else(|| global_elevations.get(name))
+                .copied()
         })
         .unwrap_or(0.0);
     stack.push(block.name.clone());
-    let block_calls: Vec<_> = bound.calls.iter().collect();
+    let block_elevations = elevation_index(bound.calls.iter());
     for inner in &bound.calls {
         visit_call(
             inner,
-            program,
+            global_elevations,
             blocks,
-            &block_calls,
+            &block_elevations,
             origin,
             elevation + bound.elevation + named_elevation,
             rotation + bound.rotation,
@@ -451,13 +470,21 @@ pub fn project_landscape_features(program: &Program) -> LandscapeProjection {
         })
         .collect();
     let mut result = LandscapeProjection::default();
+    let global_elevations = elevation_index(program.statements.iter().filter_map(|s| {
+        if let Statement::Call(c) = s {
+            Some(c)
+        } else {
+            None
+        }
+    }));
+    let no_local_elevations = HashMap::new();
     for statement in &program.statements {
         if let Statement::Call(call) = statement {
             visit_call(
                 call,
-                program,
+                &global_elevations,
                 &blocks,
-                &[],
+                &no_local_elevations,
                 [0.0, 0.0],
                 0.0,
                 0.0,
@@ -473,6 +500,22 @@ pub fn project_landscape_features(program: &Program) -> LandscapeProjection {
 mod tests {
     use super::*;
     use crate::parse;
+
+    #[test]
+    fn indexed_heights_keep_last_valid_value_and_block_scope() {
+        let p = parse(
+            "elevation(shell,0.2); elevation(shell,0.4);
+            shell=building(0.1,0,0,1,0,1,1,0,1);
+            block group: shell=building(0.1,0,0,1,0,1,1,0,1); elevation(shell,0.7); end
+            placed=group(2,0); elevation(placed,0.3);",
+        )
+        .unwrap();
+        let projected = project_landscape_features(&p);
+        assert!(projected.errors.is_empty());
+        assert_eq!(projected.features.len(), 2);
+        assert!((projected.features[0].elevation - 0.4).abs() < 0.00001);
+        assert!((projected.features[1].elevation - 1.0).abs() < 0.00001);
+    }
 
     #[test]
     fn outlines_keep_heights_types_and_model_paths() {

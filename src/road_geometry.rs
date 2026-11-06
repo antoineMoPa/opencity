@@ -5,6 +5,7 @@ use crate::{
     map::{self, Projection, Segment, WorldPoint},
     Program, RoadDefinition, RoadElementKind, RoadRole, Statement,
 };
+mod attachments;
 mod junctions;
 
 pub const GEOMETRY_TOLERANCE: f32 = 0.0005;
@@ -254,6 +255,7 @@ fn clip(a: Vertex, b: Vertex, triangle: Triangle, below: f32, above: f32) -> Opt
 fn attached_parent(
     program: &Program,
     projection: &Projection,
+    attachments: &std::collections::HashMap<String, (String, usize, f32)>,
     mouth: usize,
     parent: usize,
 ) -> bool {
@@ -263,7 +265,7 @@ fn attached_parent(
         .into_iter()
         .flatten()
         .any(|reference| {
-            let Some((name, lane, t)) = map::lane_attachment(program, reference) else {
+            let Some((name, lane, t)) = attachments.get(reference).cloned() else {
                 return false;
             };
             let Some(p) = projection
@@ -595,6 +597,7 @@ impl RoadGeometry {
             })
             .collect();
         let mut connections = vec![Vec::new(); surfaces.len()];
+        let attachments = attachments::index(program);
         let joins = crate::road_profiles::road_joins(projection);
         for (mouth, segment) in projection.segments.iter().enumerate() {
             if !definition(program, segment).is_some_and(|r| {
@@ -603,7 +606,9 @@ impl RoadGeometry {
                 continue;
             }
             for parent in 0..surfaces.len() {
-                if parent != mouth && attached_parent(program, projection, mouth, parent) {
+                if parent != mouth
+                    && attached_parent(program, projection, &attachments, mouth, parent)
+                {
                     connections[parent].push(mouth);
                     connections[mouth].push(parent);
                     // A shoulder can still overlap the parent just past the
@@ -693,6 +698,7 @@ impl RoadGeometry {
         projection: &Projection,
     ) -> Vec<(usize, usize, WorldPoint, RoadElementKind)> {
         let junctions = map::intersections(program, projection);
+        let attachments = attachments::index(program);
         let boxes: Vec<_> = self
             .surfaces
             .iter()
@@ -706,10 +712,10 @@ impl RoadGeometry {
                 }
                 let is_merge = definition(program, &projection.segments[lane])
                     .is_some_and(|r| r.role == RoadRole::Merge)
-                    && attached_parent(program, projection, lane, other);
+                    && attached_parent(program, projection, &attachments, lane, other);
                 let is_merge_shoulder = definition(program, &projection.segments[other])
                     .is_some_and(|r| r.role == RoadRole::Merge)
-                    && attached_parent(program, projection, other, lane);
+                    && attached_parent(program, projection, &attachments, other, lane);
                 'pair: for &(band, kind) in &obstacle.forbidden {
                     if is_merge_shoulder && kind == RoadElementKind::Verge {
                         continue;
