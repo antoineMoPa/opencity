@@ -566,7 +566,7 @@ pub fn check_vehicle_lane_intrusions(
     projection: &map::Projection,
 ) -> Vec<DesignIssue> {
     let roads = road_definitions(program);
-    let junctions = map::intersections(program, projection);
+    let profiles = crate::road_profiles::road_profiles(program, projection);
     let mut issues = Vec::new();
     let mut reported = std::collections::HashSet::new();
     let surfaces: Vec<_> = projection
@@ -607,23 +607,34 @@ pub fn check_vehicle_lane_intrusions(
         let Some(source_road) = roads.get(source.road_name.as_str()) else {
             continue;
         };
+        let Some((sx0, sx1, sy0, sy1, _)) = surfaces[source_index] else {
+            continue;
+        };
+        // A lane stays within its cubic control hull plus half the profile width.
+        // Reject disjoint road pairs once, before visiting the 99 lane samples.
+        let candidates: Vec<_> = surfaces
+            .iter()
+            .enumerate()
+            .filter_map(|(index, bounds)| {
+                let (x0, x1, y0, y1, _) = (*bounds)?;
+                (index != source_index && sx0 <= x1 && x0 <= sx1 && sy0 <= y1 && y0 <= sy1)
+                    .then_some(index)
+            })
+            .collect();
         for lane in car_lane_indices(source_road) {
             for step in 1..100 {
                 let t = step as f32 / 100.0;
+                let profile = &profiles[source_index];
+                if t < profile.start_clip.unwrap_or(0.) || t > profile.end_clip.unwrap_or(1.) {
+                    continue;
+                }
                 let Some(point) = map::element_position(source, source_road, lane, t) else {
                     continue;
                 };
                 let source_z = source.height_at(t);
-                if junctions
-                    .iter()
-                    .any(|junction| distance(point, junction.position) < 0.16)
-                {
-                    continue;
-                }
-                for (other_index, other) in projection.segments.iter().enumerate() {
-                    if source_index == other_index
-                        || reported.contains(&(source_index, lane, other_index))
-                    {
+                for &other_index in &candidates {
+                    let other = &projection.segments[other_index];
+                    if reported.contains(&(source_index, lane, other_index)) {
                         continue;
                     }
                     let Some(other_road) = roads.get(other.road_name.as_str()) else {
@@ -636,6 +647,12 @@ pub fn check_vehicle_lane_intrusions(
                         continue;
                     }
                     let (other_t, center_distance) = closest_segment_parameter(other, point);
+                    let profile = &profiles[other_index];
+                    if other_t < profile.start_clip.unwrap_or(0.)
+                        || other_t > profile.end_clip.unwrap_or(1.)
+                    {
+                        continue;
+                    }
                     if center_distance > width / 2.0 + 0.025
                         || !inside_segment_end_planes(other, point, other_t)
                     {

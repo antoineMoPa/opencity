@@ -140,6 +140,7 @@ pub struct SurfaceSample {
 }
 #[derive(Clone)]
 struct Triangle {
+    model_proxy: bool,
     points: [[f32; 3]; 3],
     kind: SurfaceKind,
     road: Option<usize>,

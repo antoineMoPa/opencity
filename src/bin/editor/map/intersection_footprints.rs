@@ -61,7 +61,9 @@ pub(super) fn assign(program: &Program, projection: &Projection, junctions: &mut
                     .fold(*half, f32::max)
             } else if matches!(
                 j.kind,
-                IntersectionKind::FourWay | IntersectionKind::RightTurn
+                IntersectionKind::FourWay
+                    | IntersectionKind::ThreeWay
+                    | IntersectionKind::RightTurn
             ) {
                 half * factor
             } else {
@@ -70,36 +72,59 @@ pub(super) fn assign(program: &Program, projection: &Projection, junctions: &mut
         })
         .collect();
     let mut extents = desired.clone();
+    let mut neighbors: HashMap<&str, Vec<&str>> = HashMap::new();
     for segment in &projection.segments {
-        let Some(a) = segment
-            .start_ref
-            .as_ref()
-            .and_then(|name| owners.get(name))
-            .copied()
-        else {
-            continue;
-        };
-        let Some(b) = segment
-            .end_ref
-            .as_ref()
-            .and_then(|name| owners.get(name))
-            .copied()
-        else {
-            continue;
-        };
-        if a == b {
-            continue;
+        if let (Some(a), Some(b)) = (&segment.start_ref, &segment.end_ref) {
+            neighbors.entry(a).or_default().push(b);
+            neighbors.entry(b).or_default().push(a);
         }
+    }
+    let mut connections = std::collections::BTreeSet::new();
+    for (reference, &a) in &owners {
+        for &next in neighbors.get(reference.as_str()).into_iter().flatten() {
+            let (mut previous, mut current) = (reference.as_str(), next);
+            let mut visited = std::collections::HashSet::new();
+            while visited.insert(current) {
+                if let Some(&b) = owners.get(current) {
+                    if a != b {
+                        connections.insert((a.min(b), a.max(b)));
+                    }
+                    break;
+                }
+                let Some(adjacent) = neighbors.get(current).filter(|v| v.len() == 2) else {
+                    break;
+                };
+                let Some(next) = adjacent.iter().copied().find(|&p| p != previous) else {
+                    break;
+                };
+                previous = current;
+                current = next;
+            }
+        }
+    }
+    let rotations: Vec<_> = junctions
+        .iter()
+        .map(|j| intersection_rotation(projection, j))
+        .collect();
+    for (a, b) in connections {
         let pa = junctions[a].position;
         let pb = junctions[b].position;
-        let distance = (pa.x - pb.x).abs().max((pa.y - pb.y).abs());
+        let delta = WorldPoint {
+            x: pa.x - pb.x,
+            y: pa.y - pb.y,
+        };
+        let distance = |rotation| {
+            let p = junction_local_direction(delta, rotation);
+            p.x.abs().max(p.y.abs()).max(0.000001)
+        };
+        let (da, db) = (distance(rotations[a]), distance(rotations[b]));
         let extra_a = desired[a] - base[a];
         let extra_b = desired[b] - base[b];
-        let extra = extra_a + extra_b;
+        let extra = extra_a / da + extra_b / db;
         if extra <= 0. {
             continue;
         }
-        let room = (distance - base[a] - base[b]).max(0.) * 0.9;
+        let room = (1. - base[a] / da - base[b] / db).max(0.) * 0.9;
         let share = (room / extra).clamp(0., 1.);
         for (index, addition) in [(a, extra_a), (b, extra_b)] {
             if junctions[index].ports.is_empty() {

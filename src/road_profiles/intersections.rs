@@ -6,10 +6,18 @@ fn boundary_parameter(
     center: map::WorldPoint,
     half: f32,
     from_end: bool,
+    rotation: f32,
 ) -> f32 {
     let inside = |t: f32| {
         let p = segment.point_at(t);
-        (p.x - center.x).abs() <= half && (p.y - center.y).abs() <= half
+        let local = map::junction_local_direction(
+            map::WorldPoint {
+                x: p.x - center.x,
+                y: p.y - center.y,
+            },
+            rotation,
+        );
+        local.x.abs() <= half && local.y.abs() <= half
     };
     let parameter = |step: f32| if from_end { 1. - step } else { step };
     let mut previous = 0.;
@@ -58,6 +66,7 @@ pub(super) fn apply(program: &Program, projection: &map::Projection, profiles: &
         }
     }
     for intersection in map::intersections(program, projection) {
+        let rotation = map::intersection_rotation(projection, &intersection);
         let road_half = std::iter::once(intersection.road_name.as_str())
             .chain(intersection.arm_roads.iter().map(|(_, name)| name.as_str()))
             .filter_map(|name| widths.get(name))
@@ -68,8 +77,14 @@ pub(super) fn apply(program: &Program, projection: &map::Projection, profiles: &
             continue;
         }
         let inside = |point: map::WorldPoint| {
-            (point.x - intersection.position.x).abs() <= half
-                && (point.y - intersection.position.y).abs() <= half
+            let local = map::junction_local_direction(
+                map::WorldPoint {
+                    x: point.x - intersection.position.x,
+                    y: point.y - intersection.position.y,
+                },
+                rotation,
+            );
+            local.x.abs() <= half && local.y.abs() <= half
         };
         let mut pending: Vec<_> = std::iter::once(intersection.point_ref.as_str())
             .chain(
@@ -89,7 +104,8 @@ pub(super) fn apply(program: &Program, projection: &map::Projection, profiles: &
             if !inside(if from_end { segment.end } else { segment.start }) {
                 continue;
             }
-            let parameter = boundary_parameter(segment, intersection.position, half, from_end);
+            let parameter =
+                boundary_parameter(segment, intersection.position, half, from_end, rotation);
             if from_end {
                 profiles[index].end_clip =
                     Some(profiles[index].end_clip.unwrap_or(1.).min(parameter));

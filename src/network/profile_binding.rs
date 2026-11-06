@@ -79,10 +79,11 @@ impl ArmProfile {
         intersection: &map::Intersection,
         side: ArmSide,
     ) -> Option<Self> {
+        let rotation = map::intersection_rotation(projection, intersection);
         let selected_port = intersection
             .ports
             .iter()
-            .find(|port| side.matches(port.direction));
+            .find(|port| side.matches(map::junction_local_direction(port.direction, rotation)));
         let segment = projection.segments.iter().find_map(|segment| {
             for end in [false, true] {
                 let reference = if end {
@@ -98,7 +99,7 @@ impl ArmProfile {
                     tangent.x = -tangent.x;
                     tangent.y = -tangent.y;
                 }
-                if belongs && side.matches(tangent) {
+                if belongs && side.matches(map::junction_local_direction(tangent, rotation)) {
                     return Some((segment, end));
                 }
             }
@@ -119,12 +120,13 @@ impl ArmProfile {
                 Statement::Road(road) if road.name == name => Some(road),
                 _ => None,
             })?;
-        Self::from_road(road, side, segment)
+        Self::from_road(road, side, segment, rotation)
     }
     fn from_road(
         road: &RoadDefinition,
         side: ArmSide,
         segment: Option<(&map::Segment, bool)>,
+        rotation: f32,
     ) -> Option<Self> {
         let half = road
             .elements
@@ -137,7 +139,10 @@ impl ArmProfile {
         }
         let sign = segment
             .map(|(segment, end)| {
-                let tangent = segment.tangent_at(if end { 1. } else { 0. });
+                let tangent = map::junction_local_direction(
+                    segment.tangent_at(if end { 1. } else { 0. }),
+                    rotation,
+                );
                 let component = match side {
                     ArmSide::North | ArmSide::South => tangent.y,
                     ArmSide::East | ArmSide::West => tangent.x,

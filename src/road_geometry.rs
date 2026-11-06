@@ -5,6 +5,7 @@ use crate::{
     map::{self, Projection, Segment, WorldPoint},
     Program, RoadDefinition, RoadElementKind, RoadRole, Statement,
 };
+mod junctions;
 
 pub const GEOMETRY_TOLERANCE: f32 = 0.0005;
 const MAX_SPAN: f32 = 0.04;
@@ -430,24 +431,7 @@ impl RoadGeometry {
         }
         self.protected_junctions.clear();
         for junction in map::intersections(program, projection) {
-            let mut seams = Vec::new();
-            for (index, segment) in projection.segments.iter().enumerate() {
-                for (reference, end) in [(&segment.start_ref, false), (&segment.end_ref, true)] {
-                    if !reference.as_ref().is_some_and(|r| {
-                        r == &junction.point_ref || junction.ports.iter().any(|p| &p.point_ref == r)
-                    }) {
-                        continue;
-                    }
-                    let rows = self.cross_sections(index);
-                    if let Some(row) = if end { rows.last() } else { rows.first() } {
-                        if let (Some(&a), Some(&b)) =
-                            (row.boundaries.first(), row.boundaries.last())
-                        {
-                            seams.push((index, a, b));
-                        }
-                    }
-                }
-            }
+            let seams = self.junction_seams(projection, &junction);
             if !seams.iter().any(|&(index, a, b)| {
                 protected(index)
                     || a.height - ground(a) > SAFETY_CLEARANCE
@@ -503,16 +487,7 @@ impl RoadGeometry {
                         height: height(point),
                     }
                 });
-                let middle = mix(vertices[0], vertices[1], 0.5).point;
-                let mouth = seams.iter().any(|&(_, a, b)| {
-                    let dx = b.point.x - a.point.x;
-                    let dy = b.point.y - a.point.y;
-                    let t = ((middle.x - a.point.x) * dx + (middle.y - a.point.y) * dy)
-                        / (dx * dx + dy * dy).max(1e-20);
-                    (-1e-4..=1.0001).contains(&t)
-                        && (middle.x - a.point.x - dx * t).hypot(middle.y - a.point.y - dy * t)
-                            < 1e-5
-                });
+                let mouth = Self::junction_mouth(projection, &junction, vertices, &seams);
                 if !mouth {
                     self.safety_walls.push(Wall {
                         segment: seams[0].0,

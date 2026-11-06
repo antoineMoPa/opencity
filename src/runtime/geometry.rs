@@ -120,6 +120,7 @@ pub(super) fn push(
     data: [f32; 3],
 ) {
     city.triangles.push(Triangle {
+        model_proxy: false,
         points: p,
         kind,
         road,
@@ -483,29 +484,8 @@ pub(super) fn compile(
             .find(|j| instance.id == format!("profile:{}", j.point_ref));
         let mut seams = Vec::new();
         if let Some(j) = native {
-            for (i, s) in projection.segments.iter().enumerate() {
-                for (reference, end) in [(&s.start_ref, false), (&s.end_ref, true)] {
-                    if reference.as_ref().is_some_and(|r| {
-                        r == &j.point_ref || j.ports.iter().any(|p| &p.point_ref == r)
-                    }) {
-                        let row = if end {
-                            geometry.cross_sections(i).last()
-                        } else {
-                            geometry.cross_sections(i).first()
-                        };
-                        if let Some(row) = row {
-                            if let (Some(a), Some(b)) =
-                                (row.boundaries.first(), row.boundaries.last())
-                            {
-                                seams.push((
-                                    [a.point.x, a.point.y],
-                                    [b.point.x, b.point.y],
-                                    a.height,
-                                ));
-                            }
-                        }
-                    }
-                }
+            for (_, a, b) in geometry.junction_seams(projection, j) {
+                seams.push(([a.point.x, a.point.y], [b.point.x, b.point.y], a.height));
             }
         }
         let world = |p: network::Point| {
@@ -603,6 +583,7 @@ pub(super) fn compile(
         }
     }
     for f in city.landscape.clone() {
+        let first_triangle = city.triangles.len();
         let k = match f.kind {
             LandscapeKind::Building => SurfaceKind::Building,
             LandscapeKind::Concrete => SurfaceKind::Sidewalk,
@@ -660,6 +641,11 @@ pub(super) fn compile(
                 }
             }
         }
+        if f.model.is_some() {
+            for triangle in &mut city.triangles[first_triangle..] {
+                triangle.model_proxy = true;
+            }
+        }
     }
     city.bounds = city
         .elevation
@@ -709,6 +695,7 @@ pub(super) fn compile(
             }
         }
         city.triangles.push(Triangle {
+            model_proxy: false,
             points,
             kind: SurfaceKind::Prop,
             road: None,

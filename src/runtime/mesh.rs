@@ -130,6 +130,22 @@ impl City {
     /// are suitable for
     /// caching per fixed world tile, independent of camera orientation.
     pub fn mesh(&self, region: Region, terrain_step: f32) -> Result<Mesh, String> {
+        self.mesh_with_proxies(region, terrain_step, true)
+    }
+    /// Keep authored collision/support proxies while an application draws external models.
+    pub fn mesh_with_external_models(
+        &self,
+        region: Region,
+        terrain_step: f32,
+    ) -> Result<Mesh, String> {
+        self.mesh_with_proxies(region, terrain_step, false)
+    }
+    fn mesh_with_proxies(
+        &self,
+        region: Region,
+        terrain_step: f32,
+        proxies: bool,
+    ) -> Result<Mesh, String> {
         if !region.valid() || !terrain_step.is_finite() || terrain_step < 0.005 {
             return Err("mesh needs a valid region and terrain step >= 0.005".into());
         }
@@ -160,6 +176,9 @@ impl City {
         ids.sort_unstable();
         for i in ids {
             let t = &self.triangles[i];
+            if t.model_proxy && !proxies {
+                continue;
+            }
             if geometry::polygon_region(&t.points.map(|p| [p[0], p[1]]), region) {
                 let start = mesh.vertices.len();
                 mesh.triangle(t.points, t.color, t.kind, t.data);

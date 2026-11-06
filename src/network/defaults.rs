@@ -511,7 +511,7 @@ fn profile_junction_instance(
     profile_approaches(&mut geometry, &arms, half);
     profile_ports(&mut geometry, &arms, half);
     Some(NetworkInstance {
-        rotation: 0.,
+        rotation: crate::map::intersection_rotation(projection, intersection),
         id: format!("profile:{}", intersection.point_ref),
         name: intersection.point_ref.clone(),
         definition: usize::MAX,

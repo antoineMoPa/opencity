@@ -16,8 +16,11 @@ pub use model::{
 
 #[path = "map/intersection_footprints.rs"]
 mod intersection_footprints;
+#[path = "map/intersection_frame.rs"]
+mod intersection_frame;
 #[path = "map/intersections.rs"]
 mod intersections;
+pub use intersection_frame::{intersection_rotation, junction_local_direction};
 pub use intersections::{
     intersection_arms, intersection_footprint_half, intersection_port_direction, intersections,
     place_intersection, port_faces_road, port_in_use, remove_placed_intersection, right_angle,

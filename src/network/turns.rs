@@ -23,11 +23,12 @@ pub(super) fn connected_sides(
     projection: &map::Projection,
     intersection: &map::Intersection,
 ) -> Vec<ArmSide> {
+    let rotation = map::intersection_rotation(projection, intersection);
     if !intersection.ports.is_empty() {
         return intersection
             .ports
             .iter()
-            .map(|port| arm_side(port.direction))
+            .map(|port| arm_side(map::junction_local_direction(port.direction, rotation)))
             .collect();
     }
     map::intersection_arms(projection, &intersection.point_ref)
@@ -38,7 +39,7 @@ pub(super) fn connected_sides(
                 direction.x = -direction.x;
                 direction.y = -direction.y;
             }
-            arm_side(direction)
+            arm_side(map::junction_local_direction(direction, rotation))
         })
         .collect()
 }
@@ -251,7 +252,7 @@ pub fn default_right_turn_instance(
     }
     ports_and_movements(&mut geometry, &bend, &vertical, &horizontal);
     Some(NetworkInstance {
-        rotation: 0.,
+        rotation: map::intersection_rotation(projection, intersection),
         id: format!("profile:{}", intersection.point_ref),
         name: intersection.point_ref.clone(),
         definition: usize::MAX,

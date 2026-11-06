@@ -7,6 +7,23 @@ use opencity::{
 fn city(source: &str) -> City {
     City::from_program(&parse(source).unwrap(), None).unwrap()
 }
+
+#[test]
+fn external_models_replace_visual_proxies_but_preserve_support_and_collision() {
+    let c = city(
+        "ground=land(-1,-1,2,-1,2,2,-1,2); elevation(ground,0.02);
+        sample=building(0.3,\"sample.mesh\",0,0,1,0,1,1,0,1);",
+    );
+    assert!(!c.mesh(Region::WholeMap, 0.04).unwrap().vertices.is_empty());
+    let external = c.mesh_with_external_models(Region::WholeMap, 0.04).unwrap();
+    assert!(!external.vertices.is_empty());
+    assert!(!external
+        .vertices
+        .iter()
+        .any(|v| v.surface[0] == SurfaceKind::Building as u32 as f32));
+    assert!(c.surface_at([0.5, 0.5], 1.).unwrap().height.abs() < 0.0001);
+    assert!(c.building_collision([0.5, 0.5], 0.01, 0.1, 0.2));
+}
 #[test]
 fn structured_queries_include_footprints_directions_and_containment() {
     let c = city(

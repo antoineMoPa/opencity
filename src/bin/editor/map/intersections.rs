@@ -107,7 +107,7 @@ pub fn intersection_footprint_half(intersection: &Intersection, road_half: f32) 
     }
     if matches!(
         intersection.kind,
-        IntersectionKind::FourWay | IntersectionKind::RightTurn
+        IntersectionKind::FourWay | IntersectionKind::ThreeWay | IntersectionKind::RightTurn
     ) {
         road_half * opencity::network::default_four_way_footprint_factor()
     } else {

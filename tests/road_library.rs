@@ -416,3 +416,95 @@ fn cloverleaf_ramp_centerlines_do_not_cross_at_grade() {
         }
     }
 }
+
+#[test]
+fn diagonal_surface_junctions_share_the_approach_frame_and_clip_outside_the_pavement() {
+    for angle in [23.0_f32, -32.0, 41.0] {
+        let mut program = parse(
+            "road street: sidewalk carlane middle carlane sidewalk; end
+            center=map_point(0,0); n=map_point(0,2); e=map_point(2,0);
+            s=map_point(0,-2); w=map_point(-2,0);
+            north=street(center,0,0.6,0,1.4,n);
+            east=street(center,0.6,0,1.4,0,e);
+            south=street(s,0,-1.4,0,-0.6,center);
+            west=street(w,-1.4,0,-0.6,0,center);
+            intersection4(center,street);",
+        )
+        .unwrap();
+        for statement in &mut program.statements {
+            let Statement::Call(call) = statement else {
+                continue;
+            };
+            let pairs: &[usize] = if call.name == "map_point" {
+                &[0]
+            } else if call.name == "street" {
+                &[1, 3]
+            } else {
+                &[]
+            };
+            for &i in pairs {
+                let read = |arg: &opencity::Argument| match arg {
+                    opencity::Argument::Number(n) => n.parse::<f32>().unwrap(),
+                    _ => panic!("coordinate expected"),
+                };
+                let p = opencity::blocks::rotate_vector(
+                    [read(&call.args[i]), read(&call.args[i + 1])],
+                    angle,
+                );
+                call.args[i] = opencity::Argument::Number(p[0].to_string());
+                call.args[i + 1] = opencity::Argument::Number(p[1].to_string());
+            }
+        }
+        let projection = map::project(&program);
+        let junction = map::intersections(&program, &projection).remove(0);
+        assert!((map::intersection_rotation(&projection, &junction) - angle).abs() < 0.001);
+        let instance =
+            opencity::network::default_four_way_instance(&program, &projection, &junction).unwrap();
+        assert!((instance.rotation - angle).abs() < 0.001);
+        assert!(check_design_rules(&program).is_empty());
+        let profiles = opencity::road_profiles::road_profiles(&program, &projection);
+        for (road, profile) in projection.segments.iter().zip(profiles) {
+            let t = profile.start_clip.or(profile.end_clip).unwrap();
+            let p = road.point_at(t);
+            let local = map::junction_local_direction(p, angle);
+            let half = map::intersection_footprint_half(&junction, 0.1);
+            assert!((local.x.abs().max(local.y.abs()) - half).abs() < 0.0001);
+        }
+    }
+}
+
+#[test]
+fn three_way_surface_junction_reserves_curved_corner_pavement() {
+    let program = parse(
+        "road street: sidewalk carlane carlane sidewalk; end
+        p=map_point(0,0); n=map_point(0.2,2); e=map_point(2,0.2); s=map_point(0,-2);
+        north=street(p,0,0.6,0.2,1.4,n);
+        east=street(p,0.6,0,1.4,0.2,e);
+        south=street(s,0,-1.4,0,-0.6,p);
+        grade(north,0.4,0.4); grade(east,0.4,0.4); grade(south,0.4,0.4);
+        intersection3(p,street);",
+    )
+    .unwrap();
+    let projection = map::project(&program);
+    let junction = map::intersections(&program, &projection).remove(0);
+    assert!(junction.footprint_half > 0.077);
+    let geometry = opencity::road_geometry::RoadGeometry::compile(&program, &projection);
+    assert!(geometry.obstructions().is_empty());
+    assert!(check_design_rules(&program).is_empty());
+}
+
+#[test]
+fn wide_junction_checks_only_pavement_remaining_after_approach_clipping() {
+    let program = parse(
+        "road wide: sidewalk carlane carlane carlane carlane carlane carlane sidewalk; end
+        p=map_point(0,0); n=map_point(0,2); e=map_point(2,0); s=map_point(0,-2); w=map_point(-2,0);
+        north=wide(p,0,0.6,0,1.4,n); east=wide(p,0.6,0,1.4,0,e);
+        south=wide(s,0,-1.4,0,-0.6,p); west=wide(w,-1.4,0,-0.6,0,p);
+        intersection4(p,wide);",
+    )
+    .unwrap();
+    let projection = map::project(&program);
+    let geometry = opencity::road_geometry::RoadGeometry::compile(&program, &projection);
+    assert!(geometry.band_intrusions(&program, &projection).is_empty());
+    assert!(check_design_rules(&program).is_empty());
+}
