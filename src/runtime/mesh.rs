@@ -330,7 +330,15 @@ impl City {
                         })
                         .unwrap_or_else(|| s.point_at(t));
                     let heading = (toward.y - p.y).atan2(toward.x - p.x);
-                    let position = [p.x, p.y, s.height_at(t) + 0.0015];
+                    // Use the actual supporting surface at the sidewalk, including
+                    // graded crossfalls and clipped approaches. Skip unsupported points.
+                    let Some(support) = self.surface_at([p.x, p.y], s.height_at(t) + 0.02) else {
+                        continue;
+                    };
+                    if (support.height - s.height_at(t)).abs() > 0.02 {
+                        continue;
+                    }
+                    let position = [p.x, p.y, support.height];
                     let kind = if (i + id + band) % 4 == 0 {
                         StreetFeatureKind::Bench
                     } else {
