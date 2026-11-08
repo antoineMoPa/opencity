@@ -53,9 +53,9 @@ pub(super) fn mesh(city: &City, geometry: &RoadGeometry) -> Mesh {
                 p[2] -= DEPTH;
                 p
             };
-            // Closed slab, including soffit and fascia, follows slopes and tapers.
+            // Pavement closes the slab above. A second cap just below it
+            // fights the pavement's depth at distant views of elevated roads.
             for face in [
-                [a, c, d, b],
                 [bottom(b), bottom(d), bottom(c), bottom(a)],
                 [a, bottom(a), bottom(c), c],
                 [b, d, bottom(d), bottom(b)],
@@ -154,6 +154,12 @@ mod tests {
         assert!(concrete
             .iter()
             .any(|t| t.points.iter().any(|p| p[2] < 0.001)));
+        assert!(
+            concrete
+                .iter()
+                .all(|t| !t.points.iter().all(|p| (0.079..0.079999).contains(&p[2]))),
+            "a concrete cap immediately below asphalt causes distant depth flicker"
+        );
         assert!((bridge.surface_at([0.5, 0.], 0.09).unwrap().height - 0.08).abs() < 1e-5);
         assert!(bridge.surface_at([0.5, 0.], 0.07).is_none());
         assert!(concrete

@@ -586,7 +586,9 @@ impl RoadGeometry {
                             }
                             if element.kind == RoadElementKind::CarLane {
                                 lanes.push(triangle);
-                            } else {
+                            } else if !(road.role == RoadRole::Highway
+                                && element.kind == RoadElementKind::Verge)
+                            {
                                 forbidden.push((triangle, element.kind));
                             }
                         }

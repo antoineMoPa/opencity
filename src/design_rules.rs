@@ -699,14 +699,12 @@ pub fn check_vehicle_lane_intrusions(
                     for element in &other_road.elements {
                         let band_width = map::element_world_width(element.kind);
                         let inside = offset > edge + 0.003 && offset < edge + band_width - 0.003;
-                        let paved_merge_shoulder = element.kind == RoadElementKind::Verge
-                            && mouth_overlays_parent(
-                                other, other_road, source, program, projection,
-                            );
-                        if inside
-                            && element.kind != RoadElementKind::CarLane
-                            && !paved_merge_shoulder
-                        {
+                        let paved_shoulder = element.kind == RoadElementKind::Verge
+                            && (other_road.role == crate::RoadRole::Highway
+                                || mouth_overlays_parent(
+                                    other, other_road, source, program, projection,
+                                ));
+                        if inside && element.kind != RoadElementKind::CarLane && !paved_shoulder {
                             reported.insert((source_index, lane, other_index));
                             issues.push(DesignIssue {
                                 rule: DesignRule::VehicleLaneCrossesNonCarBand,
@@ -910,6 +908,20 @@ mod tests {
         assert!(issues
             .iter()
             .any(|issue| issue.rule == DesignRule::VehicleLaneDiscontinuity));
+    }
+
+    #[test]
+    fn highway_shoulders_match_the_runtime_pavement_without_allowing_grass_verges() {
+        let source = "road high: verge carlane verge verge verge; role highway; end
+            road side: carlane; end high(-2,0,2,0); side(-1,-0.04,1,-0.04);";
+        let paved = check_design_rules(&parse(source).unwrap());
+        assert!(!paved
+            .iter()
+            .any(|issue| issue.rule == DesignRule::VehicleLaneCrossesNonCarBand));
+        let grass = check_design_rules(&parse(&source.replace("role highway;", "")).unwrap());
+        assert!(grass
+            .iter()
+            .any(|issue| issue.rule == DesignRule::VehicleLaneCrossesNonCarBand));
     }
 
     #[test]
