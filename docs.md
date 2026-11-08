@@ -113,6 +113,12 @@ heights; pixel `(0,0)` is minimum X/Y, columns increase X, rows increase Y. Path
 floods the map below one finite elevation and requires an elevation map. Road placement clears
 both terrain and water. GLB includes terrain/water; SVG omits elevation imagery.
 
+`terrain_cut(height, x1, y1, x2, y2, ...)` excavates a convex polygon below the PNG
+surface, with a dry floor and generated concrete retaining walls. An optional
+`{ slope_x: dx, slope_y: dy }` after height defines a sloped floor; height is measured
+at the first polygon vertex. Overlapping cuts use the lower floor. Cut boundaries
+are exact even between PNG samples; road grades remain independently authored.
+
 The [default map](examples/default_map.road) uses editable contours in its `terrain_source` block.
 Rebuild its elevation PNG with `cargo run --no-default-features --example bake_elevation`.
 Check connectivity, grades and clearance with

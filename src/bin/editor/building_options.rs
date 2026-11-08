@@ -294,6 +294,9 @@ impl RoadEditor {
                 Argument::Number(style.floor_height.to_string()),
             ),
         ];
+        if !style.collidable {
+            properties.push(("collision".into(), Argument::Identifier("none".into())));
+        }
         if let Some(Argument::Object(existing)) = call.args.get(offset) {
             properties.extend(
                 existing

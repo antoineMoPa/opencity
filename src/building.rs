@@ -136,6 +136,8 @@ impl BuildingMaterial {
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct BuildingStyle {
+    /// Disable the broad footprint when a model has separately authored collision volumes.
+    pub collidable: bool,
     pub material: BuildingMaterial,
     /// Spacing between procedural facade floors, in world units.
     pub floor_height: f32,
@@ -144,6 +146,7 @@ pub struct BuildingStyle {
 impl Default for BuildingStyle {
     fn default() -> Self {
         Self {
+            collidable: true,
             material: BuildingMaterial::default(),
             floor_height: 0.04,
         }
@@ -165,6 +168,13 @@ impl BuildingStyle {
                 return Err(format!("duplicate building option '{key}'"));
             }
             match key.as_str() {
+                "collision" => {
+                    style.collidable = match value {
+                        Argument::Identifier(value) if value == "solid" => true,
+                        Argument::Identifier(value) if value == "none" => false,
+                        _ => return Err("building collision must be solid or none".into()),
+                    };
+                }
                 "use" => {
                     let Argument::Identifier(keyword) = value else {
                         return Err("unknown building use".into());

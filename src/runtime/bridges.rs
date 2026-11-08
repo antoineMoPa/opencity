@@ -1,7 +1,7 @@
 //! Concrete superstructures follow the same adaptive rows as the road surface.
 use super::*;
 use crate::road_geometry::{CrossSection, RoadGeometry};
-const DEPTH: f32 = 0.0065;
+const DEPTH: f32 = crate::road_geometry::DECK_DEPTH;
 const MIN_CLEARANCE: f32 = 0.02;
 const PIER_SPACING: f32 = 0.24;
 const CONCRETE: [f32; 3] = [0.32, 0.34, 0.33];

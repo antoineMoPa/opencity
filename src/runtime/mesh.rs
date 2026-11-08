@@ -255,18 +255,35 @@ impl City {
                         e.point(right, top),
                         e.point(x, top),
                     ];
-                    mesh.quad(p, [0.12, 0.23, 0.075], SurfaceKind::Grass);
+                    for triangle in [[p[0], p[1], p[2]], [p[0], p[2], p[3]]] {
+                        e.cut_triangle(triangle, false, |t| {
+                            mesh.triangle(t, [0.12, 0.23, 0.075], SurfaceKind::Grass, [0.; 3])
+                        });
+                    }
                     if let Some(level) = e.spec.water_level {
                         if p.iter().any(|p| p[2] < level) {
-                            mesh.quad(
-                                p.map(|p| [p[0], p[1], level]),
-                                [0.025, 0.15, 0.20],
-                                SurfaceKind::Water,
-                            );
+                            for ids in [[0, 1, 2], [0, 2, 3]] {
+                                e.cut_triangle(ids.map(|i| [p[i][0], p[i][1], level]), true, |t| {
+                                    mesh.triangle(
+                                        t,
+                                        [0.025, 0.15, 0.20],
+                                        SurfaceKind::Water,
+                                        [0.; 3],
+                                    )
+                                });
+                            }
                         }
                     }
                     y = top;
                 }
+            }
+        }
+        for wall in &self.cut_walls {
+            if geometry::polygon_region(
+                &[[wall.start[0], wall.start[1]], [wall.end[0], wall.end[1]]],
+                region,
+            ) {
+                wall.append(&mut mesh);
             }
         }
         Ok(mesh)

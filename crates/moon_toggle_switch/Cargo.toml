@@ -10,8 +10,6 @@ readme = "README.md"
 keywords = ["egui", "gui", "switch", "toggle", "segmented"]
 categories = ["gui"]
 
-[workspace]
-
 [dependencies]
 egui = "0.36"
 

@@ -11,10 +11,12 @@ pub(super) fn append_heightmap(scene: &mut Scene, map: &ElevationMap, palette: E
     map.for_each_triangle(|triangle| {
         // Omit fully submerged bed faces so finite map edges do not expose
         // green strips below the water plane in oblique views.
-        if map
-            .spec
-            .water_level
-            .is_some_and(|level| triangle.iter().all(|p| p[2] < level))
+        let center = [0, 1].map(|axis| triangle.iter().map(|p| p[axis]).sum::<f32>() / 3.);
+        if map.cut_at(center).is_none()
+            && map
+                .spec
+                .water_level
+                .is_some_and(|level| triangle.iter().all(|p| p[2] < level))
         {
             return;
         }

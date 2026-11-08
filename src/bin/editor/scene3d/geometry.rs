@@ -108,11 +108,11 @@ pub(super) fn add_elevated_edges(
             surface: [0.0; 4],
         };
         let prior_bottom = WorldVertex {
-            height: wall.start.height - 0.08,
+            height: wall.start.height - opencity::road_geometry::DECK_DEPTH,
             ..prior
         };
         let current_bottom = WorldVertex {
-            height: wall.end.height - 0.08,
+            height: wall.end.height - opencity::road_geometry::DECK_DEPTH,
             ..current
         };
         scene.vertices.extend_from_slice(&[

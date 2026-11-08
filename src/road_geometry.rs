@@ -7,6 +7,7 @@ use crate::{
 };
 mod attachments;
 mod junctions;
+mod safety;
 
 pub const GEOMETRY_TOLERANCE: f32 = 0.0005;
 const MAX_SPAN: f32 = 0.04;
@@ -27,6 +28,7 @@ pub struct Wall {
 }
 pub const BARRIER_HEIGHT: f32 = 0.011;
 pub const BARRIER_HALF_WIDTH: f32 = 0.002;
+pub const DECK_DEPTH: f32 = 0.0065;
 pub fn paved_material(material: crate::network::Material) -> crate::network::Material {
     use crate::network::Material;
     match material {
@@ -395,6 +397,9 @@ impl RoadGeometry {
             .copied()
             .filter(|w| {
                 protected(w.segment)
+                    || elevation.is_some_and(|map| {
+                        safety::cut_drop(w, &projection.segments[w.segment], map)
+                    })
                     || (w.start.height - ground(w.start) > SAFETY_CLEARANCE
                         && w.end.height - ground(w.end) > SAFETY_CLEARANCE)
             })
@@ -801,7 +806,9 @@ impl RoadGeometry {
                 }
                 for triangle in &surface.lanes {
                     // Wall extends from deck - .08 to deck + .005; reserve .04 above pavement.
-                    if let Some((lo, hi)) = clip(wall.start, wall.end, *triangle, 0.005, 0.12) {
+                    if let Some((lo, hi)) =
+                        clip(wall.start, wall.end, *triangle, 0.005, DECK_DEPTH + 0.04)
+                    {
                         if distance(
                             mix(wall.start, wall.end, lo).point,
                             mix(wall.start, wall.end, hi).point,

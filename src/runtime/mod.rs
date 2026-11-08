@@ -3,6 +3,7 @@
 //! Load once, query borrowed structured records, and request camera-local triangle meshes.
 mod bridges;
 mod geometry;
+mod retaining;
 use crate::junction_mesh;
 mod building_details;
 mod building_frontage;
@@ -159,6 +160,7 @@ pub struct City {
     pub junctions: Vec<map::Intersection>,
     pub components: Vec<network::NetworkInstance>,
     pub elevation: Option<ElevationMap>,
+    cut_walls: Vec<retaining::RetainingWall>,
     pub bounds: [f32; 4],
     triangles: Vec<Triangle>,
     cells: HashMap<(i32, i32), Vec<usize>>,
@@ -206,6 +208,7 @@ impl City {
         if !components.errors.is_empty() {
             return Err(components.errors.join("; "));
         }
+        let cut_walls = elevation.as_ref().map(retaining::walls).unwrap_or_default();
         let mut city = Self {
             roads: Vec::new(),
             frontage_zones: frontages.zones,
@@ -215,6 +218,7 @@ impl City {
             junctions: map::intersections(program, &projection),
             components: components.instances,
             elevation,
+            cut_walls,
             bounds: [-1., -1., 1., 1.],
             triangles: Vec::new(),
             cells: HashMap::new(),
@@ -370,7 +374,7 @@ impl City {
         }
         if let Some(e) = &self.elevation {
             if let (Some(level), Some(b)) = (e.spec.water_level, best.as_mut()) {
-                if b.height < level {
+                if b.height < level && e.cut_at(point).is_none() {
                     b.kind = SurfaceKind::Water;
                 }
             }
@@ -388,7 +392,11 @@ impl City {
         let reach = radius + crate::road_geometry::BARRIER_HALF_WIDTH;
         let a = geometry::cell([point[0] - reach, point[1] - reach]);
         let b = geometry::cell([point[0] + reach, point[1] + reach]);
-        let mut best = None;
+        let mut best = self
+            .cut_walls
+            .iter()
+            .filter_map(|wall| wall.contact(point, radius, bottom, top))
+            .max_by(|a, b| a.1.total_cmp(&b.1));
         for x in a.0..=b.0 {
             for y in a.1..=b.1 {
                 for &id in self.barrier_cells.get(&(x, y)).into_iter().flatten() {
@@ -444,6 +452,7 @@ impl City {
     pub fn building_collision(&self, point: [f32; 2], radius: f32, bottom: f32, top: f32) -> bool {
         let collides = |f: &LandscapeFeature| {
             f.kind == LandscapeKind::Building
+                && f.building_style.unwrap_or_default().collidable
                 && f.elevation < top
                 && f.elevation + f.height.unwrap_or(0.) > bottom
                 && geometry::polygon_region(

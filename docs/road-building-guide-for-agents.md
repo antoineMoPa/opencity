@@ -148,7 +148,8 @@ examples: tests that only validate good templates cannot establish that the chec
 obstructions.
 
 Current tolerances use illustrative world units: centerline flatness `0.0005`, maximum subdivision
-control-polygon length `0.04`, merge height agreement `0.012`, wall depth `0.08`, and a `0.04`
+control-polygon length `0.04`, merge height agreement `0.012`, bridge side depth `0.0065`,
+and a `0.04`
 vertical vehicle reserve. The cloverleaf connector peaks are `0.65` to clear the loop corridors
 including their sidewalls. These checks operate on a tessellated authoring model using f64
 predicates; they are not an exact-arithmetic proof for continuous offset curves, a vehicle-specific

@@ -3,6 +3,8 @@ use crate::{Argument, Program, Statement};
 use std::{io::Cursor, path::Path};
 
 pub const ELEVATION_MAP_SIZE: usize = 1024;
+mod cuts;
+pub use cuts::TerrainCut;
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct ElevationMapSpec {
@@ -11,6 +13,7 @@ pub struct ElevationMapSpec {
     pub size: [f32; 2],
     pub heights: [f32; 2],
     pub water_level: Option<f32>,
+    pub cuts: Vec<TerrainCut>,
 }
 
 impl ElevationMapSpec {
@@ -97,12 +100,16 @@ impl ElevationMapSpec {
                 size: [width, depth],
                 heights: [low, high],
                 water_level: None,
+                cuts: Vec::new(),
             });
         }
         if let Some(map) = result.as_mut() {
             map.water_level = water_level;
+            map.cuts = TerrainCut::from_program(program)?;
         } else if water_level.is_some() {
             return Err("water_level requires an elevation_map".into());
+        } else if !TerrainCut::from_program(program)?.is_empty() {
+            return Err("terrain_cut requires an elevation_map".into());
         }
         Ok(result)
     }
@@ -167,6 +174,14 @@ impl ElevationMap {
     /// Matches the two triangles used to render every pixel cell. PNG row zero
     /// lies at the minimum world Y. Outside the rectangle there is no surface.
     pub fn height_at(&self, point: [f32; 2]) -> Option<f32> {
+        self.original_height_at(point).map(|height| {
+            self.cut_at(point)
+                .map_or(height, |cut| height.min(cut.height_at(point)))
+        })
+    }
+
+    /// Unmodified PNG support, used for the upper rim of retaining walls.
+    pub fn original_height_at(&self, point: [f32; 2]) -> Option<f32> {
         let x = (point[0] - self.spec.origin[0]) / self.spec.size[0] * 1023.0;
         let y = (point[1] - self.spec.origin[1]) / self.spec.size[1] * 1023.0;
         if !x.is_finite()
@@ -192,8 +207,13 @@ impl ElevationMap {
 
     /// The visible surface is water wherever the terrain is below sea level.
     pub fn surface_height_at(&self, point: [f32; 2]) -> Option<f32> {
-        self.height_at(point)
-            .map(|z| self.spec.water_level.map_or(z, |level| z.max(level)))
+        self.height_at(point).map(|z| {
+            if self.cut_at(point).is_some() {
+                z
+            } else {
+                self.spec.water_level.map_or(z, |level| z.max(level))
+            }
+        })
     }
 
     /// One horizontal water plane. Depth testing exposes precisely the flooded
@@ -209,13 +229,18 @@ impl ElevationMap {
             self.point(1023, 1023),
         ]
         .map(|[x, y, _]| [x, y, level]);
-        visit([a, b, d]);
-        visit([a, d, c]);
+        self.cut_triangle([a, b, d], true, &mut visit);
+        self.cut_triangle([a, d, c], true, &mut visit);
     }
 
     pub fn surface_maximum_in(&self, min: [f32; 2], max: [f32; 2]) -> Option<f32> {
-        self.maximum_in(min, max)
-            .map(|z| self.spec.water_level.map_or(z, |level| z.max(level)))
+        self.maximum_in(min, max).map(|z| {
+            if self.cut_ceiling_in(min, max).is_some() {
+                z
+            } else {
+                self.spec.water_level.map_or(z, |level| z.max(level))
+            }
+        })
     }
 
     /// Visit the full-resolution surface without allocating a triangle buffer.
@@ -262,12 +287,19 @@ impl ElevationMap {
                 }
             }
         }
-        patch(self, &mut visit, [0, 0, 1023, 1023]);
+        patch(
+            self,
+            &mut |t| self.cut_triangle(t, false, &mut visit),
+            [0, 0, 1023, 1023],
+        );
     }
 
     /// Conservative cell maximum over a world rectangle, including its rim.
     /// Road placement uses this to detect narrow peaks between cross sections.
     pub fn maximum_in(&self, min: [f32; 2], max: [f32; 2]) -> Option<f32> {
+        if (0..2).any(|i| !min[i].is_finite() || !max[i].is_finite() || min[i] > max[i]) {
+            return None;
+        }
         if (0..2).any(|i| {
             max[i] < self.spec.origin[i] || min[i] > self.spec.origin[i] + self.spec.size[i]
         }) {
@@ -280,10 +312,12 @@ impl ElevationMap {
         let x1 = pixel(max[0], 0).ceil() as usize;
         let y0 = pixel(min[1], 1).floor() as usize;
         let y1 = pixel(max[1], 1).ceil() as usize;
+        let height = (y0..=y1)
+            .flat_map(|y| (x0..=x1).map(move |x| self.samples[y * 1024 + x]))
+            .fold(f32::NEG_INFINITY, f32::max);
         Some(
-            (y0..=y1)
-                .flat_map(|y| (x0..=x1).map(move |x| self.samples[y * 1024 + x]))
-                .fold(f32::NEG_INFINITY, f32::max),
+            self.cut_ceiling_in(min, max)
+                .map_or(height, |ceiling| height.min(ceiling)),
         )
     }
 }

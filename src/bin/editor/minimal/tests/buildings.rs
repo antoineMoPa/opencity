@@ -133,7 +133,8 @@ fn building_properties_preserve_model_footprint_elevation_and_roundtrip_undo() {
         0.48,
         BuildingStyle {
             material: BuildingMaterial::Brick,
-            floor_height: 0.06
+            floor_height: 0.06,
+            ..Default::default()
         }
     ));
     editor.record_history(before.clone(), false);

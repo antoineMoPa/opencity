@@ -64,7 +64,8 @@ pub(super) fn pick(
     let terrain = pick_terrain(map, at_height);
     if let Some(level) = map.spec.water_level {
         let p = at_height(level);
-        if map.height_at([p.x, p.y]).is_some_and(|z| z < level)
+        if map.cut_at([p.x, p.y]).is_none()
+            && map.height_at([p.x, p.y]).is_some_and(|z| z < level)
             && terrain.is_none_or(|(_, height)| level > height)
         {
             return Some((p, level));

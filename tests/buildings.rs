@@ -38,6 +38,7 @@ fn building_style_survives_source_roundtrip_and_projection() {
         Some(BuildingStyle {
             material: BuildingMaterial::Glass,
             floor_height: 0.05,
+            ..BuildingStyle::default()
         })
     );
     assert_eq!(
@@ -91,6 +92,7 @@ fn glb_path_can_precede_building_options() {
         Some(BuildingStyle {
             material: BuildingMaterial::Brick,
             floor_height: 0.03,
+            ..BuildingStyle::default()
         })
     );
 }
