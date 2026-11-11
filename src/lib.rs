@@ -47,7 +47,10 @@ pub use ast::{
     RoadDirection, RoadElement, RoadElementKind, RoadRole, Statement,
 };
 pub use blocks::BlockInstance;
-pub use building::{BuildingMaterial, BuildingStyle, BuildingUse};
+pub use building::{
+    BuildingArchitecture, BuildingFamily, BuildingGround, BuildingMaterial, BuildingPalette,
+    BuildingSection, BuildingStyle, BuildingUse, DowntownField, GlassTint,
+};
 pub use elevation::{
     block_height, elevation_in_calls, elevation_of, grade_in_calls, grade_of, set_elevation,
     set_grade,

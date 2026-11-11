@@ -249,6 +249,26 @@ fn isometric_picking_prefers_visible_building_over_roof_hidden_behind_it() {
 }
 
 #[test]
+fn building_projection_adopts_completed_frontage_after_caching_authored_lots() {
+    let mut editor = editor();
+    editor.program = parse(
+        "road street: sidewalk carlane carlane sidewalk; end \
+         main = street(-2,0,2,0); \
+         ground = land(-3,-2,3,-2,3,2,-3,2); elevation(ground,0.02); \
+         cache_test = frontage_zone(main,{use:commercial,side:both,start:0.1,end:0.9,\
+         depth:0.2,seed:571});",
+    )
+    .unwrap();
+    let pending = editor.projected_landscape();
+    assert!(Arc::ptr_eq(&pending, &editor.projected_landscape()));
+    frontage::scaffold_program(&editor.program, None).unwrap();
+    let completed = editor.projected_landscape();
+    assert!(!Arc::ptr_eq(&pending, &completed));
+    assert!(completed.features.len() > pending.features.len());
+    assert!(Arc::ptr_eq(&completed, &editor.projected_landscape()));
+}
+
+#[test]
 fn default_map_picking_properties_and_overlay_share_immutable_landscape_cache() {
     let mut editor = editor();
     editor.program = parse(include_str!("../../../../../examples/default_map.road")).unwrap();
@@ -321,4 +341,29 @@ fn default_map_picking_properties_and_overlay_share_immutable_landscape_cache() 
         Some(0.48)
     );
     assert!(Arc::ptr_eq(&edited, &editor.projected_landscape()));
+}
+
+#[test]
+fn building_property_edits_preserve_the_complete_procedural_recipe() {
+    let mut editor = editor();
+    editor.program = parse(
+        "hall=building(0.3,{material:glass,family:heritage,palette:brownstone,\
+        glazing:smoke,weathering:0.7,downtown_index:0.4,section:piers,ground:retail,\
+        corners:stone,setback:off,roof_units:4,seed:42,use:mixed_use,front_edge:0},\
+        0,0,0.3,0,0.3,0.2,0,0.2);",
+    )
+    .unwrap();
+    let before = project_landscape_features(&editor.program)
+        .features
+        .remove(0);
+    let style = before.building_style.unwrap();
+    assert!(editor.edit_building_properties("hall", 0.4, style));
+    let after = project_landscape_features(&editor.program)
+        .features
+        .remove(0);
+    assert_eq!(after.building_style, Some(style));
+    assert_eq!(after.points, before.points);
+    assert_eq!(after.building_use, before.building_use);
+    assert_eq!(after.front_edge, before.front_edge);
+    assert_eq!(after.height, Some(0.4));
 }

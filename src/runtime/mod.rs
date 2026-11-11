@@ -5,6 +5,7 @@ mod bridges;
 mod geometry;
 mod retaining;
 use crate::junction_mesh;
+pub mod architecture;
 mod building_details;
 mod building_frontage;
 pub mod scaffold;
@@ -28,6 +29,8 @@ use std::{collections::HashMap, path::Path};
 /// Group 0: 288-byte camera/lighting/star uniform (see docs/game-runtime.md).
 /// Group 1: 2048² shadow depth texture and comparison sampler (see shader).
 pub const GAME_SHADER: &str = concat!(
+    include_str!("architecture/facade.wgsl"),
+    "\n",
     include_str!("sky_stars.wgsl"),
     "\n",
     include_str!("game.wgsl")
@@ -35,7 +38,11 @@ pub const GAME_SHADER: &str = concat!(
 /// Native-resolution world-fixed stellar detail, shared with consumer sky backgrounds.
 pub const SKY_STARS_SHADER: &str = include_str!("sky_stars.wgsl");
 /// Original editor shader, for consumers implementing its documented bindings.
-pub const EDITOR_SHADER: &str = include_str!("../bin/editor/shaders/scene.wgsl");
+pub const EDITOR_SHADER: &str = concat!(
+    include_str!("architecture/facade.wgsl"),
+    "\n",
+    include_str!("../bin/editor/shaders/scene.wgsl")
+);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(u32)]
@@ -56,6 +63,12 @@ pub enum SurfaceKind {
     Roof = 10,
     /// A double-sided fence plane with local pattern coordinates and cutout gaps.
     Fence = 11,
+    /// Procedural building panel: interpolated bay/floor UV, packed recipe flags.
+    Facade = 12,
+    /// Coursed stone/concrete architectural trim, using the same packed material metadata.
+    Masonry = 13,
+    /// Thin architectural glazing, such as balcony guards.
+    Glazing = 14,
 }
 impl SurfaceKind {
     /// Dry-surface tire friction coefficient, used by the example vehicle.
@@ -148,6 +161,8 @@ struct Triangle {
     color: [f32; 3],
     data: [f32; 3],
     paving_distance: Option<[f32; 3]>,
+    facade_uv: Option<[[f32; 2]; 3]>,
+    render_normal: Option<[f32; 3]>,
 }
 /// Compiled snapshot. IDs are indices stable for this snapshot, never source-file offsets.
 pub struct City {
@@ -166,6 +181,7 @@ pub struct City {
     cells: HashMap<(i32, i32), Vec<usize>>,
     barrier_cells: HashMap<(i32, i32), Vec<usize>>,
     building_cells: HashMap<(i32, i32), Vec<usize>>,
+    building_volumes: HashMap<usize, Vec<architecture::BuildingVolume>>,
 }
 impl City {
     pub fn load(path: impl AsRef<Path>) -> Result<Self, String> {
@@ -224,6 +240,7 @@ impl City {
             cells: HashMap::new(),
             barrier_cells: HashMap::new(),
             building_cells: HashMap::new(),
+            building_volumes: HashMap::new(),
         };
         for (i, feature) in city
             .landscape
@@ -350,7 +367,12 @@ impl City {
             let t = &self.triangles[i];
             if matches!(
                 t.kind,
-                SurfaceKind::Building | SurfaceKind::Prop | SurfaceKind::Marking
+                SurfaceKind::Building
+                    | SurfaceKind::Prop
+                    | SurfaceKind::Marking
+                    | SurfaceKind::Facade
+                    | SurfaceKind::Masonry
+                    | SurfaceKind::Glazing
             ) {
                 continue;
             }
@@ -450,7 +472,8 @@ impl City {
     }
     /// Circle/footprint overlap plus vertical interval for vehicle collision checks.
     pub fn building_collision(&self, point: [f32; 2], radius: f32, bottom: f32, top: f32) -> bool {
-        let collides = |f: &LandscapeFeature| {
+        let collides = |id: usize| {
+            let f = &self.landscape[id];
             f.kind == LandscapeKind::Building
                 && f.building_style.unwrap_or_default().collidable
                 && f.elevation < top
@@ -462,6 +485,11 @@ impl City {
                         radius,
                     },
                 )
+                && self.building_volumes.get(&id).is_none_or(|parts| {
+                    parts
+                        .iter()
+                        .any(|v| v.intersects(point, radius, bottom, top))
+                })
         };
         let lo = geometry::cell([point[0] - radius, point[1] - radius]);
         let hi = geometry::cell([point[0] + radius, point[1] + radius]);
@@ -472,14 +500,14 @@ impl City {
             || hi.0 as i64 - lo.0 as i64 > 64
             || hi.1 as i64 - lo.1 as i64 > 64
         {
-            return self.landscape.iter().any(collides);
+            return (0..self.landscape.len()).any(collides);
         }
         for x in lo.0..=hi.0 {
             for y in lo.1..=hi.1 {
                 if self
                     .building_cells
                     .get(&(x, y))
-                    .is_some_and(|ids| ids.iter().any(|&i| collides(&self.landscape[i])))
+                    .is_some_and(|ids| ids.iter().any(|&i| collides(i)))
                 {
                     return true;
                 }

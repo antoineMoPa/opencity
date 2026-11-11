@@ -1138,6 +1138,7 @@ impl City {
             f.kind == LandscapeKind::Building
                 && f.model.is_none()
                 && f.building_use.allows_residential_details()
+                && super::architecture::BuildingRecipe::from_feature(f).is_none()
                 && include(f)
                 && geometry::polygon_region(&f.points, region)
         }) {

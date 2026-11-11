@@ -1,11 +1,12 @@
 struct Camera { view: vec4<f32>, focus: vec4<f32>, viewport: vec4<f32>, elevation: vec4<f32>, clip: array<vec4<f32>, 4> };
 @group(0) @binding(2) var<uniform> camera: Camera;
 struct VertexInput { @location(0) world: vec4<f32>, @location(1) color: vec4<f32>, @location(2) surface: vec4<f32> };
-struct VertexOutput { @builtin(position) position: vec4<f32>, @location(0) color: vec4<f32>, @location(1) world: vec3<f32>, @location(2) @interpolate(flat) surface: vec4<f32> };
+struct VertexOutput { @builtin(position) position: vec4<f32>, @location(0) color: vec4<f32>, @location(1) world: vec3<f32>, @location(2) surface: vec4<f32>, @location(3) @interpolate(flat) material:vec2<f32> };
 @vertex fn scene_vs(input: VertexInput) -> VertexOutput {
     var output: VertexOutput;
     output.world = input.world.xyz;
     output.surface = input.surface;
+    output.material = input.surface.xw;
     if camera.elevation.z > 0.5 {
         let point = vec4<f32>(input.world.xyz, 1.0);
         output.position = vec4<f32>(dot(camera.clip[0], point), dot(camera.clip[1], point),
@@ -72,6 +73,9 @@ fn bed_height(point: vec2<f32>) -> f32 {
 }
 @fragment fn scene_fs(input: VertexOutput) -> @location(0) vec4<f32> {
     var color = input.color.rgb;
+    let facade_aa=fwidth(input.surface.yz);
+    let cross_normal=cross(dpdx(input.world),dpdy(input.world));
+    let normal=cross_normal/max(length(cross_normal),0.000000000001);
     // Derivatives are evaluated uniformly, including along water/roof edges.
     let floor_height = max(input.surface.z, 0.0001);
     let floor_position = (input.world.z - input.surface.y) / floor_height;
@@ -83,6 +87,22 @@ fn bed_height(point: vec2<f32>) -> f32 {
     let panel = 0.5 + 0.5 * cos(across * 180.0);
     let brick_row = floor(floor_position * 7.0);
     let brick = 0.5 + 0.5*cos(across*340.0 + (brick_row % 2.0)*3.141593);
+    if input.material.x>2.5&&input.material.x<5.5 {
+        let radius=max(0.6,camera.viewport.x/max(camera.view.z,1.0)*0.7);
+        var eye=vec3<f32>(camera.focus.xy+vec2<f32>(camera.focus.z,-camera.focus.w)*radius,
+            camera.elevation.y+radius*camera.elevation.x)-input.world;
+        if camera.view.w>1.5 {eye=vec3<f32>(camera.focus.xy,camera.elevation.y)-input.world;}
+        let n=select(-normal,normal,dot(normal,eye)>0.0);
+        let sun=vec3<f32>(-0.494,-0.500,0.712);
+        let lighting=vec3<f32>(0.296,0.355,0.418)
+            +vec3<f32>(0.785,0.654,0.499)*max(dot(n,sun),0.0);
+        let view=eye/max(length(eye),0.00001);
+        let sky=architecture_sky(reflect(-view,n),0.85);
+        color=architecture_facade(input.surface.yz,facade_aa,input.material.y,n,eye,
+            color,sky,lighting,0.85,(input.material.x>3.5&&input.material.x<4.5),
+            (input.material.x>4.5));
+        return vec4<f32>(pow(max(color,vec3<f32>(0.0)),vec3<f32>(1.0/2.2)),input.color.a);
+    }
     if input.surface.x > 0.5 && input.surface.x < 1.5 {
         if input.surface.w < 1.5 { color *= 0.88 + 0.12*panel; }
         else if input.surface.w > 2.5 { color *= 0.92 + 0.08*brick; }

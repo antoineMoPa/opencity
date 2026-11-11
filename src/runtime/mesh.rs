@@ -8,6 +8,7 @@ use std::collections::HashSet;
 /// Aspect is clamped to 0.125..15; zero metadata retains legacy glass rendering.
 /// Entrance paving uses [Sidewalk, local X / unit, local Y / unit, 1].
 /// Road and junction sidewalk tops use [Sidewalk, distance along band, 0, 2].
+/// Procedural facades use [Facade, bay U, floor V, packed architecture flags].
 #[derive(Clone, Copy, Debug)]
 #[repr(C)]
 pub struct Vertex {
@@ -182,6 +183,16 @@ impl City {
             if geometry::polygon_region(&t.points.map(|p| [p[0], p[1]]), region) {
                 let start = mesh.vertices.len();
                 mesh.triangle(t.points, t.color, t.kind, t.data);
+                if let Some(normal) = t.render_normal {
+                    for v in &mut mesh.vertices[start..] {
+                        v.normal = normal;
+                    }
+                }
+                if let Some(uv) = t.facade_uv {
+                    for (v, uv) in mesh.vertices[start..].iter_mut().zip(uv) {
+                        v.surface[1..3].copy_from_slice(&uv);
+                    }
+                }
                 if let Some(distance) = t.paving_distance {
                     for (v, d) in mesh.vertices[start..].iter_mut().zip(distance) {
                         v.surface[1..].copy_from_slice(&[d, 0., 2.]);

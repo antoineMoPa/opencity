@@ -1,6 +1,13 @@
 //! Scene cache for the city editor.
 use super::*;
 
+pub(super) struct LandscapeCache {
+    program: Program,
+    base: Option<PathBuf>,
+    complete: bool,
+    projection: Arc<opencity::LandscapeProjection>,
+}
+
 pub(super) struct InteractionGeometry {
     pub(super) junctions: Vec<(WorldPoint, Option<String>)>,
     pub(super) element_ends: Vec<ElementEndCandidate>,
@@ -17,9 +24,13 @@ impl RoadEditor {
     /// Picking, property controls, and selection strokes share one immutable
     /// landscape projection. Camera/selection/water animation never invalidate it.
     pub(super) fn projected_landscape(&mut self) -> Arc<opencity::LandscapeProjection> {
-        if let Some((program, projection)) = &self.landscape_cache {
-            if *program == self.program {
-                return Arc::clone(projection);
+        let base = self.path.as_deref().and_then(Path::parent);
+        if let Some(cache) = &self.landscape_cache {
+            if cache.program == self.program
+                && cache.base.as_deref() == base
+                && (cache.complete || !frontage::scaffold_is_ready(&self.program, base))
+            {
+                return Arc::clone(&cache.projection);
             }
         }
         let expanded = frontage::cached_scaffold_program(
@@ -33,9 +44,12 @@ impl RoadEditor {
             Statement::Call(c) => matches!(c.name.as_str(), "frontage_zone" | "residential_area"),
             _ => false,
         });
-        if expanded.is_some() || !zoned {
-            self.landscape_cache = Some((self.program.clone(), Arc::clone(&projection)));
-        }
+        self.landscape_cache = Some(LandscapeCache {
+            program: self.program.clone(),
+            base: base.map(Path::to_path_buf),
+            complete: expanded.is_some() || !zoned,
+            projection: Arc::clone(&projection),
+        });
 
         projection
     }

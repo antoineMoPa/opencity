@@ -1,0 +1,12 @@
+# Canonical visual QA specimens corresponding to the standalone procedural prototype.
+# 0.01 map units per specimen meter; the lot includes canopy/cornice projections.
+# Height reserves four specimen meters for cornices and rooftop services.
+# Width/depth of each primary shell, upper-floor count, palettes and glass tints match.
+qa_ground = concrete(-10,-10, 22,-10, 22,12, -10,12);
+elevation(qa_ground,0.02);
+qa_curtain = building(0.803, {material:glass, family:curtain_wall, floor_height:0.0325, palette:concrete, glazing:blue, weathering:0.08, section:bands, ground:lobby, corners:glass, setback:on, roof_units:4, seed:42}, 0,0, 0.217,0, 0.217,0.139, 0,0.139);
+qa_mixed = building(0.5105, {material:glass, family:mixed, floor_height:0.0325, palette:sandstone, glazing:teal, weathering:0.22, section:piers, ground:retail, corners:stone, setback:on, roof_units:4, seed:42}, 2,0, 2.248,0, 2.248,0.170, 2,0.170);
+qa_podium = building(0.9655, {material:glass, family:podium, floor_height:0.0325, palette:chalk, glazing:teal, weathering:0.12, section:bands, ground:retail, corners:glass, setback:on, podium_floors:2, tower_ratio:0.48, roof_units:4, seed:42}, 4,0, 4.341,0, 4.341,0.232, 4,0.232);
+qa_heritage = building(0.2505, {material:glass, family:heritage, floor_height:0.0325, palette:brownstone, glazing:smoke, weathering:0.945, section:piers, ground:retail, corners:stone, setback:off, roof_units:4, seed:42}, 6,0, 6.194,0, 6.194,0.147, 6,0.147);
+qa_civic = building(0.283, {material:glass, family:civic, floor_height:0.0325, palette:limestone, glazing:silver, weathering:0.675, section:frame, ground:lobby, corners:stone, setback:off, roof_units:4, seed:42}, 8,0, 8.318,0, 8.318,0.209, 8,0.209);
+qa_concrete = building(0.478, {material:glass, family:concrete_frame, floor_height:0.0325, palette:concrete, glazing:teal, weathering:0.4, section:frame, ground:arcade, corners:stone, setback:on, roof_units:4, seed:42}, 10,0, 10.2575,0, 10.2575,0.1795, 10,0.1795);

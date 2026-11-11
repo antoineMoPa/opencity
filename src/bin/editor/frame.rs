@@ -170,6 +170,17 @@ impl RoadEditor {
             || self.pending.is_some()
             || self.minimal.palette_pointer_gesture
             || switch_owns_pointer;
+        let mut expansion_ui =
+            root.new_child(egui::UiBuilder::new().max_rect(root.available_rect_before_wrap()));
+        if palette_active || self.pending.is_some() {
+            expansion_ui.disable();
+        }
+        self.minimal
+            .expansion
+            .show(&mut expansion_ui, &mut self.program, true);
+        root.set_max_height(
+            (expansion_ui.available_rect_before_wrap().bottom() - root.max_rect().top()).max(0.),
+        );
         let saved_input = palette_blocks_canvas.then(|| ctx.input(|input| input.clone()));
         if palette_blocks_canvas {
             ctx.input_mut(|input| {
@@ -196,13 +207,16 @@ impl RoadEditor {
         }
 
         self.pending_dialog(&ctx);
-        if let Some(rect) = self.map_rect {
+        if let Some(rect) = self
+            .map_rect
+            .filter(|_| !palette_active && self.pending.is_none())
+        {
             let matrix = self
                 .camera_transition_matrix(rect)
                 .unwrap_or_else(|| self.camera_clip_matrix(rect));
             self.minimal
                 .expansion
-                .world_overlay(&ctx, &self.program, |p| {
+                .world_overlay(&ctx, &self.program, rect, |p| {
                     let mut v = [0.; 4];
                     for row in 0..4 {
                         v[row] = matrix[row][0] * p[0]
@@ -218,7 +232,6 @@ impl RoadEditor {
                     })
                 });
         }
-        self.minimal.expansion.show(&ctx, &mut self.program, true);
         self.delete_dialog(&ctx);
         let dragging = ctx.input(|input| input.pointer.primary_down())
             && (self.dragging_endpoint.is_some()

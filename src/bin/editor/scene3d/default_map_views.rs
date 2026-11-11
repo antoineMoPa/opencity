@@ -5,7 +5,7 @@ pub(super) fn views(
     center: WorldPoint,
     fit: f32,
 ) -> Vec<(&'static str, CameraView, WorldPoint, f32)> {
-    vec![
+    let mut views = vec![
         ("top-full", CameraView::Top, center, fit),
         ("iso-full", CameraView::Isometric, center, fit),
         (
@@ -164,5 +164,34 @@ pub(super) fn views(
             WorldPoint { x: -24.0, y: -4.8 },
             800.0,
         ),
-    ]
+    ];
+    let features = project_landscape_features(&boot_program()).features;
+    for (name, family) in [
+        ("iso-family-curtain", opencity::BuildingFamily::CurtainWall),
+        ("iso-family-mixed", opencity::BuildingFamily::Mixed),
+        ("iso-family-podium", opencity::BuildingFamily::Podium),
+        ("iso-family-heritage", opencity::BuildingFamily::Heritage),
+        ("iso-family-civic", opencity::BuildingFamily::Civic),
+        (
+            "iso-family-concrete",
+            opencity::BuildingFamily::ConcreteFrame,
+        ),
+    ] {
+        if let Some((f, r)) = features
+            .iter()
+            .filter_map(|f| {
+                opencity::runtime::architecture::BuildingRecipe::from_feature(f).map(|r| (f, r))
+            })
+            .filter(|(_, r)| r.family == family)
+            .max_by(|a, b| a.1.height.total_cmp(&b.1.height))
+        {
+            let target = WorldPoint {
+                x: f.points.iter().map(|p| p[0]).sum::<f32>() / 4.,
+                y: f.points.iter().map(|p| p[1]).sum::<f32>() / 4.,
+            };
+            let zoom = (430. / r.height).min(3000.).min(700. / r.width);
+            views.push((name, CameraView::Isometric, target, zoom));
+        }
+    }
+    views
 }

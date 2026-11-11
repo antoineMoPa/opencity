@@ -1,6 +1,11 @@
 //! Building facade styles shared by landscape projection and renderers.
 
 use crate::Argument;
+mod architecture;
+pub use architecture::{
+    sample, BuildingArchitecture, BuildingFamily, BuildingGround, BuildingPalette, BuildingSection,
+    DowntownField, GlassTint,
+};
 
 /// Generic occupancy intent, independent of appearance or procedural recipes.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -136,6 +141,7 @@ impl BuildingMaterial {
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct BuildingStyle {
+    pub architecture: BuildingArchitecture,
     /// Disable the broad footprint when a model has separately authored collision volumes.
     pub collidable: bool,
     pub material: BuildingMaterial,
@@ -146,6 +152,7 @@ pub struct BuildingStyle {
 impl Default for BuildingStyle {
     fn default() -> Self {
         Self {
+            architecture: BuildingArchitecture::default(),
             collidable: true,
             material: BuildingMaterial::default(),
             floor_height: 0.04,
@@ -208,6 +215,7 @@ impl BuildingStyle {
                         .filter(|height| height.is_finite() && *height > 0.0)
                         .ok_or("building floor_height must be a positive finite number")?;
                 }
+                _ if style.architecture.parse(key, value)? => {}
                 _ => return Err(format!("unknown building option '{key}'")),
             }
         }

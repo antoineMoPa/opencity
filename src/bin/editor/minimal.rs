@@ -233,7 +233,10 @@ impl RoadEditor {
             }
         }
         self.minimal.toolbar_rect = None;
-        if self.map_tool == MapTool::Select && self.minimal.rename_source.is_some() {
+        if self.map_tool == MapTool::Select
+            && self.minimal.rename_source.is_some()
+            && !self.minimal.expansion.open
+        {
             let area = egui::Area::new(egui::Id::new("minimal-road-toolbar"))
                 .order(egui::Order::Middle)
                 .fixed_pos(root.max_rect().min + egui::vec2(12.0, 12.0))

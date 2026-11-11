@@ -208,6 +208,57 @@ pub(super) fn append_landscape_feature(
     selected_landscape: Option<&str>,
     model_base: Option<&Path>,
 ) {
+    if let Some(recipe) = opencity::runtime::architecture::BuildingRecipe::from_feature(feature) {
+        for v in recipe.mesh().vertices {
+            let masonry = v.surface[0] == opencity::runtime::SurfaceKind::Masonry as u32 as f32;
+            let glazing = v.surface[0] == opencity::runtime::SurfaceKind::Glazing as u32 as f32;
+            let facade = v.surface[0] == opencity::runtime::SurfaceKind::Facade as u32 as f32
+                || masonry
+                || glazing;
+            let sun = (v.normal[0] * -0.494 + v.normal[1] * -0.500 + v.normal[2] * 0.712).max(0.);
+            let ambient = [0.296, 0.355, 0.418];
+            let direct = [0.785, 0.654, 0.499];
+            let c = std::array::from_fn::<_, 3, _>(|i| {
+                if facade {
+                    v.color[i]
+                } else {
+                    (v.color[i] * (ambient[i] + direct[i] * sun))
+                        .max(0.)
+                        .powf(1. / 2.2)
+                }
+            });
+            scene.vertices.push(WorldVertex {
+                point: WorldPoint {
+                    x: v.position[0],
+                    y: v.position[1],
+                },
+                height: v.position[2],
+                depth_bias: 0.,
+                color: Color32::from_rgb(
+                    (c[0] * 255.) as u8,
+                    (c[1] * 255.) as u8,
+                    (c[2] * 255.) as u8,
+                ),
+                surface: if facade {
+                    [
+                        if masonry {
+                            4.
+                        } else if glazing {
+                            5.
+                        } else {
+                            3.
+                        },
+                        v.surface[1],
+                        v.surface[2],
+                        v.surface[3],
+                    ]
+                } else {
+                    [0.; 4]
+                },
+            });
+        }
+        return;
+    }
     if let Some(scaffold) = opencity::runtime::scaffold::BuildingScaffold::from_feature(feature) {
         for vertex in scaffold.mesh().vertices {
             let shade = 0.72 + 0.28 * vertex.normal[2].abs();

@@ -24,4 +24,5 @@ mod buildings;
 
 mod external_launch;
 
+mod expansion;
 mod performance;

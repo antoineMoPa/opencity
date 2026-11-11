@@ -119,6 +119,15 @@ pub(super) fn cached_scaffold_program(program: &Program, base: Option<&Path>) ->
     (source == program && path.as_deref() == base).then(|| expanded.clone())
 }
 
+pub(super) fn scaffold_is_ready(program: &Program, base: Option<&Path>) -> bool {
+    let Ok(cache) = scaffold_cache().try_lock() else {
+        return false;
+    };
+    cache
+        .as_ref()
+        .is_some_and(|(source, path, _)| source == program && path.as_deref() == base)
+}
+
 /// Cached expansion shared by scene rendering and picking. Elevation loading is
 /// the same bundled/external loader used by the scene, including browser builds.
 pub(super) fn scaffold_program(program: &Program, base: Option<&Path>) -> Result<Program, String> {

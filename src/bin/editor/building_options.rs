@@ -1,6 +1,8 @@
 //! Building picking and anchored properties do not mutate cached scene geometry.
 use super::*;
-use opencity::{BuildingMaterial, BuildingStyle, LandscapeFeature};
+use opencity::{
+    BuildingFamily, BuildingMaterial, BuildingPalette, BuildingStyle, GlassTint, LandscapeFeature,
+};
 
 impl RoadEditor {
     fn building_screen_points(
@@ -79,6 +81,38 @@ impl RoadEditor {
                         (roof[i], depth(i, true)),
                     ]);
                 }
+            }
+            if let Some(recipe) =
+                opencity::runtime::architecture::BuildingRecipe::from_feature(feature)
+            {
+                // Pick the visible setbacks and podium, rather than the old enclosing prism.
+                faces = recipe
+                    .mesh()
+                    .vertices
+                    .chunks_exact(3)
+                    .map(|triangle| {
+                        triangle
+                            .iter()
+                            .map(|v| {
+                                let p = v.position;
+                                let point = self.spatial_screen(
+                                    rect,
+                                    WorldPoint { x: p[0], y: p[1] },
+                                    p[2],
+                                    iso,
+                                );
+                                let depth = if iso {
+                                    (p[0] * self.orbit_angle.sin() - p[1] * self.orbit_angle.cos())
+                                        * self.orbit_elevation.cos()
+                                        + p[2] * self.orbit_elevation.sin()
+                                } else {
+                                    p[2]
+                                };
+                                (point, depth)
+                            })
+                            .collect()
+                    })
+                    .collect();
             }
             for face in faces {
                 let points: Vec<_> = face.iter().map(|v| v.0).collect();
@@ -170,7 +204,7 @@ impl RoadEditor {
             .order(egui::Order::Foreground)
             .fixed_pos((anchor + egui::vec2(14.0, 14.0)).clamp(
                 rect.min,
-                (rect.max - egui::vec2(230.0, 190.0)).max(rect.min),
+                (rect.max - egui::vec2(300.0, 390.0)).max(rect.min),
             ))
             .show(ui.ctx(), |ui| {
                 egui::Frame::popup(ui.style()).show(ui, |ui| {
@@ -184,7 +218,7 @@ impl RoadEditor {
                                 egui::DragValue::new(&mut height)
                                     .speed(0.01)
                                     .range(0.001..=100.0)
-                                    .max_decimals(3),
+                                    .max_decimals(5),
                             )
                             .changed();
                         ui.end_row();
@@ -218,12 +252,107 @@ impl RoadEditor {
                                 egui::DragValue::new(&mut style.floor_height)
                                     .speed(0.001)
                                     .range(0.001..=100.0)
-                                    .max_decimals(3),
+                                    .max_decimals(5),
                             )
                             .changed();
                         ui.end_row();
+                        ui.label("Building family");
+                        egui::ComboBox::from_id_salt("building-family")
+                            .selected_text(style.architecture.family.keyword())
+                            .show_ui(ui, |ui| {
+                                for family in [
+                                    BuildingFamily::Auto,
+                                    BuildingFamily::CurtainWall,
+                                    BuildingFamily::Mixed,
+                                    BuildingFamily::Podium,
+                                    BuildingFamily::Heritage,
+                                    BuildingFamily::Civic,
+                                    BuildingFamily::ConcreteFrame,
+                                    BuildingFamily::Legacy,
+                                ] {
+                                    changed |= ui
+                                        .selectable_value(
+                                            &mut style.architecture.family,
+                                            family,
+                                            family.keyword(),
+                                        )
+                                        .changed();
+                                }
+                            });
+                        ui.end_row();
+                        ui.label("Stone / structure");
+                        egui::ComboBox::from_id_salt("building-palette")
+                            .selected_text(style.architecture.palette.keyword())
+                            .show_ui(ui, |ui| {
+                                for palette in [
+                                    BuildingPalette::Seeded,
+                                    BuildingPalette::Limestone,
+                                    BuildingPalette::Sandstone,
+                                    BuildingPalette::Granite,
+                                    BuildingPalette::Basalt,
+                                    BuildingPalette::Chalk,
+                                    BuildingPalette::Buff,
+                                    BuildingPalette::Brownstone,
+                                    BuildingPalette::Concrete,
+                                    BuildingPalette::Terracotta,
+                                ] {
+                                    changed |= ui
+                                        .selectable_value(
+                                            &mut style.architecture.palette,
+                                            palette,
+                                            palette.keyword(),
+                                        )
+                                        .changed();
+                                }
+                            });
+                        ui.end_row();
+                        ui.label("Glazing");
+                        egui::ComboBox::from_id_salt("building-glazing")
+                            .selected_text(style.architecture.glazing.keyword())
+                            .show_ui(ui, |ui| {
+                                for tint in [
+                                    GlassTint::Seeded,
+                                    GlassTint::Blue,
+                                    GlassTint::Teal,
+                                    GlassTint::Silver,
+                                    GlassTint::Smoke,
+                                ] {
+                                    changed |= ui
+                                        .selectable_value(
+                                            &mut style.architecture.glazing,
+                                            tint,
+                                            tint.keyword(),
+                                        )
+                                        .changed();
+                                }
+                            });
+                        ui.end_row();
+                        ui.label("Weathering");
+                        changed |= ui
+                            .add(egui::Slider::new(
+                                &mut style.architecture.weathering,
+                                0.0..=1.0,
+                            ))
+                            .changed();
+                        ui.end_row();
+                        if let Some(index) = style.architecture.downtown_index {
+                            ui.label("Downtown index");
+                            ui.label(format!("{index:.3}"));
+                            ui.end_row();
+                        }
                     });
                     ui.small(format!("≈ {:.1} floors", height / style.floor_height));
+                    if style.architecture.family == BuildingFamily::Auto {
+                        if let Some(recipe) =
+                            opencity::runtime::architecture::BuildingRecipe::from_feature(&feature)
+                        {
+                            ui.small(format!(
+                                "Auto → {} / {}",
+                                recipe.family.keyword(),
+                                recipe.palette.keyword()
+                            ));
+                        }
+                    }
                     close = ui.button("Close").clicked();
                 });
             });
@@ -297,6 +426,7 @@ impl RoadEditor {
         if !style.collidable {
             properties.push(("collision".into(), Argument::Identifier("none".into())));
         }
+        properties.extend(style.architecture.options());
         if let Some(Argument::Object(existing)) = call.args.get(offset) {
             properties.extend(
                 existing

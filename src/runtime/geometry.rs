@@ -127,6 +127,8 @@ pub(super) fn push(
         color: color(rgb),
         data,
         paving_distance: None,
+        facade_uv: None,
+        render_normal: None,
     });
 }
 fn quad(city: &mut City, p: [[f32; 3]; 4], kind: SurfaceKind, road: Option<usize>, rgb: [u8; 3]) {
@@ -582,8 +584,38 @@ pub(super) fn compile(
             }
         }
     }
-    for f in city.landscape.clone() {
+    for (feature_id, f) in city.landscape.clone().into_iter().enumerate() {
         let first_triangle = city.triangles.len();
+        if let Some(recipe) = super::architecture::BuildingRecipe::from_feature(&f) {
+            let (mesh, volumes) = recipe.geometry();
+            city.building_volumes.insert(feature_id, volumes);
+            for t in mesh.vertices.chunks_exact(3) {
+                let facade = t[0].surface[0] == SurfaceKind::Facade as u32 as f32
+                    || t[0].surface[0] == SurfaceKind::Masonry as u32 as f32
+                    || t[0].surface[0] == SurfaceKind::Glazing as u32 as f32;
+                city.triangles.push(Triangle {
+                    model_proxy: false,
+                    points: std::array::from_fn(|i| t[i].position),
+                    kind: if t[0].surface[0] == SurfaceKind::Masonry as u32 as f32 {
+                        SurfaceKind::Masonry
+                    } else if t[0].surface[0] == SurfaceKind::Glazing as u32 as f32 {
+                        SurfaceKind::Glazing
+                    } else if facade {
+                        SurfaceKind::Facade
+                    } else {
+                        SurfaceKind::Prop
+                    },
+                    road: None,
+                    color: t[0].color,
+                    data: [0., 0., t[0].surface[3]],
+                    paving_distance: None,
+                    facade_uv: facade
+                        .then(|| std::array::from_fn(|i| [t[i].surface[1], t[i].surface[2]])),
+                    render_normal: Some(t[0].normal),
+                });
+            }
+            continue;
+        }
         let k = match f.kind {
             LandscapeKind::Building => SurfaceKind::Building,
             LandscapeKind::Concrete => SurfaceKind::Sidewalk,
@@ -702,6 +734,8 @@ pub(super) fn compile(
             color: triangle[0].color,
             data: [0.; 3],
             paving_distance: None,
+            facade_uv: None,
+            render_normal: None,
         });
     }
     Ok(())

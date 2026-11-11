@@ -239,7 +239,16 @@ fn shade_surface(v:Output,front:bool,coverage:f32,surface:SurfaceData)->vec4<f32
     let daylight=clamp(camera.daylight_sky.x,0.0,1.0);
     let eye=camera.eye_time.xyz-v.world;let view=eye/max(length(eye),0.001);
     var lit:vec3<f32>;
-    if kind>7.5&&kind<8.5&&v.surface.w>=16.0 {
+    if kind>11.5&&kind<14.5 {
+        let sun=camera.sun_exposure.xyz/max(length(camera.sun_exposure.xyz),0.001);
+        let direct=max(dot(n,sun),0.0)*visibility(v.world,n);
+        let lighting=vec3<f32>(mix(0.12,0.43,daylight))
+            +camera.sun_color.rgb*direct*mix(0.15,0.85,daylight);
+        let reflected=reflect(-view,n);
+        let environment=textureSampleLevel(sky_environment,sky_sampler,reflected,0.0).rgb;
+        lit=architecture_facade(v.fence_uv,surface.paving_footprint,v.surface.w,
+            n,eye,base,environment,lighting,daylight,(kind>12.5&&kind<13.5),(kind>13.5));
+    } else if kind>7.5&&kind<8.5&&v.surface.w>=16.0 {
         // Detailed panes replace the exterior lighting with their room and glass.
         let lit_window=step(0.05,base.r);
         let seed=floor(v.surface.w/16.0);

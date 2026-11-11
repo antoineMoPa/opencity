@@ -217,7 +217,7 @@ struct RoadEditor {
     render_format: eframe::wgpu::TextureFormat,
     projection_cache: Option<(Program, Arc<map::Projection>)>,
     interaction_cache: Option<Arc<scene_cache::InteractionGeometry>>,
-    landscape_cache: Option<(Program, Arc<opencity::LandscapeProjection>)>,
+    landscape_cache: Option<scene_cache::LandscapeCache>,
     selected_zone: Option<String>,
     frontage_cache: Option<(Program, Arc<opencity::FrontageProjection>)>,
     scene_cache: Option<SceneCache>,

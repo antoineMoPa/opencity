@@ -48,7 +48,7 @@ struct RenderTarget {
     bind_group: wgpu::BindGroup,
 }
 
-const SCENE_SHADER: &str = include_str!("../shaders/scene.wgsl");
+const SCENE_SHADER: &str = opencity::runtime::EDITOR_SHADER;
 const COMPOSITE_SHADER: &str = include_str!("../shaders/composite.wgsl");
 
 impl SceneCallback {

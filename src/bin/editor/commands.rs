@@ -80,7 +80,13 @@ impl RoadEditor {
             (
                 "expand-network",
                 "Expand road network…",
-                "Pick ghost extensions or grow a network",
+                "Extend roads from their open ends",
+                "",
+            ),
+            (
+                "grow-network",
+                "Auto-grow road network…",
+                "Grow a network using a seed and step count",
                 "",
             ),
         ]
@@ -182,8 +188,13 @@ impl RoadEditor {
     }
 
     pub(super) fn execute_palette_command(&mut self, id: &str, ctx: &egui::Context) {
-        if id == "expand-network" {
-            self.minimal.expansion.open = true;
+        if id == "expand-network" || id == "grow-network" {
+            if id == "grow-network" {
+                self.minimal.expansion.start_growth();
+            } else {
+                self.minimal.expansion.start();
+            }
+            ctx.request_repaint();
             return;
         }
         if self.camera_view == CameraView::Vehicular

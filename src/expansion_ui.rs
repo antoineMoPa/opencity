@@ -1,14 +1,14 @@
 //! Shared ghost picker for editor and game. It never writes files itself.
 use crate::{
     expansion::{self, End, Proposal},
-    map::{self, WorldPoint},
     Program,
 };
+mod icons;
+use icons::{button, Icon};
 
 pub struct Picker {
     pub open: bool,
     snapshot: Option<Program>,
-    projection: Option<map::Projection>,
     ends: Vec<End>,
     pub proposals: Vec<Proposal>,
     pub selected: usize,
@@ -20,15 +20,15 @@ pub struct Picker {
     seed: u64,
     steps: usize,
     pub message: String,
-    pan: egui::Vec2,
-    zoom: f32,
+    growth: bool,
+    reveal_selected: bool,
+    keyboard_focus: Option<egui::Id>,
 }
 impl Default for Picker {
     fn default() -> Self {
         Self {
             open: false,
             snapshot: None,
-            projection: None,
             ends: vec![],
             proposals: vec![],
             selected: 0,
@@ -40,8 +40,9 @@ impl Default for Picker {
             seed: 1,
             steps: 8,
             message: String::new(),
-            pan: egui::Vec2::ZERO,
-            zoom: 1.,
+            growth: false,
+            reveal_selected: false,
+            keyboard_focus: None,
         }
     }
 }
@@ -51,27 +52,39 @@ impl Picker {
         &mut self,
         ctx: &egui::Context,
         program: &Program,
+        viewport: egui::Rect,
         project: impl Fn([f32; 3]) -> Option<egui::Pos2>,
     ) {
         if !self.open {
             return;
         }
         self.refresh(program);
-        let painter = ctx.layer_painter(egui::LayerId::new(
-            egui::Order::Background,
-            egui::Id::new("expansion-world"),
-        ));
+        let painter = ctx
+            .layer_painter(egui::LayerId::new(
+                egui::Order::Background,
+                egui::Id::new("expansion-world"),
+            ))
+            .with_clip_rect(viewport);
         let pointer = ctx.pointer_hover_pos();
         let clicked = ctx.input(|i| i.pointer.primary_clicked())
+            && pointer.is_some_and(|p| viewport.contains(p))
             && pointer
                 .and_then(|p| ctx.layer_id_at(p))
                 .is_none_or(|layer| layer.order == egui::Order::Background);
         let mut chosen = None;
         for (i, end) in self.ends.iter().enumerate() {
             if let Some(p) = project([end.point.x, end.point.y, end.height]) {
+                let selected = self.end == Some(i);
+                if selected {
+                    painter.circle_filled(
+                        p,
+                        12.,
+                        egui::Color32::from_rgba_unmultiplied(240, 190, 70, 35),
+                    );
+                }
                 painter.circle_stroke(
                     p,
-                    8.,
+                    if selected { 8. } else { 6. },
                     egui::Stroke::new(2., egui::Color32::from_rgb(240, 190, 70)),
                 );
                 if clicked && pointer.is_some_and(|q| q.distance(p) < 14.) {
@@ -123,9 +136,9 @@ impl Picker {
                         painter.add(egui::Shape::convex_polygon(
                             polygon,
                             egui::Color32::from_rgba_unmultiplied(
-                                80,
+                                184,
+                                228,
                                 210,
-                                240,
                                 if index == self.selected { 35 } else { 5 },
                             ),
                             egui::Stroke::NONE,
@@ -141,9 +154,9 @@ impl Picker {
                                 egui::Stroke::new(
                                     if index == self.selected { 4. } else { 1. },
                                     egui::Color32::from_rgba_unmultiplied(
-                                        80,
+                                        184,
+                                        228,
                                         210,
-                                        240,
                                         if index == self.selected { 210 } else { 65 },
                                     ),
                                 ),
@@ -171,11 +184,30 @@ impl Picker {
             return;
         }
         self.ends = expansion::ends(program);
-        self.projection = Some(map::project(program));
         self.proposals.clear();
         self.end = None;
         self.selected = 0;
         self.snapshot = Some(program.clone());
+    }
+    pub fn start(&mut self) {
+        self.open = true;
+        self.growth = false;
+    }
+    pub fn start_growth(&mut self) {
+        self.open = true;
+        self.growth = true;
+    }
+    /// The same logical height is used by the panel and the native GPU viewport.
+    pub fn viewport_rect(&self, bounds: egui::Rect) -> egui::Rect {
+        let height = if self.open {
+            42_f32.min((bounds.height() - 1.).max(0.))
+        } else {
+            0.
+        };
+        egui::Rect::from_min_max(
+            bounds.min,
+            egui::pos2(bounds.right(), bounds.bottom() - height),
+        )
     }
     fn choose_end(&mut self, program: &Program, index: usize) {
         self.end = Some(index);
@@ -190,6 +222,20 @@ impl Picker {
                 element: self.element,
             },
         );
+        self.proposals.sort_by_key(|p| icons::order(p.kind));
+        self.reveal_selected = true;
+    }
+    fn step_end(&mut self, program: &Program, previous: bool) {
+        if self.ends.is_empty() {
+            return;
+        }
+        let index = match self.end {
+            Some(i) if previous => (i + self.ends.len() - 1) % self.ends.len(),
+            Some(i) => (i + 1) % self.ends.len(),
+            None if previous => self.ends.len() - 1,
+            None => 0,
+        };
+        self.choose_end(program, index);
     }
     pub fn selected(&self) -> Option<&Proposal> {
         self.proposals.get(self.selected)
@@ -203,142 +249,107 @@ impl Picker {
             self.refresh(program);
         }
     }
+    /// Reserves a thin strip in the caller's root UI before its canvas is laid out.
     /// `editable` is false for bundled/browser maps without an authored file.
-    pub fn show(&mut self, ctx: &egui::Context, program: &mut Program, editable: bool) -> bool {
+    pub fn show(&mut self, root: &mut egui::Ui, program: &mut Program, editable: bool) -> bool {
         if !self.open {
             return false;
         }
-        if ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape)) {
+        let ctx = root.ctx().clone();
+        // Enter can release a numeric/text edit earlier in this frame. That
+        // same key must not also place a road after the edit commits.
+        let keyboard_free = root.is_enabled()
+            && ctx.memory(|m| {
+                m.focused().is_none()
+                    && !self
+                        .keyboard_focus
+                        .is_some_and(|id| m.had_focus_last_frame(id))
+            });
+        if root.is_enabled()
+            && ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape))
+        {
             self.open = false;
+            ctx.request_repaint();
             return false;
         }
         self.refresh(program);
         let before = program.clone();
-        let mut open = self.open;
-        egui::Window::new("Expand road network")
-            .open(&mut open)
-            .default_size(egui::vec2(680., 620.))
-            .show(ctx, |ui| {
-                ui.label("Pick an open end. Tab cycles ghosts; click to select; Enter applies.");
-                if !editable {
-                    ui.colored_label(
-                        ui.visuals().warn_fg_color,
-                        "Preview only: open a .road file.",
-                    );
+        let mut enter = false;
+        if keyboard_free && !self.growth {
+            if !self.proposals.is_empty() {
+                let previous =
+                    ctx.input_mut(|i| i.consume_key(egui::Modifiers::SHIFT, egui::Key::Tab));
+                let next = ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Tab));
+                if previous || next {
+                    self.selected = (self.selected
+                        + if previous {
+                            self.proposals.len() - 1
+                        } else {
+                            1
+                        })
+                        % self.proposals.len();
+                    self.reveal_selected = true;
                 }
+            }
+            enter = ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Enter));
+        }
+        let bounds = root.available_rect_before_wrap();
+        let height = bounds.bottom() - self.viewport_rect(bounds).bottom();
+        egui::Panel::bottom("expansion-fringe")
+            .exact_size(height)
+            .show_separator_line(false)
+            .frame(
+                egui::Frame::NONE
+                    .fill(egui::Color32::from_rgb(27, 41, 34))
+                    .inner_margin(egui::Margin::symmetric(8, 7)),
+            )
+            .show(root, |ui| {
+                ui.set_clip_rect(ui.max_rect().intersect(ui.clip_rect()));
+                *ui.visuals_mut() = egui::Visuals::dark();
+                ui.spacing_mut().item_spacing = egui::vec2(4., 0.);
+                ui.spacing_mut().interact_size.y = 26.;
                 ui.horizontal(|ui| {
-                    ui.label("Length");
-                    let mut changed = ui
-                        .add(
-                            egui::DragValue::new(&mut self.length)
-                                .range(0.05..=100.)
-                                .speed(0.05),
-                        )
-                        .changed();
-                    ui.label("Curve °");
-                    changed |= ui
-                        .add(
-                            egui::DragValue::new(&mut self.curve_degrees)
-                                .range(5.0..=145.0)
-                                .speed(1.),
-                        )
-                        .changed();
-                    ui.label("Grade");
-                    changed |= ui
-                        .add(
-                            egui::DragValue::new(&mut self.grade)
-                                .range(0.005..=0.1)
-                                .speed(0.005),
-                        )
-                        .changed();
-                    if changed {
-                        if let Some(i) = self.end {
-                            self.choose_end(program, i);
-                        }
-                    }
-                    if ui.button("Refresh").clicked() {
-                        self.snapshot = None;
-                        self.refresh(program);
-                    }
-                    ui.label(format!("{} open ends", self.ends.len()));
-                });
-                let previous = self.element;
-                egui::ComboBox::from_label("Element to start or end")
-                    .selected_text(element_label(self.element))
-                    .show_ui(ui, |ui| {
-                        use crate::RoadElementKind::*;
-                        for kind in [
-                            CarLane,
-                            Sidewalk,
-                            ParkingLane,
-                            BikeLane,
-                            BusLane,
-                            BusStop,
-                            Middle,
-                            Verge,
-                            Barrier,
-                            BuildingEdge,
-                            TrainTrack,
-                            TramTrack,
-                            SubwayTrack,
-                            Runway,
-                            Taxiway,
-                            Apron,
-                        ] {
-                            ui.selectable_value(&mut self.element, kind, element_label(kind));
-                        }
-                    });
-                if self.element != previous {
-                    if let Some(i) = self.end {
-                        self.choose_end(program, i);
-                    }
-                }
-                if !self.proposals.is_empty() {
-                    let next =
-                        ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Tab));
-                    let previous =
-                        ui.input_mut(|i| i.consume_key(egui::Modifiers::SHIFT, egui::Key::Tab));
-                    if next {
-                        self.selected = (self.selected + 1) % self.proposals.len();
-                    }
-                    if previous {
-                        self.selected =
-                            (self.selected + self.proposals.len() - 1) % self.proposals.len();
-                    }
-                }
-                self.canvas(ui, program);
-                ui.horizontal_wrapped(|ui| {
-                    let labels: Vec<_> = self.proposals.iter().map(|p| p.kind.label()).collect();
-                    for (i, label) in labels.into_iter().enumerate() {
-                        if ui.selectable_label(self.selected == i, label).clicked() {
-                            self.selected = i;
-                        }
-                    }
-                });
-                let enter =
-                    ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Enter));
-                let apply = ui
-                    .add_enabled(
-                        editable && self.selected().is_some(),
-                        egui::Button::new("Apply selected extension"),
-                    )
-                    .clicked();
-                if apply || (enter && editable) {
-                    self.accept(program);
-                }
-                ui.collapsing("Auto-growth experiment", |ui| {
-                    ui.label(
-                        "Grow from this network, checking each step. Editor Undo is available.",
+                    // Keep confirmation and close reachable even on narrow windows.
+                    let controls_width = if self.message.is_empty() { 64. } else { 96. };
+                    let content = egui::vec2((ui.available_width() - controls_width).max(0.), 28.);
+                    ui.allocate_ui_with_layout(
+                        content,
+                        egui::Layout::left_to_right(egui::Align::Center),
+                        |ui| {
+                            egui::ScrollArea::horizontal()
+                                .id_salt("expansion-fringe-scroll")
+                                .scroll_bar_visibility(
+                                    egui::scroll_area::ScrollBarVisibility::AlwaysHidden,
+                                )
+                                .auto_shrink([false, false])
+                                .show(ui, |ui| {
+                                    ui.horizontal(|ui| {
+                                        if self.growth {
+                                            self.growth_controls(ui);
+                                        } else {
+                                            self.extension_controls(ui, program);
+                                        }
+                                    });
+                                });
+                        },
                     );
-                    ui.horizontal(|ui| {
-                        ui.label("Seed");
-                        ui.add(egui::DragValue::new(&mut self.seed));
-                        ui.label("Steps");
-                        ui.add(egui::DragValue::new(&mut self.steps).range(1..=32));
-                        if ui
-                            .add_enabled(editable, egui::Button::new("Grow"))
-                            .clicked()
-                        {
+                    if !self.message.is_empty() {
+                        button(ui, Icon::Message, false, &self.message);
+                    }
+                    let help = if !editable {
+                        "Preview only: open an authored .road file"
+                    } else if self.growth {
+                        "Grow network"
+                    } else {
+                        "Place extension · Enter"
+                    };
+                    let enabled = editable && (self.growth || self.selected().is_some());
+                    let apply = ui
+                        .add_enabled_ui(enabled, |ui| button(ui, Icon::Apply, true, help))
+                        .inner;
+                    if (apply.clicked() || enter) && enabled {
+                        apply.surrender_focus();
+                        if self.growth {
                             let count = expansion::grow_with_options(
                                 program,
                                 self.seed,
@@ -352,136 +363,179 @@ impl Picker {
                             );
                             self.message = format!("Grew {count} steps; save to keep the result.");
                             self.refresh(program);
+                        } else {
+                            self.accept(program);
                         }
-                    });
+                    }
+                    if button(ui, Icon::Close, false, "Done · Esc").clicked() {
+                        self.open = false;
+                        ctx.request_repaint();
+                    }
                 });
-                ui.label(&self.message);
             });
-        self.open = open;
+        self.reveal_selected = false;
+        self.keyboard_focus = ctx.memory(|m| m.focused());
         *program != before
     }
-    fn canvas(&mut self, ui: &mut egui::Ui, program: &Program) {
-        let projection = self
-            .projection
-            .as_ref()
-            .expect("picker refreshed before painting");
-        let (rect, response) = ui.allocate_exact_size(
-            egui::vec2(ui.available_width(), 320.),
-            egui::Sense::click_and_drag(),
-        );
-        let points: Vec<_> = projection
-            .segments
-            .iter()
-            .flat_map(|s| [s.start, s.end])
-            .chain(self.ends.iter().map(|end| end.point))
-            .chain(
-                self.proposals
-                    .iter()
-                    .flat_map(|p| p.ghosts.iter().flat_map(|s| [s.start, s.end])),
-            )
-            .collect();
-        if points.is_empty() {
-            ui.painter().text(
-                rect.center(),
-                egui::Align2::CENTER_CENTER,
-                "Place a road or open the expansion seed map",
-                egui::FontId::proportional(14.),
-                ui.visuals().text_color(),
-            );
-            return;
+    fn extension_controls(&mut self, ui: &mut egui::Ui, program: &Program) {
+        let previous = button(ui, Icon::Previous, false, "Previous open end");
+        if previous.clicked() {
+            self.step_end(program, true);
+            previous.surrender_focus();
         }
-        let min = WorldPoint {
-            x: points.iter().map(|p| p.x).fold(f32::INFINITY, f32::min),
-            y: points.iter().map(|p| p.y).fold(f32::INFINITY, f32::min),
+        let label = match self.end {
+            Some(i) => format!("Open end {} / {}", i + 1, self.ends.len()),
+            None => format!("{} open ends", self.ends.len()),
         };
-        let max = WorldPoint {
-            x: points.iter().map(|p| p.x).fold(f32::NEG_INFINITY, f32::max),
-            y: points.iter().map(|p| p.y).fold(f32::NEG_INFINITY, f32::max),
-        };
-        let scale = ((rect.width() - 32.) / (max.x - min.x).max(0.1))
-            .min((rect.height() - 32.) / (max.y - min.y).max(0.1))
-            * self.zoom;
-        let center = WorldPoint {
-            x: (min.x + max.x) / 2.,
-            y: (min.y + max.y) / 2.,
-        };
-        let screen = |p: WorldPoint| {
-            rect.center()
-                + self.pan
-                + egui::vec2((p.x - center.x) * scale, -(p.y - center.y) * scale)
-        };
-        let painter = ui.painter_at(rect);
-        painter.rect_filled(rect, 4., ui.visuals().extreme_bg_color);
-        for segment in &projection.segments {
-            let line = (0..=32)
-                .map(|i| screen(segment.point_at(i as f32 / 32.)))
-                .collect();
-            painter.add(egui::Shape::line(
-                line,
-                egui::Stroke::new(2., ui.visuals().text_color().gamma_multiply(0.45)),
-            ));
+        let endpoint = button(ui, Icon::End, false, &label);
+        if endpoint.clicked() {
+            self.step_end(program, false);
+            endpoint.surrender_focus();
         }
-        let click = response
-            .clicked()
-            .then(|| response.interact_pointer_pos())
-            .flatten();
-        let mut ghost_hit = None;
-        let mut hit_distance = 7.;
-        for (index, proposal) in self.proposals.iter().enumerate() {
-            let color = if index == self.selected {
-                ui.visuals().selection.stroke.color
-            } else {
-                ui.visuals().weak_text_color().gamma_multiply(0.35)
-            };
-            for ghost in &proposal.ghosts {
-                for i in 0..32 {
-                    let a = screen(ghost.point_at(i as f32 / 32.));
-                    let b = screen(ghost.point_at((i + 1) as f32 / 32.));
-                    if index == self.selected || i % 2 == 0 {
-                        painter.line_segment(
-                            [a, b],
-                            egui::Stroke::new(if index == self.selected { 4. } else { 1. }, color),
-                        );
-                    }
-                    if let Some(p) = click {
-                        let distance = screen_distance(p, a, b);
-                        if distance < hit_distance {
-                            hit_distance = distance;
-                            ghost_hit = Some(index);
-                        }
-                    }
-                }
+        let next = button(ui, Icon::Next, false, "Next open end");
+        if next.clicked() {
+            self.step_end(program, false);
+            next.surrender_focus();
+        }
+        ui.separator();
+        let mut pick = None;
+        for (i, proposal) in self.proposals.iter().enumerate() {
+            let response = ui
+                .push_id(proposal.kind.label(), |ui| {
+                    button(
+                        ui,
+                        Icon::Proposal(proposal.kind),
+                        self.selected == i,
+                        proposal.kind.label(),
+                    )
+                })
+                .inner;
+            if self.reveal_selected && self.selected == i {
+                response.scroll_to_me(Some(egui::Align::Center));
+            }
+            if response.clicked() {
+                pick = Some(i);
+                response.surrender_focus();
             }
         }
-        let mut end_hit = None;
-        for (i, end) in self.ends.iter().enumerate() {
-            let p = screen(end.point);
-            painter.circle_filled(
-                p,
-                5.,
-                if self.end == Some(i) {
-                    ui.visuals().selection.stroke.color
-                } else {
-                    ui.visuals().warn_fg_color
-                },
-            );
-            if click.is_some_and(|c| c.distance(p) < 12.) {
-                end_hit = Some(i);
-            }
-        }
-        if let Some(i) = end_hit {
-            self.choose_end(program, i);
-        } else if let Some(i) = ghost_hit {
+        if let Some(i) = pick {
             self.selected = i;
         }
-        if response.dragged() {
-            self.pan += response.drag_delta();
+        let kind = self.selected().map(|p| p.kind);
+        let Some(kind) = kind else {
+            return;
+        };
+        if kind == expansion::Kind::Stop {
+            return;
         }
-        if response.hovered() {
-            let scroll = ui.input(|i| i.smooth_scroll_delta.y);
-            self.zoom = (self.zoom * (scroll * 0.002).exp()).clamp(0.25, 20.);
+        ui.separator();
+        let mut changed = ui
+            .add(
+                egui::DragValue::new(&mut self.length)
+                    .range(0.05..=100.)
+                    .speed(0.05)
+                    .suffix(" u"),
+            )
+            .on_hover_text("Length in map units")
+            .changed();
+        match kind {
+            expansion::Kind::CurveLeft | expansion::Kind::CurveRight => {
+                changed |= ui
+                    .add(
+                        egui::DragValue::new(&mut self.curve_degrees)
+                            .range(5.0..=145.0)
+                            .speed(1.)
+                            .suffix("°"),
+                    )
+                    .on_hover_text("Curve angle")
+                    .changed();
+            }
+            expansion::Kind::Rise | expansion::Kind::Fall => {
+                let mut percent = self.grade * 100.;
+                if ui
+                    .add(
+                        egui::DragValue::new(&mut percent)
+                            .range(0.5..=10.)
+                            .speed(0.5)
+                            .suffix("%"),
+                    )
+                    .on_hover_text("Grade")
+                    .changed()
+                {
+                    self.grade = percent / 100.;
+                    changed = true;
+                }
+            }
+            expansion::Kind::AddElement | expansion::Kind::RemoveElement => {
+                let kinds = element_kinds();
+                let index = kinds
+                    .iter()
+                    .position(|kind| *kind == self.element)
+                    .unwrap_or(0);
+                let previous = button(ui, Icon::Previous, false, "Previous element");
+                if previous.clicked() {
+                    self.element = kinds[(index + kinds.len() - 1) % kinds.len()];
+                    changed = true;
+                    previous.surrender_focus();
+                }
+                ui.label(egui::RichText::new(element_label(self.element)).size(11.));
+                let next = button(ui, Icon::Next, false, "Next element");
+                if next.clicked() {
+                    self.element = kinds[(index + 1) % kinds.len()];
+                    changed = true;
+                    next.surrender_focus();
+                }
+            }
+            _ => {}
+        }
+        if changed {
+            if let Some(index) = self.end {
+                self.choose_end(program, index);
+                self.selected = self
+                    .proposals
+                    .iter()
+                    .position(|p| p.kind == kind)
+                    .unwrap_or(0);
+            }
         }
     }
+    fn growth_controls(&mut self, ui: &mut egui::Ui) {
+        if button(ui, Icon::Previous, false, "Back to extensions").clicked() {
+            self.growth = false;
+        }
+        ui.label(egui::RichText::new("Seed").size(11.));
+        ui.add(egui::DragValue::new(&mut self.seed));
+        ui.label(egui::RichText::new("Steps").size(11.));
+        ui.add(egui::DragValue::new(&mut self.steps).range(1..=32));
+        ui.add(
+            egui::DragValue::new(&mut self.length)
+                .range(0.05..=100.)
+                .speed(0.05)
+                .suffix(" u"),
+        )
+        .on_hover_text("Length in map units");
+    }
+}
+fn element_kinds() -> [crate::RoadElementKind; 16] {
+    use crate::RoadElementKind::*;
+    [
+        CarLane,
+        Sidewalk,
+        ParkingLane,
+        BikeLane,
+        BusLane,
+        BusStop,
+        Middle,
+        Verge,
+        Barrier,
+        BuildingEdge,
+        TrainTrack,
+        TramTrack,
+        SubwayTrack,
+        Runway,
+        Taxiway,
+        Apron,
+    ]
 }
 fn screen_distance(p: egui::Pos2, a: egui::Pos2, b: egui::Pos2) -> f32 {
     let v = b - a;
@@ -519,6 +573,7 @@ fn element_label(kind: crate::RoadElementKind) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::map;
     fn frame(
         picker: &mut Picker,
         ctx: &egui::Context,
@@ -536,10 +591,11 @@ mod tests {
                 ..Default::default()
             },
             |ui| {
-                picker.world_overlay(ui.ctx(), program, |p| {
+                picker.show(ui, program, editable);
+                let viewport = ui.available_rect_before_wrap();
+                picker.world_overlay(ui.ctx(), program, viewport, |p| {
                     Some(egui::pos2(900. + p[0] * 80., 200. - p[1] * 80.))
                 });
-                picker.show(ui.ctx(), program, editable);
             },
         );
         output.textures_delta.clear();
@@ -555,6 +611,74 @@ mod tests {
                 modifiers: egui::Modifiers::NONE,
             })
             .collect()
+    }
+    #[test]
+    fn fringe_reserves_exactly_42_points_and_never_picks_a_covered_end() {
+        for width in [320., 640., 1280., 2048.] {
+            let mut program =
+                crate::parse("road street: carlane carlane; end a=street(0,0,1,0);").unwrap();
+            let mut picker = Picker::default();
+            picker.start();
+            let ctx = egui::Context::default();
+            let bounds = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(width, 800.));
+            for selected in [false, true] {
+                if selected {
+                    picker.choose_end(&program, 1);
+                }
+                let mut output = ctx.run_ui(
+                    egui::RawInput {
+                        screen_rect: Some(bounds),
+                        ..Default::default()
+                    },
+                    |ui| {
+                        picker.show(ui, &mut program, true);
+                        let viewport = ui.available_rect_before_wrap();
+                        assert_eq!(
+                            viewport.bottom(),
+                            758.,
+                            "width={width}, selected={selected}"
+                        );
+                        assert_eq!(viewport, picker.viewport_rect(bounds));
+                    },
+                );
+                output.textures_delta.clear();
+            }
+            picker.open = false;
+            assert_eq!(picker.viewport_rect(bounds), bounds);
+        }
+    }
+    #[test]
+    fn focused_numeric_edit_cannot_apply_or_cycle_a_proposal() {
+        let mut program =
+            crate::parse("road street: carlane carlane; end street(0,0,1,0);").unwrap();
+        let before = program.clone();
+        let mut picker = Picker::default();
+        picker.start();
+        picker.refresh(&program);
+        picker.choose_end(&program, 1);
+        let ctx = egui::Context::default();
+        let mut text = String::from("1.0");
+        let id = egui::Id::new("focused-geometry-value");
+        for events in [vec![], key(egui::Key::Enter), key(egui::Key::Tab)] {
+            ctx.memory_mut(|m| m.request_focus(id));
+            let mut output = ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(1280., 800.),
+                    )),
+                    events,
+                    ..Default::default()
+                },
+                |ui| {
+                    ui.add(egui::TextEdit::singleline(&mut text).id(id));
+                    picker.show(ui, &mut program, true);
+                },
+            );
+            output.textures_delta.clear();
+            assert_eq!(program, before);
+            assert_eq!(picker.selected().unwrap().kind, expansion::Kind::Continue);
+        }
     }
     #[test]
     fn world_click_tab_and_enter_accept_ghost_without_preview_edits() {
@@ -578,9 +702,9 @@ mod tests {
         frame(&mut picker, &ctx, &mut program, events, true);
         assert!(!picker.proposals.is_empty());
         assert_eq!(program, before);
-        assert_eq!(picker.selected().unwrap().kind, expansion::Kind::Stop);
-        frame(&mut picker, &ctx, &mut program, key(egui::Key::Tab), true);
         assert_eq!(picker.selected().unwrap().kind, expansion::Kind::Continue);
+        frame(&mut picker, &ctx, &mut program, key(egui::Key::Tab), true);
+        assert_eq!(picker.selected().unwrap().kind, expansion::Kind::CurveLeft);
         frame(
             &mut picker,
             &ctx,

@@ -103,6 +103,10 @@ fn block_on<F: Future>(future: F) -> F::Output {
 }
 
 fn render_test_callback(callback: SceneCallback) -> Option<Vec<u8>> {
+    render_test_callback_at(callback, 128, 128)
+}
+fn render_test_callback_at(callback: SceneCallback, width: u32, height: u32) -> Option<Vec<u8>> {
+    assert_eq!(width % 64, 0);
     let instance = wgpu::Instance::default();
     let Ok(adapter) = block_on(instance.request_adapter(&wgpu::RequestAdapterOptions::default()))
     else {
@@ -124,7 +128,7 @@ fn render_test_callback(callback: SceneCallback) -> Option<Vec<u8>> {
         &device,
         &queue,
         &egui_wgpu::ScreenDescriptor {
-            size_in_pixels: [128, 128],
+            size_in_pixels: [width, height],
             pixels_per_point: 1.0,
         },
         &mut encoder,
@@ -133,8 +137,8 @@ fn render_test_callback(callback: SceneCallback) -> Option<Vec<u8>> {
     let output = device.create_texture(&wgpu::TextureDescriptor {
         label: Some("scene test output"),
         size: wgpu::Extent3d {
-            width: 128,
-            height: 128,
+            width,
+            height,
             depth_or_array_layers: 1,
         },
         mip_level_count: 1,
@@ -163,13 +167,13 @@ fn render_test_callback(callback: SceneCallback) -> Option<Vec<u8>> {
             multiview_mask: None,
         });
         let mut pass = pass.forget_lifetime();
-        pass.set_viewport(0.0, 0.0, 128.0, 128.0, 0.0, 1.0);
+        pass.set_viewport(0.0, 0.0, width as f32, height as f32, 0.0, 1.0);
         callback.paint(
             egui::epaint::PaintCallbackInfo {
                 viewport: callback.rect,
                 clip_rect: callback.rect,
                 pixels_per_point: 1.0,
-                screen_size_px: [128, 128],
+                screen_size_px: [width, height],
             },
             &mut pass,
             &resources,
@@ -177,7 +181,7 @@ fn render_test_callback(callback: SceneCallback) -> Option<Vec<u8>> {
     }
     let readback = device.create_buffer(&wgpu::BufferDescriptor {
         label: Some("scene test readback"),
-        size: 128 * 128 * 4,
+        size: u64::from(width) * u64::from(height) * 4,
         usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
         mapped_at_creation: false,
     });
@@ -192,13 +196,13 @@ fn render_test_callback(callback: SceneCallback) -> Option<Vec<u8>> {
             buffer: &readback,
             layout: wgpu::TexelCopyBufferLayout {
                 offset: 0,
-                bytes_per_row: Some(128 * 4),
-                rows_per_image: Some(128),
+                bytes_per_row: Some(width * 4),
+                rows_per_image: Some(height),
             },
         },
         wgpu::Extent3d {
-            width: 128,
-            height: 128,
+            width,
+            height,
             depth_or_array_layers: 1,
         },
     );
@@ -530,11 +534,19 @@ fn render_starter_scene_pngs() {
             ),
         ];
     }
+    if std::env::var_os("OPENCITY_QA_BUILDINGS").is_some() {
+        views.retain(|v| {
+            v.0.starts_with("iso-family-")
+                || matches!(v.0, "top-full" | "iso-west-center" | "iso-east-center")
+        });
+    }
     for (name, camera, target, zoom) in views {
         let rect =
             egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(WIDTH as f32, HEIGHT as f32));
         let pan = if camera == CameraView::Top {
             egui::vec2(-target.x * zoom, target.y * zoom)
+        } else if name.starts_with("iso-family-") {
+            egui::vec2(0.0, 230.0)
         } else if qa_library && camera == CameraView::Isometric {
             egui::vec2(0.0, 300.0)
         } else {
@@ -769,3 +781,6 @@ mod default_map_views;
 
 #[path = "surface_gpu_tests.rs"]
 mod surface_gpu_tests;
+
+#[path = "architecture_gpu_tests.rs"]
+mod architecture_gpu_tests;

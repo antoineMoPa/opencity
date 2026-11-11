@@ -145,12 +145,12 @@ fn every_enclosed_city_block_has_nine_lots_and_a_taller_center() {
         assert!(
             stories
                 .iter()
-                .all(|n| (*n - n.round()).abs() < 0.001 && *n >= 0.999 && *n <= 10.001),
-            "{city} buildings should use complete stories with modest center peaks"
+                .all(|n| (*n - n.round()).abs() < 0.001 && *n >= 0.999 && *n <= 30.001),
+            "{city} buildings should use complete stories with bounded central towers"
         );
         assert!(
-            stories.iter().filter(|n| **n <= 4.001).count() as f32 / stories.len() as f32 >= 0.80,
-            "{city} should be dominated by 1–4 story buildings"
+            stories.iter().filter(|n| **n <= 6.001).count() as f32 / stories.len() as f32 >= 0.80,
+            "{city} should be dominated by 1–6 story buildings"
         );
         let distinct: std::collections::BTreeSet<_> =
             stories.iter().map(|n| n.round() as u32).collect();
@@ -164,6 +164,13 @@ fn every_enclosed_city_block_has_nine_lots_and_a_taller_center() {
         {
             let floors = building.height.unwrap() / building.building_style.unwrap().floor_height;
             if floors > 8.001 {
+                if let Some(index) = building.building_style.unwrap().architecture.downtown_index {
+                    assert!(index > 0.10, "towers need a developed district");
+                    if floors >= 18. {
+                        assert!(index > 0.45);
+                    }
+                    continue;
+                }
                 let b = bounds(building);
                 let distance =
                     ((b[0] + b[2]) * 0.5 - center.x).hypot((b[1] + b[3]) * 0.5 - center.y);
