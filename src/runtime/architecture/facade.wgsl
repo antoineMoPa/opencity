@@ -5,6 +5,15 @@ fn architecture_hash(p:vec2<f32>)->f32 {
     var h=q.x*374761393u+q.y*668265263u;h=(h^(h>>13u))*1274126177u;
     return f32(h^(h>>16u))/4294967295.0;
 }
+fn architecture_glass_tint(tint_id:u32)->vec3<f32> {
+    // Subtle material absorption; the reflected environment supplies the sky hue.
+    switch tint_id {
+        case 1u: {return vec3<f32>(0.60,0.74,0.70);}
+        case 2u: {return vec3<f32>(0.78,0.80,0.80);}
+        case 3u: {return vec3<f32>(0.34,0.37,0.38);}
+        default: {return vec3<f32>(0.62,0.72,0.79);}
+    }
+}
 fn architecture_sky(ray:vec3<f32>,day:f32)->vec3<f32> {
     let h=clamp(ray.z*0.75+0.35,0.0,1.0);
     var sky=mix(mix(vec3<f32>(0.03,0.06,0.12),vec3<f32>(0.68,0.78,0.83),day),
@@ -73,10 +82,7 @@ fn architecture_facade(uv:vec2<f32>,footprint:vec2<f32>,packed:f32,
     if glazing {
         let view=eye/max(length(eye),0.00001);
         let grazing=pow(1.0-clamp(dot(n,view),0.0,1.0),5.0);
-        var tint=vec3<f32>(0.24,0.58,0.94);
-        if tint_id==1u {tint=vec3<f32>(0.30,0.75,0.74);}
-        if tint_id==2u {tint=vec3<f32>(0.72,0.79,0.84);}
-        if tint_id==3u {tint=vec3<f32>(0.29,0.38,0.43);}
+        let tint=architecture_glass_tint(tint_id);
         return mix(base*lighting*0.20,environment*tint,0.45+grazing*0.4);
     }
     if family==6u {
@@ -129,14 +135,11 @@ fn architecture_facade(uv:vec2<f32>,footprint:vec2<f32>,packed:f32,
     if max(aa.x,aa.y)<0.8 {
         interior=architecture_room(room_uv,0.96*(x1-x0)/(y1-y0),room_seed,n,eye,occupied,day);
     }
-    var tint=vec3<f32>(0.24,0.58,0.94);
-    if tint_id==1u {tint=vec3<f32>(0.30,0.75,0.74);}
-    if tint_id==2u {tint=vec3<f32>(0.72,0.79,0.84);}
-    if tint_id==3u {tint=vec3<f32>(0.29,0.38,0.43);}
+    let tint=architecture_glass_tint(tint_id);
     let view=eye/max(length(eye),0.00001);
     let grazing=pow(1.0-clamp(dot(n,view),0.0,1.0),5.0);
     let reflection=clamp(mix(0.09,0.48,day)*select(0.45,1.0,family==0u||family==2u)+grazing*0.42,0.0,0.94);
-    var glass=mix(interior*vec3<f32>(0.45,0.63,0.66),environment*tint,reflection);
+    var glass=mix(interior*vec3<f32>(0.76,0.78,0.76),environment*tint,reflection);
     var mullion=1.0-smoothstep(0.006,0.006+aa.x,abs(q.x-0.5));
     if old {mullion=max(mullion,1.0-smoothstep(0.009,0.009+aa.y,abs(q.y-(y0+y1)*0.5)));}
     glass=mix(glass,select(vec3<f32>(0.12,0.19,0.24),base*0.22,old),mullion*0.75);

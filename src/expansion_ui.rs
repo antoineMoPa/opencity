@@ -6,6 +6,13 @@ use crate::{
 mod icons;
 use icons::{button, Icon};
 
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct FollowTarget {
+    pub position: [f32; 3],
+    pub heading: f32,
+    pub length: f32,
+}
+
 pub struct Picker {
     pub open: bool,
     snapshot: Option<Program>,
@@ -23,6 +30,7 @@ pub struct Picker {
     growth: bool,
     reveal_selected: bool,
     keyboard_focus: Option<egui::Id>,
+    follow_target: Option<FollowTarget>,
 }
 impl Default for Picker {
     fn default() -> Self {
@@ -43,6 +51,7 @@ impl Default for Picker {
             growth: false,
             reveal_selected: false,
             keyboard_focus: None,
+            follow_target: None,
         }
     }
 }
@@ -94,6 +103,7 @@ impl Picker {
         }
         if let Some(i) = chosen {
             self.choose_end(program, i);
+            ctx.request_repaint();
         }
         let mut hit = None;
         let mut hit_distance = 7.;
@@ -177,6 +187,8 @@ impl Picker {
         }
         if let Some(i) = hit {
             self.selected = i;
+            self.reveal_selected = true;
+            ctx.request_repaint();
         }
     }
     pub fn refresh(&mut self, program: &Program) {
@@ -187,6 +199,7 @@ impl Picker {
         self.proposals.clear();
         self.end = None;
         self.selected = 0;
+        self.follow_target = None;
         self.snapshot = Some(program.clone());
     }
     pub fn start(&mut self) {
@@ -240,13 +253,36 @@ impl Picker {
     pub fn selected(&self) -> Option<&Proposal> {
         self.proposals.get(self.selected)
     }
+    /// Consumers move their camera only after accepting the edit (and saving it, if needed).
+    pub fn take_follow_target(&mut self) -> Option<FollowTarget> {
+        self.follow_target.take()
+    }
     fn accept(&mut self, program: &mut Program) {
         if let Some(p) = self.selected() {
-            self.message = match p.apply(program) {
-                Ok(()) => format!("Applied {}. Save the map to keep it.", p.kind.label()),
-                Err(e) => e,
-            };
+            let next = p.ghosts.last().map(|ghost| expansion::Anchor::Road {
+                source: ghost.source,
+                at_end: p.end.at_end,
+            });
+            if let Err(error) = p.apply(program) {
+                self.message = error;
+                return;
+            }
+            self.message = format!("Applied {}. Save the map to keep it.", p.kind.label());
             self.refresh(program);
+            if let Some(index) = self
+                .ends
+                .iter()
+                .position(|end| Some(&end.anchor) == next.as_ref())
+            {
+                let end = &self.ends[index];
+                let target = FollowTarget {
+                    position: [end.point.x, end.point.y, end.height],
+                    heading: end.heading,
+                    length: self.length,
+                };
+                self.choose_end(program, index);
+                self.follow_target = Some(target);
+            }
         }
     }
     /// Reserves a thin strip in the caller's root UI before its canvas is laid out.
@@ -281,6 +317,7 @@ impl Picker {
                     ctx.input_mut(|i| i.consume_key(egui::Modifiers::SHIFT, egui::Key::Tab));
                 let next = ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Tab));
                 if previous || next {
+                    ctx.memory_mut(|m| m.move_focus(egui::FocusDirection::None));
                     self.selected = (self.selected
                         + if previous {
                             self.proposals.len() - 1
@@ -328,6 +365,7 @@ impl Picker {
                                             self.growth_controls(ui);
                                         } else {
                                             self.extension_controls(ui, program);
+                                            self.reveal_selected = false;
                                         }
                                     });
                                 });
@@ -373,7 +411,6 @@ impl Picker {
                     }
                 });
             });
-        self.reveal_selected = false;
         self.keyboard_focus = ctx.memory(|m| m.focused());
         *program != before
     }
@@ -613,7 +650,7 @@ mod tests {
             .collect()
     }
     #[test]
-    fn fringe_reserves_exactly_42_points_and_never_picks_a_covered_end() {
+    fn fringe_reserves_exactly_42_points_at_each_width() {
         for width in [320., 640., 1280., 2048.] {
             let mut program =
                 crate::parse("road street: carlane carlane; end a=street(0,0,1,0);").unwrap();
@@ -656,28 +693,32 @@ mod tests {
         picker.start();
         picker.refresh(&program);
         picker.choose_end(&program, 1);
-        let ctx = egui::Context::default();
-        let mut text = String::from("1.0");
-        let id = egui::Id::new("focused-geometry-value");
-        for events in [vec![], key(egui::Key::Enter), key(egui::Key::Tab)] {
-            ctx.memory_mut(|m| m.request_focus(id));
-            let mut output = ctx.run_ui(
-                egui::RawInput {
-                    screen_rect: Some(egui::Rect::from_min_size(
-                        egui::Pos2::ZERO,
-                        egui::vec2(1280., 800.),
-                    )),
-                    events,
-                    ..Default::default()
-                },
-                |ui| {
-                    ui.add(egui::TextEdit::singleline(&mut text).id(id));
-                    picker.show(ui, &mut program, true);
-                },
-            );
-            output.textures_delta.clear();
-            assert_eq!(program, before);
-            assert_eq!(picker.selected().unwrap().kind, expansion::Kind::Continue);
+        for trigger in [egui::Key::Enter, egui::Key::Tab] {
+            let ctx = egui::Context::default();
+            let mut text = String::from("1.0");
+            let id = egui::Id::new("focused-geometry-value");
+            for (warmup, events) in [(true, vec![]), (false, key(trigger))] {
+                let mut output = ctx.run_ui(
+                    egui::RawInput {
+                        screen_rect: Some(egui::Rect::from_min_size(
+                            egui::Pos2::ZERO,
+                            egui::vec2(1280., 800.),
+                        )),
+                        events,
+                        ..Default::default()
+                    },
+                    |ui| {
+                        let edit = ui.add(egui::TextEdit::singleline(&mut text).id(id));
+                        if warmup {
+                            edit.request_focus();
+                        }
+                        picker.show(ui, &mut program, true);
+                    },
+                );
+                output.textures_delta.clear();
+                assert_eq!(program, before);
+                assert_eq!(picker.selected().unwrap().kind, expansion::Kind::Continue);
+            }
         }
     }
     #[test]
@@ -713,9 +754,18 @@ mod tests {
             false,
         );
         assert_eq!(program, before);
+        assert_eq!(picker.selected().unwrap().kind, expansion::Kind::CurveLeft);
         frame(&mut picker, &ctx, &mut program, key(egui::Key::Enter), true);
         assert_eq!(map::project(&program).segments.len(), 2);
-        assert!(picker.proposals.is_empty());
+        assert!(
+            picker.selected().is_some(),
+            "end={:?}, ends={:?}, follow={:?}",
+            picker.end,
+            picker.ends,
+            picker.follow_target
+        );
+        assert_eq!(picker.selected().unwrap().kind, expansion::Kind::Continue);
+        assert!(picker.take_follow_target().is_some());
     }
     #[test]
     fn intersection_only_seed_exposes_four_pickable_ends() {
@@ -732,3 +782,6 @@ mod tests {
             .any(|p| p.kind == expansion::Kind::Continue));
     }
 }
+
+#[cfg(test)]
+mod follow_tests;

@@ -13,6 +13,8 @@ mod scaffold_frontage;
 mod scaffold_residential;
 pub use building_frontage::BuildingFrontage;
 mod mesh;
+#[cfg(test)]
+mod surface_tests;
 mod svg;
 use crate::{
     heightmap::{ElevationMap, ElevationMapSpec},
@@ -179,6 +181,8 @@ pub struct City {
     pub bounds: [f32; 4],
     triangles: Vec<Triangle>,
     cells: HashMap<(i32, i32), Vec<usize>>,
+    // Tire/foot support must not traverse dense render-only facade geometry.
+    support_cells: HashMap<(i32, i32), Vec<usize>>,
     barrier_cells: HashMap<(i32, i32), Vec<usize>>,
     building_cells: HashMap<(i32, i32), Vec<usize>>,
     building_volumes: HashMap<usize, Vec<architecture::BuildingVolume>>,
@@ -238,6 +242,7 @@ impl City {
             bounds: [-1., -1., 1., 1.],
             triangles: Vec::new(),
             cells: HashMap::new(),
+            support_cells: HashMap::new(),
             barrier_cells: HashMap::new(),
             building_cells: HashMap::new(),
             building_volumes: HashMap::new(),
@@ -363,7 +368,12 @@ impl City {
                 }
             })
             .filter(|s| s.height <= ceiling);
-        for &i in self.cells.get(&geometry::cell(point)).into_iter().flatten() {
+        for &i in self
+            .support_cells
+            .get(&geometry::cell(point))
+            .into_iter()
+            .flatten()
+        {
             let t = &self.triangles[i];
             if matches!(
                 t.kind,

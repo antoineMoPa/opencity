@@ -245,7 +245,11 @@ fn shade_surface(v:Output,front:bool,coverage:f32,surface:SurfaceData)->vec4<f32
         let lighting=vec3<f32>(mix(0.12,0.43,daylight))
             +camera.sun_color.rgb*direct*mix(0.15,0.85,daylight);
         let reflected=reflect(-view,n);
-        let environment=textureSampleLevel(sky_environment,sky_sampler,reflected,0.0).rgb;
+        let sky=textureSampleLevel(sky_environment,sky_sampler,reflected,0.0).rgb;
+        // Soften the clear-sky chroma on architectural glass while retaining
+        // directional reflections, brightness and warm light at sunset.
+        let sky_luminance=dot(sky,vec3<f32>(0.2126,0.7152,0.0722));
+        let environment=mix(vec3<f32>(sky_luminance),sky,0.30);
         lit=architecture_facade(v.fence_uv,surface.paving_footprint,v.surface.w,
             n,eye,base,environment,lighting,daylight,(kind>12.5&&kind<13.5),(kind>13.5));
     } else if kind>7.5&&kind<8.5&&v.surface.w>=16.0 {

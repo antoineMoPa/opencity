@@ -701,12 +701,24 @@ pub(super) fn compile(
         city.bounds = [-1., -1., 1., 1.];
     }
     for (i, t) in city.triangles.iter().enumerate() {
+        let supports = !matches!(
+            t.kind,
+            SurfaceKind::Building
+                | SurfaceKind::Prop
+                | SurfaceKind::Marking
+                | SurfaceKind::Facade
+                | SurfaceKind::Masonry
+                | SurfaceKind::Glazing
+        );
         let b = bounds(t.points.map(|p| [p[0], p[1]]));
         let a = cell([b[0], b[1]]);
         let z = cell([b[2], b[3]]);
         for x in a.0..=z.0 {
             for y in a.1..=z.1 {
                 city.cells.entry((x, y)).or_default().push(i);
+                if supports {
+                    city.support_cells.entry((x, y)).or_default().push(i);
+                }
             }
         }
     }

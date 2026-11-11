@@ -1,0 +1,15 @@
+elevation_map("terrain.png", -2, -2, 4, 4, -0.1, 0.2);
+water_level(0);
+ground = land(-1.5, -1.5, 1.5, -1.5, 1.5, 1.5, -1.5, 1.5);
+elevation(ground, 0.01);
+paved = concrete(-0.4, -0.4, 0.4, -0.4, 0.4, 0.4, -0.4, 0.4);
+elevation(paved, 0.02);
+road street: sidewalk carlane carlane sidewalk; end
+low = street(-1.5, 0, 1.5, 0);
+grade(low, 0.03, 0.09);
+high = street(0, -1.5, 0, 1.5);
+elevation(high, 0.4);
+bridge(high);
+tower_a = building(0.4, {material:glass, family:podium}, -0.4, 0.1, -0.1, 0.1, -0.1, 0.4, -0.4, 0.4);
+tower_b = building(0.3, {material:limestone, family:civic}, 0.1, 0.1, 0.4, 0.1, 0.4, 0.4, 0.1, 0.4);
+tower_c = building(0.5, {material:glass, family:concrete_frame}, -0.4, -0.4, -0.1, -0.4, -0.1, -0.1, -0.4, -0.1);

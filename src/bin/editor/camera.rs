@@ -305,3 +305,43 @@ impl RoadEditor {
             (self.orbit_elevation + step).clamp(MIN_ISO_ELEVATION, MAX_ISO_ELEVATION);
     }
 }
+
+impl RoadEditor {
+    pub(super) fn follow_expansion(&mut self, target: opencity::expansion_ui::FollowTarget) {
+        let rect = self
+            .map_rect
+            .unwrap_or_else(|| egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(800., 600.)));
+        let from = self
+            .camera_transition_matrix(rect)
+            .unwrap_or_else(|| self.camera_clip_matrix(rect));
+        let anchor = self.camera_visible_anchor();
+        let point = WorldPoint {
+            x: target.position[0],
+            y: target.position[1],
+        };
+        match self.camera_view {
+            CameraView::Top => {
+                self.map_pan = egui::vec2(-point.x * self.map_zoom, point.y * self.map_zoom);
+            }
+            CameraView::Isometric => {
+                self.orbit_target = point;
+                self.map_pan = egui::vec2(
+                    0.,
+                    target.position[2] * self.orbit_elevation.cos() * self.map_zoom,
+                );
+            }
+            CameraView::Vehicular => {
+                let behind = (target.length * 0.1).clamp(0.04, 0.15);
+                self.vehicle_position = WorldPoint {
+                    x: point.x - target.heading.cos() * behind,
+                    y: point.y - target.heading.sin() * behind,
+                };
+                self.vehicle_heading = target.heading;
+                self.vehicle_eye_height = target.position[2] + 0.035;
+                self.minimal.vehicle_initialized = true;
+            }
+        }
+        self.fit_scene_once = false;
+        self.start_camera_transition(from, anchor);
+    }
+}

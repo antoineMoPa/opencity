@@ -178,6 +178,10 @@ impl RoadEditor {
         self.minimal
             .expansion
             .show(&mut expansion_ui, &mut self.program, true);
+        if let Some(target) = self.minimal.expansion.take_follow_target() {
+            self.follow_expansion(target);
+            ctx.request_repaint();
+        }
         root.set_max_height(
             (expansion_ui.available_rect_before_wrap().bottom() - root.max_rect().top()).max(0.),
         );
