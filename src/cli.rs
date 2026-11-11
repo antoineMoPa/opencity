@@ -2,29 +2,15 @@
 use crate::{network, parse_road_file, Statement};
 use std::{ffi::OsString, path::PathBuf};
 
-#[cfg(all(feature = "geodata", not(target_arch = "wasm32")))]
-mod calibration;
-#[cfg(all(feature = "geodata", not(target_arch = "wasm32")))]
-mod geodata;
-
 pub const HELP: &str = "OpenCity — road and intersection tools
 
 USAGE:
   opencity intersection-svg INPUT.road --name NAME --output OUTPUT.svg [OPTIONS]
-  opencity intersection-png INPUT.road --name NAME --output OUTPUT.png [OPTIONS]
-  opencity fetch-street --name NAME --bbox W,S,E,N --output STREET.geojson
-  opencity lookup-place --name NAME --bbox W,S,E,N --output PLACES.geojson
-  opencity map-coordinates --calibration MAP.json --lonlat LONGITUDE,LATITUDE
-  opencity map-coordinates --calibration MAP.json --input SOURCE.geojson --output WORLD.json
   editor [INPUT.road]
   editor mcp
 
 COMMANDS:
-  intersection-svg   Export a standalone intersection SVG
-  intersection-png   Export a standalone intersection PNG
-  fetch-street       Fetch one named street's full coordinate detail inside a crop
-  lookup-place       Look up named places or a structured address inside a crop
-  map-coordinates    Map WGS84 coordinates into a calibrated game map, or back
+  intersection-svg   Export an intersection as SVG
   mcp                Run the editor automation bridge (editor executable)
 
 OPTIONS:
@@ -36,7 +22,7 @@ OPTIONS:
   --appearance-only Hide all path, movement, and port overlays
   -h, --help        Show this help without opening a window
 
-Both export commands also work through the editor executable.
+SVG export also works through the editor executable.
 Component types: intersection, interchange, road_segment.
 ";
 
@@ -47,23 +33,7 @@ pub fn run(args: Vec<OsString>) -> Option<Result<(), String>> {
         println!("{HELP}");
         return Some(Ok(()));
     }
-    if first == "map-coordinates" {
-        #[cfg(all(feature = "geodata", not(target_arch = "wasm32")))]
-        return Some(calibration::run(&args));
-        #[cfg(not(all(feature = "geodata", not(target_arch = "wasm32"))))]
-        return Some(Err(
-            "Coordinate mapping requires a native build with --features geodata".into(),
-        ));
-    }
-    if matches!(first, "fetch-street" | "lookup-place") {
-        #[cfg(all(feature = "geodata", not(target_arch = "wasm32")))]
-        return Some(geodata::run(&args));
-        #[cfg(not(all(feature = "geodata", not(target_arch = "wasm32"))))]
-        return Some(Err(
-            "Geographic lookup requires a native build with --features geodata".into(),
-        ));
-    }
-    if !matches!(first, "intersection-svg" | "intersection-png") {
+    if first != "intersection-svg" {
         return None;
     }
     if args.iter().any(|a| a == "--help" || a == "-h") {
@@ -174,34 +144,11 @@ fn export(args: &[OsString]) -> Result<(), String> {
     };
     let svg = network::to_svg_with_options(&geometry, &title, size, show_paths, show_ports);
     // Render before touching the destination, so invalid exports leave it intact.
-    let bytes = if args[0] == "intersection-svg" {
-        svg.into_bytes()
-    } else {
-        render_png(&svg)?
-    };
+    let bytes = svg.into_bytes();
     if let Some(parent) = output.parent().filter(|p| !p.as_os_str().is_empty()) {
         std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
     }
     std::fs::write(&output, bytes).map_err(|e| e.to_string())?;
     println!("Wrote {}", output.display());
     Ok(())
-}
-
-#[cfg(feature = "intersection-export")]
-pub fn render_png(svg: &str) -> Result<Vec<u8>, String> {
-    let tree = resvg::usvg::Tree::from_str(svg, &resvg::usvg::Options::default())
-        .map_err(|e| e.to_string())?;
-    let size = tree.size().to_int_size();
-    let mut pixels = resvg::tiny_skia::Pixmap::new(size.width(), size.height())
-        .ok_or("could not allocate image")?;
-    resvg::render(
-        &tree,
-        resvg::tiny_skia::Transform::identity(),
-        &mut pixels.as_mut(),
-    );
-    pixels.encode_png().map_err(|e| e.to_string())
-}
-#[cfg(not(feature = "intersection-export"))]
-pub fn render_png(_svg: &str) -> Result<Vec<u8>, String> {
-    Err("PNG export requires the intersection-export Cargo feature".into())
 }

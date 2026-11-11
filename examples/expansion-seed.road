@@ -1,0 +1,10 @@
+# A single intersection, ready for Expand road network and seeded auto-growth.
+road seed_street:
+    sidewalk carlane middle carlane sidewalk;
+end
+center = map_point(0, 0);
+north = map_point(0, 0.15);
+south = map_point(0, -0.15);
+east = map_point(0.15, 0);
+west = map_point(-0.15, 0);
+intersection4(center, seed_street, north, north, east, east, south, south, west, west);

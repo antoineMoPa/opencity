@@ -81,13 +81,31 @@ pub(super) fn toggle_theme(ctx: &egui::Context) {
     ctx.request_repaint();
 }
 
-pub(super) fn empty_profile_icon(tint: Color32) -> egui::Image<'static> {
-    egui::Image::from_bytes(
-        "bytes://lucide/box.svg",
-        include_bytes!("../../../assets/lucide/box.svg"),
-    )
-    .fit_to_exact_size(egui::vec2(16.0, 16.0))
-    .tint(tint)
+pub(super) fn empty_profile_icon(tint: Color32) -> impl egui::Widget {
+    move |ui: &mut egui::Ui| {
+        let (rect, response) = ui.allocate_exact_size(egui::vec2(16.0, 16.0), egui::Sense::hover());
+        let point = |x, y| rect.min + egui::vec2(x, y) * (16.0 / 24.0);
+        let stroke = egui::Stroke::new(4.0 / 3.0, tint);
+        ui.painter().add(egui::Shape::closed_line(
+            vec![
+                point(12.0, 2.0),
+                point(21.0, 7.0),
+                point(21.0, 17.0),
+                point(12.0, 22.0),
+                point(3.0, 17.0),
+                point(3.0, 7.0),
+            ],
+            stroke,
+        ));
+        for (start, end) in [
+            (point(3.0, 7.0), point(12.0, 12.0)),
+            (point(21.0, 7.0), point(12.0, 12.0)),
+            (point(12.0, 12.0), point(12.0, 22.0)),
+        ] {
+            ui.painter().line_segment([start, end], stroke);
+        }
+        response
+    }
 }
 
 pub(super) fn kind_label(kind: RoadElementKind) -> &'static str {

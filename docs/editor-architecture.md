@@ -215,9 +215,8 @@ crates, data and configuration are outside this source check.
 
 Explicit intersection components live in `src/network/`: typed geometry and movement data,
 dependency resolution, reusable placement, default components, and SVG generation.
-`src/parser/network.rs` handles their brace grammar. `src/cli.rs` supplies headless SVG/PNG export
-commands to both binaries; the `intersection-export` feature uses the existing resvg dependency for
-rasterization.
+`src/parser/network.rs` handles their brace grammar. `src/cli.rs` supplies headless SVG export
+to both binaries without a rasterizer dependency.
 
 `editor/network_ui.rs` owns read-only inspection state and the map-click option. Opening the viewer
 suspends the normal map command path; its layer and movement selections never mutate `Program`.

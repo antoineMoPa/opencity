@@ -16,6 +16,7 @@ mod building;
 pub mod cli;
 mod elevation;
 mod error;
+pub mod expansion;
 mod frontage;
 pub mod heightmap;
 #[doc(hidden)]
@@ -67,3 +68,6 @@ pub use frontage::{
     project_frontage_zones, BuildingForm, FrontageError, FrontageFrame, FrontageProjection,
     FrontageSide, FrontageZone, ZoneForm,
 };
+
+#[cfg(feature = "expansion-ui")]
+pub mod expansion_ui;

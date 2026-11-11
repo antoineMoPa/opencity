@@ -77,6 +77,12 @@ impl RoadEditor {
                 "Switch the workspace theme",
                 "⌘J",
             ),
+            (
+                "expand-network",
+                "Expand road network…",
+                "Pick ghost extensions or grow a network",
+                "",
+            ),
         ]
         .into_iter()
         .map(|(id, title, description, shortcut)| PaletteCommand {
@@ -176,6 +182,10 @@ impl RoadEditor {
     }
 
     pub(super) fn execute_palette_command(&mut self, id: &str, ctx: &egui::Context) {
+        if id == "expand-network" {
+            self.minimal.expansion.open = true;
+            return;
+        }
         if self.camera_view == CameraView::Vehicular
             && (id.starts_with("intersection:")
                 || id.starts_with("road:")

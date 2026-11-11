@@ -166,6 +166,7 @@ impl RoadEditor {
         self.minimal.palette_pointer_gesture |=
             palette_active && ctx.input(|i| i.pointer.any_down());
         let palette_blocks_canvas = palette_active
+            || self.minimal.expansion.open
             || self.pending.is_some()
             || self.minimal.palette_pointer_gesture
             || switch_owns_pointer;
@@ -195,6 +196,29 @@ impl RoadEditor {
         }
 
         self.pending_dialog(&ctx);
+        if let Some(rect) = self.map_rect {
+            let matrix = self
+                .camera_transition_matrix(rect)
+                .unwrap_or_else(|| self.camera_clip_matrix(rect));
+            self.minimal
+                .expansion
+                .world_overlay(&ctx, &self.program, |p| {
+                    let mut v = [0.; 4];
+                    for row in 0..4 {
+                        v[row] = matrix[row][0] * p[0]
+                            + matrix[row][1] * p[1]
+                            + matrix[row][2] * (p[2] + 0.003)
+                            + matrix[row][3];
+                    }
+                    (v[3] > 0.).then(|| {
+                        egui::pos2(
+                            rect.center().x + v[0] / v[3] * rect.width() / 2.,
+                            rect.center().y - v[1] / v[3] * rect.height() / 2.,
+                        )
+                    })
+                });
+        }
+        self.minimal.expansion.show(&ctx, &mut self.program, true);
         self.delete_dialog(&ctx);
         let dragging = ctx.input(|input| input.pointer.primary_down())
             && (self.dragging_endpoint.is_some()

@@ -3,6 +3,7 @@ use super::*;
 
 #[derive(Default)]
 pub(super) struct MinimalEditor {
+    pub(super) expansion: opencity::expansion_ui::Picker,
     #[cfg(not(target_arch = "wasm32"))]
     pub(super) launch_feedback: Option<external_launch::LaunchFeedback>,
     pub(super) intersection_viewer: Option<network_ui::Viewer>,

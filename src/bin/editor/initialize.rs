@@ -5,7 +5,6 @@ impl RoadEditor {
     pub(super) fn new(cc: &eframe::CreationContext<'_>, open_path: Option<PathBuf>) -> Self {
         #[cfg(target_arch = "wasm32")]
         let (web_event_sender, web_events) = std::sync::mpsc::channel();
-        egui_extras::install_image_loaders(&cc.egui_ctx);
         cc.egui_ctx
             .set_visuals_of(egui::Theme::Dark, editor_visuals(egui::Theme::Dark));
         cc.egui_ctx

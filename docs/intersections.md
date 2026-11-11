@@ -145,12 +145,12 @@ entries. Four-way profile intersections use the shared default component, includ
 movements. Two-way corners use their shared curved road profiles. Three-way profile intersections
 retain their appearance and ports without adding explicit movements.
 
-## SVG and PNG command-line exports
+## SVG command-line exports
 
 Build the headless CLI without the GUI dependencies:
 
 ```sh
-cargo build --no-default-features --features intersection-export --bin opencity
+cargo build --no-default-features --bin opencity
 ./target/debug/opencity --help
 ```
 
@@ -159,12 +159,10 @@ Export a definition or uniquely named placed instance:
 ```sh
 ./target/debug/opencity intersection-svg examples/intersections.road \
   --name crossroads --output /tmp/crossroads.svg
-./target/debug/opencity intersection-png examples/intersections.road \
-  --name highway_junction --output /tmp/highway.png --size 1600
 ```
 
-Both commands also work with `./target/debug/editor`. `editor --help` lists them without opening a
-window. Each command also accepts `--help`.
+The command also works with `./target/debug/editor`. `editor --help` lists it without opening a
+window. The export command also accepts `--help`.
 
 `--name` can be omitted when the file contains exactly one explicit component definition. `--output`
 (or `-o`) is required. `--size` sets square image dimensions from 64 to 8192 pixels (default 1024).
@@ -173,8 +171,8 @@ indicators. `--appearance-only` also hides port indicators for a clean pavement,
 image. Exports use the component's isolated local coordinates, so selecting a placed instance does
 not add its world translation to the image.
 
-SVGs retain machine-readable path, band, port, and movement attributes. PNGs rasterize that same SVG
-locally with resvg; no GUI, browser, or external service is needed. Invalid input or options return
+SVGs retain machine-readable path, band, port, and movement attributes without rasterization;
+no GUI, browser, or external service is needed. Invalid input or options return
 a nonzero exit status before writing the output. Exports support explicit definitions and placed
 components. Existing four-way map junctions can also be selected by their point reference, such as
 `--name center` in `examples/default_intersection.road`.
@@ -209,6 +207,4 @@ this integration. Export the clean reference appearance with:
 ```sh
 ./target/debug/opencity intersection-svg road_library/default_four_way.road \
   --name default_four_way --appearance-only --output /tmp/default-intersection.svg
-./target/debug/opencity intersection-png road_library/default_four_way.road \
-  --name default_four_way --appearance-only --output /tmp/default-intersection.png
 ```

@@ -36,6 +36,12 @@ make hooks                      # enable pre-commit checks
 cargo test
 ```
 
+Development builds retain incremental compilation and optimized geometry, with limited local
+debug symbols and no dependency debug data. The workspace root provides these profiles when this
+crate is built inside a workspace. Use `cargo build --bin editor --timings` to inspect build costs;
+reserve `--release` for production builds. The first build after changing profiles rebuilds affected
+dependencies. Parser-only consumers should disable default features, as shown below.
+
 Source limits: 100 columns for Markdown/Rust; 1,200 lines per Rust file. Native scene preparation
 runs on a worker. Profile startup without a GPU:
 `OPENCITY_SCENE_PROFILE=1 cargo test --bin editor profile_default_startup -- --ignored --nocapture`.
@@ -134,13 +140,9 @@ height, cross-section, tangent and direction. Saving writes expanded editable ro
 
 ## Use the crate
 
-For bounded street/address lookup and reversible geographic-to-world mapping,
-see the [agent geographic-data workflow](docs/geodata-agent-workflow.md). The CLI preserves
-coordinate detail; simplification and game-map placement stay with the agent.
-
 ```toml
 [dependencies]
-opencity = { path = "../opencity" }
+opencity = { path = "../opencity", default-features = false }
 ```
 
 ```rust
@@ -239,7 +241,6 @@ Headless exports (also accepted by `editor`):
 
 ```sh
 opencity intersection-svg INPUT.road --name NAME --output OUTPUT.svg
-opencity intersection-png INPUT.road --name NAME --output OUTPUT.png
 ```
 
 ## Game runtime integration
