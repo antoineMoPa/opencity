@@ -21,12 +21,6 @@ pub(super) fn tools() -> Value {
             &[],
         ),
         tool(
-            "check_design_rules",
-            "Check road joins and intersection edge cross sections",
-            json!({}),
-            &[],
-        ),
-        tool(
             "get_viewport_image",
             "Capture the current editor viewport as a PNG image; include_ui \
             captures the entire editor window",
@@ -156,8 +150,7 @@ pub(super) fn tools() -> Value {
             "Atomically edit a local connection. Point edits require segment,\
             x,y; grade requires segment,start_height,end_height; attachment \
             requires reference,lane,t; intersection requires x,y,kind,\
-            profile. Shared/anchored references are preserved. Run \
-            check_design_rules after edits.",
+            profile. Shared/anchored references are preserved.",
             json!({
                 "connection_id": {
                     "type": "string"

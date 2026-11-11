@@ -2,8 +2,6 @@ use opencity::road_profiles::{
     road_for_segment, road_profiles as paint_profiles, AttachmentFootprint,
     RoadProfile as PaintProfile,
 };
-#[cfg(not(target_arch = "wasm32"))]
-use opencity::road_profiles::{road_joins, straight_join};
 use std::{
     collections::HashMap,
     path::{Path, PathBuf},
@@ -119,12 +117,6 @@ struct SceneCache {
     scene: Arc<scene3d::Scene>,
 }
 
-#[cfg(not(target_arch = "wasm32"))]
-struct DesignAnalysisCache {
-    program: Program,
-    issues: Vec<DesignIssue>,
-}
-
 #[cfg(target_arch = "wasm32")]
 enum WebFileEvent {
     Opened { name: String, source: String },
@@ -233,10 +225,6 @@ struct RoadEditor {
     web_scene_build: Option<scene3d::WebSceneBuild>,
     #[cfg(not(target_arch = "wasm32"))]
     scene_build: Option<std::sync::mpsc::Receiver<SceneCache>>,
-    #[cfg(not(target_arch = "wasm32"))]
-    design_analysis_cache: Option<DesignAnalysisCache>,
-    #[cfg(not(target_arch = "wasm32"))]
-    design_analysis_job: Option<std::sync::mpsc::Receiver<DesignAnalysisCache>>,
     orbit_angle: f32,
     orbit_elevation: f32,
     orbit_target: WorldPoint,
@@ -348,12 +336,6 @@ use road_paint::*;
 
 #[path = "editor/road_hover.rs"]
 mod road_hover;
-
-#[cfg(not(target_arch = "wasm32"))]
-#[path = "editor/design_rules.rs"]
-mod design_rules;
-#[cfg(not(target_arch = "wasm32"))]
-use design_rules::*;
 
 #[path = "editor/intersection_paint.rs"]
 mod intersection_paint;

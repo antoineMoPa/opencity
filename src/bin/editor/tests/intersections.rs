@@ -128,8 +128,6 @@ fn mixed_intersection_paints_narrow_local_arm_without_design_mismatch() {
 
     let projection = map::project(&program);
     let junction = map::intersections(&program, &projection).pop().unwrap();
-    let profiles = paint_profiles(&program, &projection);
-    assert!(design_rule_issues(&program, &projection, &profiles).is_empty());
     let rect = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1000.0, 1000.0));
     let paint = intersection_paint(
         &program,

@@ -167,54 +167,6 @@ impl RoadEditor {
         }
     }
 
-    #[cfg(not(target_arch = "wasm32"))]
-    pub(super) fn design_issues(
-        &mut self,
-        ctx: &egui::Context,
-        projection: &map::Projection,
-    ) -> Vec<DesignIssue> {
-        #[cfg(not(target_arch = "wasm32"))]
-        if let Some(receiver) = &self.design_analysis_job {
-            match receiver.try_recv() {
-                Ok(cache) => {
-                    // An edit may have overtaken this analysis. Never display stale issues.
-                    if cache.program == self.program {
-                        self.design_analysis_cache = Some(cache);
-                    }
-                    self.design_analysis_job = None;
-                }
-                Err(std::sync::mpsc::TryRecvError::Disconnected) => self.design_analysis_job = None,
-                Err(std::sync::mpsc::TryRecvError::Empty) => {}
-            }
-        }
-        if let Some(cache) = &self.design_analysis_cache {
-            if cache.program == self.program
-                || self.dragging_endpoint.is_some()
-                || self.dragging_control.is_some()
-                || self.dragging_intersection.is_some()
-            {
-                return cache.issues.clone();
-            }
-        }
-        #[cfg(not(target_arch = "wasm32"))]
-        {
-            if self.design_analysis_job.is_none() {
-                let program = self.program.clone();
-                let projection = projection.clone();
-                let repaint = ctx.clone();
-                let (sender, receiver) = std::sync::mpsc::channel();
-                std::thread::spawn(move || {
-                    let profiles = paint_profiles(&program, &projection);
-                    let issues = design_rule_issues(&program, &projection, &profiles);
-                    let _ = sender.send(DesignAnalysisCache { program, issues });
-                    repaint.request_repaint();
-                });
-                self.design_analysis_job = Some(receiver);
-            }
-            Vec::new()
-        }
-    }
-
     pub(super) fn paint_selection_overlay(
         &mut self,
         painter: &egui::Painter,

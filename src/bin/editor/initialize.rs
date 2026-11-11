@@ -56,10 +56,6 @@ impl RoadEditor {
             web_scene_build: None,
             #[cfg(not(target_arch = "wasm32"))]
             scene_build: None,
-            #[cfg(not(target_arch = "wasm32"))]
-            design_analysis_cache: None,
-            #[cfg(not(target_arch = "wasm32"))]
-            design_analysis_job: None,
             orbit_angle: std::f32::consts::FRAC_PI_4,
             orbit_elevation: ISO_ELEVATION,
             orbit_target: WorldPoint { x: 0.0, y: 0.0 },

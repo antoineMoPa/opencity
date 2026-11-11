@@ -9,21 +9,11 @@
 //! assert_eq!(parse(&road_text)?, ast);
 //! # Ok::<(), opencity::Error>(())
 //! ```
-//!
-//! Design checks can inspect a parsed road network without changing the source:
-//!
-//! ```
-//! use opencity::{check_design_rules, parse};
-//! let program = parse("road street: carlane; end street(0, 0, 1, 0);")?;
-//! assert!(check_design_rules(&program).is_empty());
-//! # Ok::<(), opencity::Error>(())
-//! ```
 
 mod ast;
 pub mod blocks;
 mod building;
 pub mod cli;
-mod design_rules;
 mod elevation;
 mod error;
 mod frontage;
@@ -57,10 +47,6 @@ pub use ast::{
 };
 pub use blocks::BlockInstance;
 pub use building::{BuildingMaterial, BuildingStyle, BuildingUse};
-pub use design_rules::{
-    check_design_rules, check_design_rules_with_projection, check_vehicle_lane_continuity,
-    check_vehicle_lane_intrusions, DesignIssue, DesignRule,
-};
 pub use elevation::{
     block_height, elevation_in_calls, elevation_of, grade_in_calls, grade_of, set_elevation,
     set_grade,

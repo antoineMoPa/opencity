@@ -1,6 +1,4 @@
-use opencity::{
-    check_design_rules, map, parse, road_geometry::RoadGeometry, DesignRule, RoadRole, Statement,
-};
+use opencity::{map, parse, road_geometry::RoadGeometry, RoadRole, Statement};
 
 #[test]
 fn road_roles_round_trip_and_are_independent_of_names() {
@@ -21,22 +19,6 @@ fn road_roles_round_trip_and_are_independent_of_names() {
 }
 
 #[test]
-fn narrow_barrier_beside_lane_center_is_rejected() {
-    let program = parse(
-        "road pavement: carlane; end; road wall: barrier; end;
-        lane = pavement(0,0,1,0); obstacle = wall(0.503,0.014,0.507,0.014);",
-    )
-    .unwrap();
-    let issues = check_design_rules(&program);
-    assert!(
-        issues
-            .iter()
-            .any(|i| i.rule == DesignRule::VehicleLaneCrossesNonCarBand),
-        "{issues:?}"
-    );
-}
-
-#[test]
 fn unrelated_wall_is_reported_instead_of_opened() {
     let program = parse(
         "road pavement: carlane; end;\n        a = pavement(-1,0,1,0); b = \
@@ -46,9 +28,6 @@ fn unrelated_wall_is_reported_instead_of_opened() {
     let projection = map::project(&program);
     let geometry = RoadGeometry::compile(&program, &projection);
     assert!(!geometry.obstructions().is_empty());
-    assert!(check_design_rules(&program)
-        .iter()
-        .any(|i| i.rule == DesignRule::VehiclePathObstructed));
 }
 
 #[test]
@@ -83,33 +62,11 @@ fn merge_openings_survive_renaming_and_all_quarter_turns() {
             "turn {turn}: {:?}",
             geometry.obstructions()
         );
-        assert!(check_design_rules(&program).is_empty());
         // Losing the explicit merge declaration must expose the obstruction.
         let broken = parse(&renamed.replace("role merge;", "role ordinary;")).unwrap();
-        assert!(check_design_rules(&broken)
-            .iter()
-            .any(|i| i.rule == DesignRule::VehiclePathObstructed));
-    }
-}
-
-#[test]
-fn merge_role_requires_an_explicit_car_lane_attachment() {
-    let program = parse(
-        "road connector: carlane; role merge; end; a=map_point(0,0); \
-            b=map_point(1,0); c=connector(a,0.3,0,0.7,0,b);",
-    )
-    .unwrap();
-    assert!(check_design_rules(&program)
-        .iter()
-        .any(|i| i.rule == DesignRule::InvalidMergeConnection));
-}
-
-#[test]
-fn cloverleaf_has_clear_corridors_in_every_orientation() {
-    for turn in 0..4 {
-        let program = parse(&format!("place(cloverleaf, c, 7, -4, {turn});")).unwrap();
-        let issues = check_design_rules(&program);
-        assert!(issues.is_empty(), "turn {turn}: {issues:?}");
+        assert!(!RoadGeometry::compile(&broken, &map::project(&broken))
+            .obstructions()
+            .is_empty());
     }
 }
 

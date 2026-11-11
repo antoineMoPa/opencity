@@ -110,21 +110,14 @@ loops and four four-piece direct connectors link the ports. Keep the `ew_center`
 references separate: they occupy the same horizontal position but are on different decks. See
 [the agent guide](../docs/road-building-guide-for-agents.md) for the local construction order.
 
-Run Rust `check_design_rules` after placing patterns. It checks car-lane continuity at shared points
-and lane attachments, including height and travel direction, and checks full-width lane surfaces
-against non-car bands and resolved elevated walls. `role merge;` explicitly declares a car-only
-merge surface that overlays the adjoining parent edge at its declared `lane_point`; use it for an
-intentional entry or merge, and keep its lane center and height aligned with the parent car lane.
-The street ramps use one at the street entry as well as the interstate merge. The checker reports
-the offending segment and band for local repair.
-
-The fixed illustrative widths and tessellated authoring geometry are suitable for authoring and
-integration checks. A game's physical lane dimensions, shoulder geometry, clearance, markings,
-collision mesh, and target pixel scale still need an engine-specific pass before shipping.
+Inspect lane continuity, height and travel direction after placing patterns. `role merge;`
+explicitly declares a car-only merge surface over the adjoining parent edge at its declared
+`lane_point`; keep its lane center and height aligned with the parent car lane. Check physical
+clearance and collision geometry in the consuming engine before shipping.
 
 Ramp profiles declare `role ramp;`; merge profiles declare `role merge;`. Names have no semantic
 effect. Elevated wall openings are clipped geometrically and shared by editor rendering, GLB export,
-and design validation. Connector peaks in the cloverleaf rise to `0.65` to keep loop corridors clear
+and runtime collision. Connector peaks in the cloverleaf rise to `0.65` to keep loop corridors clear
 of their sidewalls. Run `cargo test --test road_library --test road_geometry` before accepting
 changes; see the agent guide for tolerances and remaining physical-model limits.
 

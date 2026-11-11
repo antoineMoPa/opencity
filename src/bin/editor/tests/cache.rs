@@ -52,58 +52,6 @@ fn first_scene_build_returns_loading_scene_without_waiting() {
 }
 
 #[test]
-fn design_analysis_does_not_wait_for_pending_work() {
-    let mut editor = sample_editor();
-    let ctx = egui::Context::default();
-    let projection = map::project(&editor.program);
-    let (sender, receiver) = std::sync::mpsc::channel();
-    editor.design_analysis_job = Some(receiver);
-    assert!(editor.design_issues(&ctx, &projection).is_empty());
-    assert!(editor.design_analysis_cache.is_none());
-    sender
-        .send(DesignAnalysisCache {
-            program: editor.program.clone(),
-            issues: vec![DesignIssue {
-                code: "test_issue",
-                message: "finished".into(),
-                at: WorldPoint { x: 0.0, y: 0.0 },
-                roads: [String::new(), String::new()],
-            }],
-        })
-        .unwrap();
-    let issues = editor.design_issues(&ctx, &projection);
-    assert_eq!(issues.len(), 1);
-    assert_eq!(issues[0].code, "test_issue");
-    assert!(editor.design_analysis_job.is_none());
-}
-
-#[test]
-fn design_analysis_discards_old_results_and_checks_latest_document() {
-    let mut editor = sample_editor();
-    editor.program = parse("road lane: carlane; end; lane(0,0,1,0);").unwrap();
-    let ctx = egui::Context::default();
-    let projection = map::project(&editor.program);
-    let (sender, receiver) = std::sync::mpsc::channel();
-    editor.design_analysis_job = Some(receiver);
-    sender
-        .send(DesignAnalysisCache {
-            program: Program::default(),
-            issues: Vec::new(),
-        })
-        .unwrap();
-    assert!(editor.design_issues(&ctx, &projection).is_empty());
-    assert!(editor.design_analysis_cache.is_none());
-    let result = editor
-        .design_analysis_job
-        .take()
-        .unwrap()
-        .recv_timeout(std::time::Duration::from_secs(10))
-        .unwrap();
-    assert_eq!(result.program, editor.program);
-    assert!(result.issues.is_empty());
-}
-
-#[test]
 fn placed_merge_mouth_with_shoulders_receives_parent_profile() {
     let program = parse("place(cloverleaf, sample, 0, 0, 0);").unwrap();
     let projection = map::project(&program);
@@ -232,7 +180,6 @@ fn profile_target_geometry_edit() {
         .unwrap();
     let control = segment.controls[0];
     let ctx = egui::Context::default();
-    let _ = editor.design_issues(&ctx, &first);
     let previous_scene = editor.scene_geometry(&ctx, editor_palette(egui::Theme::Dark), &first);
     editor.dragging_control = Some((segment.source, false));
     let start = std::time::Instant::now();
@@ -248,16 +195,14 @@ fn profile_target_geometry_edit() {
     let edit = start.elapsed();
     let projection = map::project(&editor.program);
     let projected = start.elapsed();
-    let _issues = editor.design_issues(&ctx, &projection);
-    let analysis = start.elapsed();
+
     let scene = editor.scene_geometry(&ctx, editor_palette(egui::Theme::Dark), &projection);
     assert!(Arc::ptr_eq(&previous_scene, &scene));
     eprintln!(
-        "edit={:?} projection={:?} analysis={:?} scene={:?} total={:?}",
+        "edit={:?} projection={:?} scene={:?} total={:?}",
         edit,
         projected - edit,
-        analysis - projected,
-        start.elapsed() - analysis,
+        start.elapsed() - projected,
         start.elapsed()
     );
     #[cfg(not(target_arch = "wasm32"))]

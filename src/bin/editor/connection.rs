@@ -598,28 +598,10 @@ impl RoadEditor {
             })
             .collect();
 
-        let analysis = self
-            .design_analysis_cache
-            .as_ref()
-            .filter(|cache| cache.program == self.program);
         Ok(json!({
         "workspace":serde_json::Value::Null,
         "active":self.active_connection().map(|item| item.id),
-        "connections":items,
-        "design_checks":if analysis.is_some() {
-         "current"
-        }
-         else {
-         "pending"
-        }
-        ,
-        "issues":analysis.map(|cache| cache.issues.iter().map(|issue| json!({
-        "code":issue.code,
-        "message":issue.message,
-        "x":issue.at.x,
-        "y":issue.at.y
-        }
-        )).collect::<Vec<_>>())
+        "connections":items
         }
         ))
     }

@@ -77,11 +77,6 @@ adapting one.
 
 - After each patch, parse and project the file. Require `projection.unresolved == 0`; inspect any
   unresolved call before continuing.
-- Run `check_design_rules`. Resolve unconnected ramp ends, same-grade crossings, car-lane
-  discontinuities, and car paths crossing sidewalks, verges, medians, barriers, or other non-car
-  bands. A lane path must meet the next car lane at the same point, height, and permitted travel
-  direction. Check street profiles against their intersection edges in the editor's **Check design
-  rules** view.
 - For every ramp, follow references from entry to merge. Verify point order, one-way direction,
   parent lane travel, exact shared seam references, and equal heights at each seam. Use a paved
   `ramp_mouth` at each intentional edge crossing so the merge has a drivable surface. Check that an
@@ -128,24 +123,8 @@ surfaces. It opens both sides of the connection: the parent wall across the mout
 inside the parent pavement. The editor and GLB exporter consume these same wall pieces. Never add
 camera-dependent wall hiding or enlarge a proximity radius to repair an obstruction.
 
-Run `check_design_rules` after every geometry or profile edit. Treat **all** issues as failures
-before adding a template to the library:
-
-- `invalid_merge_connection`: supply a paved merge profile and an explicit parent car-lane
-  attachment.
-- `vehicle_path_obstructed`: a remaining elevated wall enters another lane's clearance corridor. Fix
-  topology or provide enough vertical separation; unrelated walls are not automatically removed.
-- `vehicle_lane_crosses_non_car_band`: the lane's full width overlaps a forbidden band. A clear
-  centerline is insufficient. Explicit barriers are never exempted by merge or junction
-  declarations.
-- `geometry_unresolved`: subdivision exhausted its budget; simplify the curve. Do not accept an
-  unresolved result as collision-free.
-
 Run `cargo test --test road_library --test road_geometry` and the editor tests after library
-changes. Tests cover the gallery, all quarter-turns of the elevated ramp and cloverleaf, renamed
-merge profiles, narrow off-center barriers, unrelated walls, and separated overpasses. Keep negative
-examples: tests that only validate good templates cannot establish that the checker detects
-obstructions.
+changes. Inspect pavement, grade and clearance at each connection.
 
 Current tolerances use illustrative world units: centerline flatness `0.0005`, maximum subdivision
 control-polygon length `0.04`, merge height agreement `0.012`, bridge side depth `0.0065`,
@@ -229,13 +208,13 @@ full-window mode: choose Edit cross section, edit the selected placement’s pro
 type, then Back to map. Profile names differ from placement names; edits apply to all placements of
 that profile and share undo/save history. Dock panels, tabs, branch popups, cut tools and the
 connection workspace have been removed. The viewport renders the complete map; it does not isolate
-selected connections. Numeric construction, profiles, branches, heights and design checks remain
+selected connections. Numeric construction, profiles, branches and heights remain
 available through `.road` and the Rust API.
 
 ## 8. Inspect and edit connections through the Rust API
 
 `get_connection_workspace {}` returns named merges and intersections, member roads, ports,
-attachments and asynchronous design-check status.
+and attachments.
 `open_connection_editor {"connection_id":"merge:ramp"}` is a compatibility command that selects and
 focuses that connection in the full isometric viewport. It does not open a panel or enter a filtered
 workspace; its legacy `camera` argument is accepted, and the compatibility command focuses
@@ -246,12 +225,11 @@ removed.
 supply `segment`, `x`, `y`. For `grade`, supply `segment`, `start_height`, `end_height`. For
 `attachment`, supply `reference`, `lane`, `t`. For `intersection`, supply `x`, `y`, `kind`
 (`right_turn`, `three_way`, `four_way`), and `profile`. These are validated, undoable AST edits;
-they do not repair pavement, grade or clearance defects automatically. Run the complete design
-checker after editing. Block instances and protected endpoints reject unsupported mutations.
+they do not repair pavement, grade or clearance defects automatically. Inspect the geometry after
+editing. Block instances and protected endpoints reject unsupported mutations.
 
 Use `get_viewport_image {"include_ui":true}` to inspect the entire editor window, including the
-selected road name field. The default `false` captures the map rectangle. Check `design_checks`
-before interpreting cached issues; `pending` does not mean geometry is clear. Connection IDs use
+selected road name field. The default `false` captures the map rectangle. Connection IDs use
 assigned names; refresh after document replacement or renaming. Connection queries and edits operate
 on the full document; the compatibility `workspace` field is null.
 

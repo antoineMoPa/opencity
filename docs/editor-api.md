@@ -44,7 +44,7 @@ from the current state; their coordinates must match. The `replace_document` too
 zoom is 18 to 2400 pixels per unit for ordinary maps, with a 0.1 minimum for documents containing
 explicit intersection components.
 
-The other tools are `check_design_rules`, `get_viewport`, `set_viewport`, `set_intersection`,
+The other tools are `get_viewport`, `set_viewport`, `set_intersection`,
 `move_road`, `move_control_point`, `move_endpoint`, `undo`, and `redo`. The Rust MCP `tools/list`
 response provides their current JSON schemas. The [language and editor guide](../docs.md) explains
 road source and editing semantics.
@@ -52,7 +52,7 @@ road source and editing semantics.
 ## Connection queries and precision edits
 
 `get_connection_workspace` lists named merges and intersections with stable connection IDs, their
-member roads, ports, lane attachments, and design-check status. `open_connection_editor` is a
+member roads, ports, and lane attachments. `open_connection_editor` is a
 compatibility command: an optional `connection_id` selects and focuses a connection in the full
 isometric viewport. It never opens a panel or filters the map. The legacy `camera` argument is
 accepted; this compatibility command focuses the isometric view. Top, Isometric and Vehicular remain
@@ -60,15 +60,14 @@ available through the view switch. `edit_connection` performs validated, undoabl
 [connection editing guide][connection-guide] for arguments and limitations.
 
 `get_viewport_image` accepts `{"include_ui":true}` to capture the entire editor window including the
-selected road name field. Omit this option for the map rectangle. Check `design_checks` before
-interpreting cached issues; `pending` does not mean that geometry is clear. The abandoned
+selected road name field. Omit this option for the map rectangle. The abandoned
 `cut_connection_segment` and `close_connection_editor` tools have been removed. There is no
 workspace to cut within or close; `workspace` is returned as null for query compatibility. Precision
 editing remains stateless and uses the full document.
 
 Red map annotations are top-level source calls with unique assigned IDs. Use the existing
 source/document API to create or edit them; they do not count as roads, landscape, obstacles or
-design-rule geometry:
+collision geometry:
 
 ```road
 note_1 = annotation_segment(0, 0, 2, 1);

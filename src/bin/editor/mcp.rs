@@ -348,10 +348,6 @@ impl RoadEditor {
                     }
                 }
             } else {
-                if request.name == "get_connection_workspace" {
-                    let projection = self.projected_map();
-                    self.design_issues(ctx, &projection);
-                }
                 let before = self.program.clone();
                 let result = self.call_mcp(&request.name, &request.args);
                 self.record_history(before, false);
@@ -402,25 +398,6 @@ impl RoadEditor {
         match name {
             "get_connection_workspace" | "open_connection_editor" | "edit_connection" => {
                 self.connection_api(name, args)
-            }
-            "check_design_rules" => {
-                let projection = map::project(&self.program);
-                let profiles = super::paint_profiles(&self.program, &projection);
-                let issues: Vec<_> =
-                    super::design_rule_issues(&self.program, &projection, &profiles)
-                        .into_iter()
-                        .map(|issue| {
-                            json!({
-                            "code":issue.code,
-                            "message":issue.message,
-                            "at":[issue.at.x,
-                            issue.at.y],
-                            "roads":issue.roads
-                            }
-                            )
-                        })
-                        .collect();
-                Ok(json!({"passed":issues.is_empty(),"issues":issues}))
             }
             "get_road_state" => {
                 let projection = map::project(&self.program);

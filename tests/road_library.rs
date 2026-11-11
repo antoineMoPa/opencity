@@ -1,14 +1,10 @@
-use opencity::{
-    check_design_rules, map, parse, DesignRule, RoadDirection, RoadElementKind, Statement,
-};
+use opencity::{map, parse, RoadDirection, RoadElementKind, Statement};
 
 fn asset(source: &str) -> (opencity::Program, map::Projection) {
     let program = parse(source).expect("library asset parses");
     assert_eq!(parse(&program.to_road_source()).unwrap(), program);
     let projection = map::project(&program);
     assert_eq!(projection.unresolved, 0, "all library calls project");
-    let issues = check_design_rules(&program);
-    assert!(issues.is_empty(), "library design issues: {issues:#?}");
     (program, projection)
 }
 
@@ -294,19 +290,6 @@ fn cloverleaf_has_separate_decks_and_eight_directed_connectors() {
 }
 
 #[test]
-fn lowering_an_elevated_merge_mouth_is_rejected() {
-    let source = include_str!("../road_library/cloverleaf.road").replace(
-        "grade(se_loop_c_merge, 0.25, 0.3);",
-        "grade(se_loop_c_merge, 0.2, 0.3);",
-    );
-    let issues = check_design_rules(&parse(&source).unwrap());
-    assert!(issues.iter().any(|issue| {
-        issue.rule == DesignRule::VehicleLaneMergeHeightMismatch
-            && issue.roads[0] == "se_loop_c_merge"
-    }));
-}
-
-#[test]
 fn cloverleaf_core_keeps_shoulders_at_every_ramp_port() {
     let (program, projection) = asset(include_str!("../road_library/cloverleaf.road"));
     let core: Vec<_> = projection
@@ -461,7 +444,6 @@ fn diagonal_surface_junctions_share_the_approach_frame_and_clip_outside_the_pave
         let instance =
             opencity::network::default_four_way_instance(&program, &projection, &junction).unwrap();
         assert!((instance.rotation - angle).abs() < 0.001);
-        assert!(check_design_rules(&program).is_empty());
         let profiles = opencity::road_profiles::road_profiles(&program, &projection);
         for (road, profile) in projection.segments.iter().zip(profiles) {
             let t = profile.start_clip.or(profile.end_clip).unwrap();
@@ -490,7 +472,6 @@ fn three_way_surface_junction_reserves_curved_corner_pavement() {
     assert!(junction.footprint_half > 0.077);
     let geometry = opencity::road_geometry::RoadGeometry::compile(&program, &projection);
     assert!(geometry.obstructions().is_empty());
-    assert!(check_design_rules(&program).is_empty());
 }
 
 #[test]
@@ -506,5 +487,4 @@ fn wide_junction_checks_only_pavement_remaining_after_approach_clipping() {
     let projection = map::project(&program);
     let geometry = opencity::road_geometry::RoadGeometry::compile(&program, &projection);
     assert!(geometry.band_intrusions(&program, &projection).is_empty());
-    assert!(check_design_rules(&program).is_empty());
 }

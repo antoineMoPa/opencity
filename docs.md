@@ -151,9 +151,6 @@ program.write_road_file("output/city.road")?;
 
 `parse(&str)`, `tokenize(&str)` and `Program::to_road_source()` support in-memory use.
 Writing creates parent directories and preserves statement order and numeric spelling.
-`check_design_rules(&program)` reports typed diagnostics for connectivity, heights, directions and
-car-lane continuity; editor checks additionally cover road edges and intersection profiles.
-Checks use illustrative band widths; consumers still validate vehicle collision geometry.
 
 ## Definition language
 

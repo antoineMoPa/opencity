@@ -1,76 +1,6 @@
 use super::*;
 
 #[test]
-fn design_check_finds_a_straight_misaligned_join() {
-    let program = parse(
-        "road narrow: carlane; end; road wide: verge-carlane-verge; end; \
-            p0 = map_point(0, 0); seam = map_point(1, 0); p1 = map_point(2, \
-            0); a = narrow(p0, 0.3, 0, 0.7, 0, seam); b = wide(seam, 1.3, 0, \
-            1.7, 0, p1);",
-    )
-    .unwrap();
-    let projection = map::project(&program);
-    let mut profiles = paint_profiles(&program, &projection);
-    assert!(design_rule_issues(&program, &projection, &profiles).is_empty());
-    profiles[1].start_taper.clear();
-    let issues = design_rule_issues(&program, &projection, &profiles);
-    assert_eq!(issues.len(), 1);
-    assert_eq!(issues[0].code, "road_edge_mismatch");
-}
-
-#[test]
-fn design_check_reports_a_ramp_that_nearly_meets_a_road() {
-    let program = parse(
-        "road ramp: verge-carlane-verge;\nrole ramp; end; road street: \
-        carlane; end; a = map_point(0, 0); b = map_point(1, 0); near = \
-        map_point(1.02, 0); c = map_point(2, 0); exit = ramp(a, 0.3, 0, \
-        0.7, 0, b); street(near, 1.3, 0, 1.7, 0, c);",
-    )
-    .unwrap();
-
-    let projection = map::project(&program);
-    let issues = design_rule_issues(
-        &program,
-        &projection,
-        &paint_profiles(&program, &projection),
-    );
-    assert!(issues
-        .iter()
-        .any(|issue| issue.code == "unconnected_ramp_end"
-            && issue.at == WorldPoint { x: 1.0, y: 0.0 }));
-}
-
-#[test]
-fn design_check_requires_a_junction_or_height_for_a_ramp_crossing() {
-    let source = "road ramp: verge-carlane-verge;\nrole ramp; end; road street: \
-        carlane; end; a = map_point(-2, 0); b = map_point(2, 0); c = \
-        map_point(0, -2); d = map_point(0, 2); exit = ramp(a, -0.7, 0, \
-        0.7, 0, b); street(c, 0, -0.7, 0, 0.7, d);";
-
-    let at_grade = parse(source).unwrap();
-    let projection = map::project(&at_grade);
-    let issues = design_rule_issues(
-        &at_grade,
-        &projection,
-        &paint_profiles(&at_grade, &projection),
-    );
-    assert!(issues
-        .iter()
-        .any(|issue| issue.code == "ramp_at_grade_crossing"));
-
-    let bridged = parse(&format!("{source} elevation(exit, 0.2);")).unwrap();
-    let projection = map::project(&bridged);
-    let issues = design_rule_issues(
-        &bridged,
-        &projection,
-        &paint_profiles(&bridged, &projection),
-    );
-    assert!(!issues
-        .iter()
-        .any(|issue| issue.code == "ramp_at_grade_crossing"));
-}
-
-#[test]
 fn starter_city_defines_street_intersections_without_filling_the_cloverleaf() {
     let program = starter_program();
     let projection = map::project(&program);
@@ -99,11 +29,6 @@ fn starter_city_defines_street_intersections_without_filling_the_cloverleaf() {
                 ));
         }
     }
-    assert!(existing_design_checks_are_clear(&design_rule_issues(
-        &program,
-        &projection,
-        &paint_profiles(&program, &projection)
-    )));
     assert_eq!(
         intersections
             .iter()
@@ -239,34 +164,7 @@ fn starter_city_defines_street_intersections_without_filling_the_cloverleaf() {
         .unwrap();
     let tangent = country_edge.tangent_at(0.0);
     assert!(tangent.x.abs() < 0.001);
-    let profiles = paint_profiles(&program, &projection);
-    assert!(existing_design_checks_are_clear(&design_rule_issues(
-        &program,
-        &projection,
-        &profiles
-    )));
     assert_eq!(parse(&program.to_road_source()).unwrap(), program);
-}
-
-#[test]
-fn design_check_reports_an_approach_that_exceeds_the_intersection_edge() {
-    let program = parse(
-        "road narrow: sidewalk-carlane-sidewalk; end; \
-        road wide: sidewalk-carlane-carlane-sidewalk; end; \
-        center = map_point(0, 0); west = map_point(-1, 0); \
-        east = map_point(1, 0); north = map_point(0, 1); \
-        a = wide(west, -0.7, 0, -0.3, 0, center); \
-        b = narrow(center, 0.3, 0, 0.7, 0, east); \
-        c = narrow(center, 0, 0.3, 0, 0.7, north); \
-        intersection3(center, narrow);",
-    )
-    .unwrap();
-    let projection = map::project(&program);
-    let profiles = paint_profiles(&program, &projection);
-    let issues = design_rule_issues(&program, &projection, &profiles);
-    assert!(issues.iter().any(|issue| {
-        issue.code == "intersection_edge_mismatch" && issue.roads == ["a", "narrow"]
-    }));
 }
 
 #[test]

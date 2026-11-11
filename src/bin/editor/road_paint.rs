@@ -94,12 +94,6 @@ pub(super) fn section_widths(
     )
 }
 
-#[cfg(not(target_arch = "wasm32"))]
-pub(super) fn section_edges(road: &RoadDefinition, profile: &PaintProfile, t: f32) -> (f32, f32) {
-    let (widths, left) = section_widths(road, 1.0, profile, t);
-    (left, left + widths.iter().sum::<f32>())
-}
-
 pub(super) fn screen_point_in_road(
     point: egui::Pos2,
     footprint: &AttachmentFootprint,

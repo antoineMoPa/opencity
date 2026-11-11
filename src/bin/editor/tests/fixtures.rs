@@ -1,18 +1,5 @@
 use super::*;
 
-pub(super) fn existing_design_checks_are_clear(issues: &[DesignIssue]) -> bool {
-    issues.iter().all(|issue| {
-        matches!(
-            issue.code,
-            "invalid_merge_connection"
-                | "vehicle_path_obstructed"
-                | "vehicle_lane_discontinuity"
-                | "vehicle_lane_crosses_non_car_band"
-                | "vehicle_lane_merge_height_mismatch"
-        )
-    })
-}
-
 pub(crate) fn sample_editor() -> RoadEditor {
     RoadEditor {
         launch_action: Ok(None),
@@ -52,9 +39,6 @@ pub(crate) fn sample_editor() -> RoadEditor {
         web_scene_build: None,
         #[cfg(not(target_arch = "wasm32"))]
         scene_build: None,
-        design_analysis_cache: None,
-        #[cfg(not(target_arch = "wasm32"))]
-        design_analysis_job: None,
         orbit_angle: std::f32::consts::FRAC_PI_4,
         orbit_elevation: ISO_ELEVATION,
         orbit_target: WorldPoint { x: 0.0, y: 0.0 },

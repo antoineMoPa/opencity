@@ -14,4 +14,3 @@ mod selection_cache;
 mod vehicle;
 
 pub(crate) use fixtures::sample_editor;
-use fixtures::*;

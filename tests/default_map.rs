@@ -1,5 +1,4 @@
 use opencity::{
-    check_design_rules,
     heightmap::{ElevationMap, ElevationMapSpec},
     map,
     road_geometry::{RoadGeometry, Vertex},
@@ -23,15 +22,13 @@ fn scene() -> (Program, map::Projection, ElevationMap) {
 }
 
 #[test]
-fn default_map_round_trips_and_passes_every_design_rule() {
+fn default_map_round_trips_and_resolves_geometry() {
     let (program, projection, _) = scene();
     assert_eq!(opencity::parse(&program.to_road_source()).unwrap(), program);
     assert_eq!(projection.unresolved, 0);
     assert!(!projection.segments.is_empty(), "default map needs roads");
     let geometry = RoadGeometry::compile(&program, &projection);
     assert!(geometry.unresolved.is_empty());
-    let issues = check_design_rules(&program);
-    assert!(issues.is_empty(), "default map design issues: {issues:#?}");
     for junction in map::intersections(&program, &projection) {
         let widest_approach = projection
             .segments

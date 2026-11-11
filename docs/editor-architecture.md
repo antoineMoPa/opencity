@@ -110,7 +110,7 @@ connection workspaces have been removed.
     </tr>
     <tr>
       <td>
-        Geometry caching and asynchronous API design analysis
+        Geometry caching
       </td>
       <td>
         <code>scene_cache.rs</code>
