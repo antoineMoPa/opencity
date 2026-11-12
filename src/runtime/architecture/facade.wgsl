@@ -5,6 +5,26 @@ fn architecture_hash(p:vec2<f32>)->f32 {
     var h=q.x*374761393u+q.y*668265263u;h=(h^(h>>13u))*1274126177u;
     return f32(h^(h>>16u))/4294967295.0;
 }
+// Smooth material-space dirt with pixel-footprint filtering: no screen-space crawl.
+fn architecture_noise(p:vec2<f32>,footprint:vec2<f32>,seed:f32)->f32 {
+    let cell=floor(p)+vec2<f32>(seed*13.0,seed*7.0);
+    let q=fract(p);let t=q*q*(3.0-2.0*q);
+    let a=mix(architecture_hash(cell),architecture_hash(cell+vec2<f32>(1.0,0.0)),t.x);
+    let b=mix(architecture_hash(cell+vec2<f32>(0.0,1.0)),architecture_hash(cell+vec2<f32>(1.0)),t.x);
+    let resolved=1.0-smoothstep(0.35,1.0,max(footprint.x,footprint.y));
+    return mix(0.5,mix(a,b,t.y),resolved);
+}
+fn architecture_weather(uv:vec2<f32>,footprint:vec2<f32>,seed:f32,
+    age:f32,n:vec3<f32>,base:vec3<f32>)->vec3<f32> {
+    let broad=architecture_noise(uv*0.55,footprint*0.55,seed);
+    let pores=architecture_noise(uv*19.0,footprint*19.0,seed+17.0);
+    let runoff=pow(architecture_noise(uv*vec2<f32>(5.0,0.19),
+        footprint*vec2<f32>(5.0,0.19),seed+31.0),3.0);
+    let low_wall=exp(-max(uv.y,0.0)*1.8)*(1.0-abs(n.z));
+    let deposits=age*(0.13+broad*0.32+runoff*0.58+low_wall*0.20);
+    let patina=mix(vec3<f32>(1.0),vec3<f32>(0.72,0.69,0.62),deposits);
+    return base*patina*(1.0-deposits*0.24)*(1.0+age*(pores-0.5)*0.15);
+}
 fn architecture_glass_tint(tint_id:u32)->vec3<f32> {
     // Subtle material absorption; the reflected environment supplies the sky hue.
     switch tint_id {
@@ -76,14 +96,14 @@ fn architecture_facade(uv:vec2<f32>,footprint:vec2<f32>,packed:f32,
     let street=((flags>>20u)&1u)==1u;let pattern=(flags>>21u)&3u;
     let aa=max(footprint,vec2<f32>(0.0005));let cell=floor(uv);let q=fract(uv);
     if plain&&family==6u {
-        let grain=architecture_hash(floor(uv*vec2<f32>(296.4,308.75))+vec2<f32>(seed,0.0));
-        return base*lighting*(0.85+grain*0.28);
+        return architecture_weather(uv,aa,seed,age,n,base)*lighting;
     }
     if glazing {
         let view=eye/max(length(eye),0.00001);
         let grazing=pow(1.0-clamp(dot(n,view),0.0,1.0),5.0);
         let tint=architecture_glass_tint(tint_id);
-        return mix(base*lighting*0.20,environment*tint,0.45+grazing*0.4);
+        let dust=architecture_noise(uv*vec2<f32>(3.0,0.3),aa*vec2<f32>(3.0,0.3),seed);
+        return mix(base*lighting*0.20,environment*tint,0.45+grazing*0.4)*(1.0-age*dust*0.10);
     }
     if family==6u {
         let r=length(q-vec2<f32>(0.5));
@@ -119,10 +139,10 @@ fn architecture_facade(uv:vec2<f32>,footprint:vec2<f32>,packed:f32,
     let joint=max(1.0-smoothstep(0.007,0.007+stone_aa.x,min(stone_f.x,1.0-stone_f.x)),
         1.0-smoothstep(0.01,0.01+stone_aa.y,min(stone_f.y,1.0-stone_f.y)));
     let variation=mix(0.91,1.07,architecture_hash(floor(stone_uv)));
-    let streak=pow(architecture_hash(vec2<f32>(floor(uv.x*3.0),cell.y)),3.0);
-    var wall=base*variation*(1.0-joint*0.23)*(1.0-age*(0.12+streak*0.35))*lighting;
+    let wear=age*select(0.7,1.15,old);
+    var wall=architecture_weather(uv,aa,seed,wear,n,base)*variation*(1.0-joint*0.23)*lighting;
     if plain {return wall;}
-    if family==0u {wall=vec3<f32>(0.055,0.14,0.24)*lighting;}
+    if family==0u {wall=architecture_weather(uv,aa,seed,wear,n,base*vec3<f32>(0.24,0.35,0.42))*lighting;}
     if old {
         let sill=(1.0-smoothstep(0.025,0.025+aa.y,abs(q.y-y0+0.035)))
             *step(x0-0.06,q.x)*step(q.x,x1+0.06);
@@ -140,6 +160,12 @@ fn architecture_facade(uv:vec2<f32>,footprint:vec2<f32>,packed:f32,
     let grazing=pow(1.0-clamp(dot(n,view),0.0,1.0),5.0);
     let reflection=clamp(mix(0.09,0.48,day)*select(0.45,1.0,family==0u||family==2u)+grazing*0.42,0.0,0.94);
     var glass=mix(interior*vec3<f32>(0.76,0.78,0.76),environment*tint,reflection);
+    // Recess contact at pane edges plus restrained dirt washed down from the sill.
+    let resolved=1.0-smoothstep(0.15,0.6,max(aa.x,aa.y));
+    let reveal=1.0-smoothstep(0.0,0.065,min(edges.x,edges.y));
+    let sill_runoff=(1.0-smoothstep(y0,y0+0.23,q.y))
+        *architecture_noise(vec2<f32>(uv.x*8.0,cell.y),aa*vec2<f32>(8.0,1.0),seed+41.0);
+    glass*=1.0-resolved*(reveal*0.13+age*sill_runoff*0.14);
     var mullion=1.0-smoothstep(0.006,0.006+aa.x,abs(q.x-0.5));
     if old {mullion=max(mullion,1.0-smoothstep(0.009,0.009+aa.y,abs(q.y-(y0+y1)*0.5)));}
     glass=mix(glass,select(vec3<f32>(0.12,0.19,0.24),base*0.22,old),mullion*0.75);

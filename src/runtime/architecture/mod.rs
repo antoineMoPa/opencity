@@ -304,7 +304,13 @@ impl BuildingRecipe {
                             self.packed(family.unwrap() % 8, street),
                         ]
                     } else {
-                        [SurfaceKind::Prop as u32 as f32, 0., 0., 0.]
+                        // Roof membranes, copings and metalwork share filtered weathering.
+                        [
+                            SurfaceKind::Masonry as u32 as f32,
+                            uv[i][0],
+                            uv[i][1],
+                            self.packed(6, false),
+                        ]
                     },
                 });
             }

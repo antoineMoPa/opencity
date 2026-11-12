@@ -82,6 +82,7 @@ fn runtime_keeps_facade_uvs_and_replaces_the_old_shell() {
     for (streamed, direct) in mesh.vertices.iter().zip(&direct.vertices) {
         assert_eq!(streamed.position, direct.position);
         assert_eq!(streamed.normal, direct.normal);
+        assert_eq!(streamed.color, direct.color);
         assert_eq!(streamed.surface, direct.surface);
     }
     assert!(mesh
@@ -218,4 +219,35 @@ fn default_map_shows_all_families_and_materials_in_each_town() {
         assert_eq!(palettes.len(), 9, "{town}: full stone/concrete palette");
     }
     assert_eq!(total, 786);
+}
+
+#[test]
+fn baked_occlusion_is_identical_after_rotation_translation_and_reflection() {
+    let f = feature("heritage", "0,0,0.3,0,0.3,0.2,0,0.2");
+    let recipe = BuildingRecipe::from_feature(&f).unwrap();
+    let reference = recipe.mesh();
+    for reflected in [false, true] {
+        let (s, c) = 0.73_f32.sin_cos();
+        let transformed = BuildingRecipe {
+            origin: [500., -600., 2.],
+            along: [c, s],
+            inward: if reflected { [s, -c] } else { [-s, c] },
+            ..recipe
+        }
+        .mesh();
+        assert_eq!(reference.vertices.len(), transformed.vertices.len());
+        for (index, v) in transformed.vertices.iter().enumerate() {
+            let source = if reflected {
+                index / 3 * 3
+                    + match index % 3 {
+                        1 => 2,
+                        2 => 1,
+                        _ => 0,
+                    }
+            } else {
+                index
+            };
+            assert_eq!(v.color, reference.vertices[source].color);
+        }
+    }
 }

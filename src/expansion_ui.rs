@@ -64,6 +64,16 @@ impl Picker {
         viewport: egui::Rect,
         project: impl Fn([f32; 3]) -> Option<egui::Pos2>,
     ) {
+        self.world_overlay_with_input(ctx, program, viewport, true, project);
+    }
+    pub fn world_overlay_with_input(
+        &mut self,
+        ctx: &egui::Context,
+        program: &Program,
+        viewport: egui::Rect,
+        input_enabled: bool,
+        project: impl Fn([f32; 3]) -> Option<egui::Pos2>,
+    ) {
         if !self.open {
             return;
         }
@@ -75,7 +85,8 @@ impl Picker {
             ))
             .with_clip_rect(viewport);
         let pointer = ctx.pointer_hover_pos();
-        let clicked = ctx.input(|i| i.pointer.primary_clicked())
+        let clicked = input_enabled
+            && ctx.input(|i| i.pointer.primary_clicked())
             && pointer.is_some_and(|p| viewport.contains(p))
             && pointer
                 .and_then(|p| ctx.layer_id_at(p))
@@ -288,6 +299,16 @@ impl Picker {
     /// Reserves a thin strip in the caller's root UI before its canvas is laid out.
     /// `editable` is false for bundled/browser maps without an authored file.
     pub fn show(&mut self, root: &mut egui::Ui, program: &mut Program, editable: bool) -> bool {
+        self.show_with_toolbar(root, program, editable, |_| {})
+    }
+    /// Add consumer-owned controls to the reserved strip without changing picker behavior.
+    pub fn show_with_toolbar(
+        &mut self,
+        root: &mut egui::Ui,
+        program: &mut Program,
+        editable: bool,
+        toolbar: impl FnOnce(&mut egui::Ui),
+    ) -> bool {
         if !self.open {
             return false;
         }
@@ -346,6 +367,7 @@ impl Picker {
                 ui.spacing_mut().item_spacing = egui::vec2(4., 0.);
                 ui.spacing_mut().interact_size.y = 26.;
                 ui.horizontal(|ui| {
+                    toolbar(ui);
                     // Keep confirmation and close reachable even on narrow windows.
                     let controls_width = if self.message.is_empty() { 64. } else { 96. };
                     let content = egui::vec2((ui.available_width() - controls_width).max(0.), 28.);

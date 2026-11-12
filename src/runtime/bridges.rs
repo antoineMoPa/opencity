@@ -55,6 +55,7 @@ pub(super) fn mesh(city: &City, geometry: &RoadGeometry) -> Mesh {
             };
             // Pavement closes the slab above. A second cap just below it
             // fights the pavement's depth at distant views of elevated roads.
+            let slab_start = mesh.vertices.len();
             for face in [
                 [bottom(b), bottom(d), bottom(c), bottom(a)],
                 [a, bottom(a), bottom(c), c],
@@ -64,6 +65,9 @@ pub(super) fn mesh(city: &City, geometry: &RoadGeometry) -> Mesh {
             ] {
                 mesh.quad(face, CONCRETE, SurfaceKind::Prop);
             }
+            super::surface_weathering::concrete_mesh(&mut mesh.vertices[slab_start..], |point| {
+                super::surface_weathering::base(p, q, point) - DEPTH
+            });
             if since_pier < PIER_SPACING {
                 continue;
             }
@@ -107,6 +111,12 @@ pub(super) fn mesh(city: &City, geometry: &RoadGeometry) -> Mesh {
                 CONCRETE,
                 SurfaceKind::Prop,
             );
+            let mut pier = Mesh {
+                vertices: mesh.vertices[start..].to_vec(),
+            };
+            super::surface_weathering::concrete_mesh(&mut pier.vertices, |_| foot);
+            super::ambient_occlusion::bake_cuboids(&mut pier, 0.012, Some(foot));
+            mesh.vertices[start..].copy_from_slice(&pier.vertices);
             let across = [(b[0] - a[0]) / width, (b[1] - a[1]) / width];
             for v in &mut mesh.vertices[start..] {
                 let [x, y, z] = v.position;

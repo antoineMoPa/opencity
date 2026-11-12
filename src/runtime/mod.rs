@@ -4,7 +4,9 @@
 mod bridges;
 mod geometry;
 mod retaining;
+mod surface_weathering;
 use crate::junction_mesh;
+pub mod ambient_occlusion;
 pub mod architecture;
 mod building_details;
 mod building_frontage;
@@ -32,6 +34,8 @@ use std::{collections::HashMap, path::Path};
 /// Group 1: 2048² shadow depth texture and comparison sampler (see shader).
 pub const GAME_SHADER: &str = concat!(
     include_str!("architecture/facade.wgsl"),
+    "\n",
+    include_str!("surfaces.wgsl"),
     "\n",
     include_str!("sky_stars.wgsl"),
     "\n",
@@ -160,7 +164,7 @@ struct Triangle {
     points: [[f32; 3]; 3],
     kind: SurfaceKind,
     road: Option<usize>,
-    color: [f32; 3],
+    color: [[f32; 3]; 3],
     data: [f32; 3],
     paving_distance: Option<[f32; 3]>,
     facade_uv: Option<[[f32; 2]; 3]>,

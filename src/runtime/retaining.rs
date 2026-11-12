@@ -110,6 +110,7 @@ impl RetainingWall {
     }
 
     pub fn append(&self, mesh: &mut Mesh) {
+        let start = mesh.vertices.len();
         let [a, b] = [self.start, self.end];
         let d = [b[0] - a[0], b[1] - a[1]];
         let length = d[0].hypot(d[1]);
@@ -141,6 +142,11 @@ impl RetainingWall {
         ] {
             mesh.quad(face, [0.34, 0.35, 0.34], SurfaceKind::Prop);
         }
+        let a = [self.start[0], self.start[1], self.start[2]];
+        let b = [self.end[0], self.end[1], self.end[2]];
+        super::surface_weathering::concrete_mesh(&mut mesh.vertices[start..], |p| {
+            super::surface_weathering::base(a, b, p)
+        });
     }
 }
 

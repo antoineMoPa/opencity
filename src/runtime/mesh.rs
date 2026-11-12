@@ -7,7 +7,11 @@ use std::collections::HashSet;
 /// UVs are interpolated, with U increasing along (normal.y, -normal.x, 0).
 /// Aspect is clamped to 0.125..15; zero metadata retains legacy glass rendering.
 /// Entrance paving uses [Sidewalk, local X / unit, local Y / unit, 1].
-/// Road and junction sidewalk tops use [Sidewalk, distance along band, 0, 2].
+/// Road bands use [kind, distance along band, distance across band, packed pavement].
+/// Pavement bits: layout (2=sidewalk, 3=road), width in cm (12 bits), then two 5-bit edges.
+/// Edge 0=flush, 1=exposed; 2..31=raised contact with height (edge-1) cm.
+/// Legacy junction tops retain [Sidewalk, distance along band, 0, 2].
+/// Infrastructure concrete uses [kind, world horizontal coordinate, height above foot, -2].
 /// Procedural facades use [Facade, bay U, floor V, packed architecture flags].
 #[derive(Clone, Copy, Debug)]
 #[repr(C)]
@@ -182,7 +186,10 @@ impl City {
             }
             if geometry::polygon_region(&t.points.map(|p| [p[0], p[1]]), region) {
                 let start = mesh.vertices.len();
-                mesh.triangle(t.points, t.color, t.kind, t.data);
+                mesh.triangle(t.points, t.color[0], t.kind, t.data);
+                for (v, color) in mesh.vertices[start..].iter_mut().zip(t.color) {
+                    v.color = color;
+                }
                 if let Some(normal) = t.render_normal {
                     for v in &mut mesh.vertices[start..] {
                         v.normal = normal;
@@ -193,7 +200,7 @@ impl City {
                         v.surface[1..3].copy_from_slice(&uv);
                     }
                 }
-                if let Some(distance) = t.paving_distance {
+                if let Some(distance) = t.paving_distance.filter(|_| t.facade_uv.is_none()) {
                     for (v, d) in mesh.vertices[start..].iter_mut().zip(distance) {
                         v.surface[1..].copy_from_slice(&[d, 0., 2.]);
                     }

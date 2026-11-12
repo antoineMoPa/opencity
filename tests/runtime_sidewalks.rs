@@ -29,12 +29,12 @@ fn straight_sidewalk_joints_cross_the_whole_width_in_any_direction() {
             }
             if v.normal[2] > 0.9 {
                 tops += 1;
-                assert_eq!(v.surface[3], 2.);
+                assert_eq!((v.surface[3] as u32) & 3, 2);
                 let along = v.position[0] * direction[0] + v.position[1] * direction[1];
                 assert!((v.surface[1] - along).abs() < 1e-5, "{v:?}");
             } else {
                 curbs += 1;
-                assert_eq!(v.surface[3], 0., "curbs must not carry slab joints");
+                assert_eq!(v.surface[3], -2., "curbs must not carry slab joints");
             }
         }
         assert!(tops > 0 && curbs > 0);
@@ -51,7 +51,7 @@ fn curved_sidewalks_keep_equal_distance_across_each_section_and_shared_vertices(
     assert!(tops.len() > 8);
     for pair in tops.chunks_exact(2) {
         let [a, b] = [pair[0], pair[1]];
-        assert!(a.iter().chain(b).all(|v| v.surface[3] == 2.));
+        assert!(a.iter().chain(b).all(|v| (v.surface[3] as u32) & 3 == 2));
         // Quad order is [start left, end left, end right, start right].
         assert!((a[1].surface[1] - a[2].surface[1]).abs() < 1e-6);
         assert!((b[0].surface[1] - b[2].surface[1]).abs() < 1e-6);
@@ -75,7 +75,7 @@ fn clipped_junction_sidewalks_keep_band_coordinates() {
         }
         assert!(t
             .iter()
-            .all(|v| v.surface[3] == 2. && v.surface[1].is_finite()));
+            .all(|v| (v.surface[3] as u32) & 3 == 2 && v.surface[1].is_finite()));
         if t.iter()
             .all(|v| v.position[0].abs() < 0.12 && v.position[1].abs() < 0.12)
         {

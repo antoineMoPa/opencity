@@ -576,7 +576,12 @@ pub(super) fn geometry(recipe: BuildingRecipe) -> (Mesh, Vec<BuildingVolume>) {
         _ => 0.,
     };
     let mut kit = Kit {
-        recipe,
+        recipe: BuildingRecipe {
+            origin: [0.; 3],
+            along: [1., 0.],
+            inward: [0., 1.],
+            ..recipe
+        },
         mesh: Mesh::default(),
         volumes: Vec::new(),
         unit,
@@ -586,5 +591,23 @@ pub(super) fn geometry(recipe: BuildingRecipe) -> (Mesh, Vec<BuildingVolume>) {
         street: (unit * 4.8).min(recipe.height * 0.28),
     };
     kit.build();
+    // Bake before world placement: exact cuboids, stable precision and rotation-independent AO.
+    super::super::ambient_occlusion::bake_cuboids(
+        &mut kit.mesh,
+        recipe.floor_height * 1.25,
+        Some(0.),
+    );
+    for v in &mut kit.mesh.vertices {
+        v.position = recipe.point(v.position);
+        v.normal = recipe.vector(v.normal);
+    }
+    if recipe.along[0] * recipe.inward[1] - recipe.along[1] * recipe.inward[0] < 0. {
+        for triangle in kit.mesh.vertices.chunks_exact_mut(3) {
+            triangle.swap(1, 2);
+        }
+    }
+    for volume in &mut kit.volumes {
+        volume.recipe = recipe;
+    }
     (kit.mesh, kit.volumes)
 }

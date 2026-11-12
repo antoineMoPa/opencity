@@ -124,7 +124,7 @@ pub(super) fn push(
         points: p,
         kind,
         road,
-        color: color(rgb),
+        color: [color(rgb); 3],
         data,
         paving_distance: None,
         facade_uv: None,
@@ -187,6 +187,7 @@ pub(super) fn compile(
         }
     }
     for wall in &geometry.safety_walls {
+        let start = city.triangles.len();
         for face in wall.barrier_faces() {
             quad(
                 city,
@@ -195,6 +196,11 @@ pub(super) fn compile(
                 Some(wall.segment),
                 [165, 170, 162],
             );
+        }
+        let a = [wall.start.point.x, wall.start.point.y, wall.start.height];
+        let b = [wall.end.point.x, wall.end.point.y, wall.end.height];
+        for t in &mut city.triangles[start..] {
+            super::surface_weathering::concrete(t, |p| super::surface_weathering::base(a, b, p));
         }
     }
     for (id, seg) in projection.segments.iter().enumerate() {
@@ -240,9 +246,25 @@ pub(super) fn compile(
                     }
                     paving_distances[band] += length;
                 }
+                let length = ((p[1][0] + p[2][0] - p[0][0] - p[3][0]) * 0.5)
+                    .hypot((p[1][1] + p[2][1] - p[0][1] - p[3][1]) * 0.5);
+                let along = if k == SurfaceKind::Sidewalk {
+                    paving_distances[band] - length
+                } else {
+                    distance
+                };
+                super::surface_weathering::band(
+                    &mut city.triangles[start..],
+                    road,
+                    pair,
+                    band,
+                    along,
+                    length,
+                );
                 // Vertical curb faces share the pavement's subdivision and slopes.
                 if k == SurfaceKind::Sidewalk {
-                    for (a, b) in [(p[0], p[1]), (p[3], p[2])] {
+                    for (a, b) in [(p[0], p[1]), (p[2], p[3])] {
+                        let first = city.triangles.len();
                         quad(
                             city,
                             [
@@ -255,6 +277,11 @@ pub(super) fn compile(
                             Some(id),
                             [118, 122, 124],
                         );
+                        let bottom =
+                            |p: [f32; 3]| super::surface_weathering::base(a, b, p) - raised;
+                        for t in &mut city.triangles[first..] {
+                            super::surface_weathering::concrete(t, bottom);
+                        }
                     }
                 }
             }
@@ -606,7 +633,7 @@ pub(super) fn compile(
                         SurfaceKind::Prop
                     },
                     road: None,
-                    color: t[0].color,
+                    color: std::array::from_fn(|i| t[i].color),
                     data: [0., 0., t[0].surface[3]],
                     paving_distance: None,
                     facade_uv: facade
@@ -743,11 +770,13 @@ pub(super) fn compile(
             points,
             kind: SurfaceKind::Prop,
             road: None,
-            color: triangle[0].color,
-            data: [0.; 3],
+            color: std::array::from_fn(|j| triangle[j].color),
+            data: [0., 0., triangle[0].surface[3]],
             paving_distance: None,
-            facade_uv: None,
-            render_normal: None,
+            facade_uv: Some(std::array::from_fn(|j| {
+                [triangle[j].surface[1], triangle[j].surface[2]]
+            })),
+            render_normal: Some(triangle[0].normal),
         });
     }
     Ok(())

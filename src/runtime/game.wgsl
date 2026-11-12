@@ -1,4 +1,4 @@
-// Optional standalone shader. Z up, map units. Vertex layout is runtime::Vertex.
+// Optional standalone shader. Z up, map units. Vertex paving_style is runtime::Vertex.
 // Group 0 binding 0: matrices, eye/time, sun/exposure, daylight/reserved, inverse view, sun RGB/intensity.
 // Group 1: 2048-square depth shadow texture (0), comparison sampler (1).
 struct Camera { view_projection: mat4x4<f32>, light_view_projection: mat4x4<f32>, eye_time: vec4<f32>, sun_exposure: vec4<f32>, daylight_sky: vec4<f32>, inverse_view_projection: mat4x4<f32>, sun_color: vec4<f32>, star_params: vec4<f32>, star_color: vec4<f32> };
@@ -135,6 +135,7 @@ struct SurfaceData {
     normal:vec3<f32>, detail:f32, floor_position:f32, band:f32,
     brick_row:f32, brick_coord:f32, brick_footprint:vec2<f32>,
     roof_row:f32, roof_tile:f32, roof_detail:f32, paving_footprint:vec2<f32>,
+    world_footprint:vec3<f32>,
 };
 fn prepare_surface(v:Output)->SurfaceData {
     let p=v.world.xy;
@@ -152,7 +153,7 @@ fn prepare_surface(v:Output)->SurfaceData {
     let roof_row=(p.x+p.y)/(roof_unit*0.15);
     let roof_tile=(p.y-p.x)/(roof_unit*0.32)+floor(roof_row)*0.5;
     let roof_detail=1.0-smoothstep(0.25,0.8,max(fwidth(roof_row),fwidth(roof_tile)));
-    return SurfaceData(n,detail,floor_position,band,brick_row,brick_coord,brick_footprint,roof_row,roof_tile,roof_detail,fwidth(v.fence_uv));
+    return SurfaceData(n,detail,floor_position,band,brick_row,brick_coord,brick_footprint,roof_row,roof_tile,roof_detail,fwidth(v.fence_uv),max(abs(dpdx(v.world)),abs(dpdy(v.world))));
 }
 @fragment fn fs(v:Output,@builtin(front_facing) front:bool)->@location(0) vec4<f32> {
     let fence_footprint=fwidth(v.fence_uv);
@@ -171,6 +172,10 @@ fn prepare_surface(v:Output)->SurfaceData {
 }
 fn shade_surface(v:Output,front:bool,coverage:f32,surface:SurfaceData)->vec4<f32> {
     var base=v.color;let p=v.world.xy;let kind=v.surface.x;var facade_glow=0.0;
+    // Only imported building models opt into these local weathering coordinates.
+    if kind>6.5&&kind<7.5&&v.surface.w== -1.0 {
+        base=architecture_weather(v.fence_uv,surface.paving_footprint,17.0,0.25,surface.normal,base);
+    }
     var facade_room=vec3<f32>(0.0);var room_mask=0.0;
     var n=surface.normal;
     if kind>10.5&&kind<11.5&&!front {n=-n;}
@@ -183,13 +188,16 @@ fn shade_surface(v:Output,front:bool,coverage:f32,surface:SurfaceData)->vec4<f32
     if kind<0.5 { // Asphalt aggregate, weathering, occasional repaired cracks.
         let crack=pow(1.0-abs(sin(p.x*307.0+noise(p*16.0)*14.0)),32.0)*0.16;
         base*=0.35*(0.80+0.20*grain+0.15*broad-crack);
+        let edge=pavement_edges(v.fence_uv.y,v.surface.w);
+        base=pavement_weather(p,surface.world_footprint.xy,base,true,edge,0.0);
     } else if kind<1.5 { // Multi-scale grass cover, soil and blades.
         base=mix(base,vec3<f32>(0.18,0.22,0.15),0.45);
         base=mix(base*0.72,base*1.22,broad)*(0.90+0.18*grain);
     } else if kind<2.5 {
         // Only authored top surfaces carry joints. Curb faces stay plain.
         var joint_coverage=0.0;
-        if v.surface.w==2.0 {
+        let paving_style=u32(max(round(v.surface.w),0.0))&3u;
+        if paving_style==2u && n.z>0.5 {
             // A single distance coordinate makes every gap cross the full band;
             // there is no across-width repetition to create longitudinal lines.
             joint_coverage=mortar_coverage(v.fence_uv.x/0.015+0.005,surface.paving_footprint.x/0.015,0.01);
@@ -197,7 +205,13 @@ fn shade_surface(v:Output,front:bool,coverage:f32,surface:SurfaceData)->vec4<f32
             // Entrance paths also use full-width slabs along their local depth.
             joint_coverage=mortar_coverage(v.fence_uv.y/0.75+0.005,surface.paving_footprint.y/0.75,0.01);
         }
-        base*=mix(1.0,0.65,joint_coverage)*(0.90+grain*0.16);
+        if v.surface.w== -2.0 {
+            base=concrete_weather(v.world,surface.world_footprint,v.fence_uv.y,n,base);
+        } else {
+            let edge=select(vec2<f32>(0.0),pavement_edges(v.fence_uv.y,v.surface.w),paving_style==2u);
+            base*=mix(1.0,0.65,joint_coverage);
+            base=pavement_weather(p,surface.world_footprint.xy,base,false,edge,joint_coverage);
+        }
     }
     else if kind<3.5 { // Editor facade palette/floor spacing with game lighting.
         let across=select(v.world.y,v.world.x,abs(n.y)>abs(n.x));
@@ -231,10 +245,17 @@ fn shade_surface(v:Output,front:bool,coverage:f32,surface:SurfaceData)->vec4<f32
         n=vec3<f32>(0.08*cos(p.x*120.0+camera.eye_time.w*1.2),0.08*cos(p.y*190.0-camera.eye_time.w*0.7),1.0);
         n/=length(n);base*=0.92+wave*0.04;
     } else if kind<5.5 {base*=0.86+0.25*grain;}
+    else if kind>6.5&&kind<7.5&&v.surface.w== -2.0 {
+        base=concrete_weather(v.world,surface.world_footprint,v.fence_uv.y,n,base);
+    }
     else if kind>9.5&&kind<10.5 {
         // A small, anti-aliased shingle pattern scaled by the consumer's unit.
         let gap=max(step(0.95,fract(roof_row)),step(0.97,fract(roof_tile)));
         base*=1.0-roof_detail*gap*0.3;
+    }
+    if kind>2.5&&kind<3.5&&v.surface.w==2.0 {
+        base=concrete_weather(v.world,surface.world_footprint,
+            max(v.world.z-v.surface.y,0.0),n,base);
     }
     let daylight=clamp(camera.daylight_sky.x,0.0,1.0);
     let eye=camera.eye_time.xyz-v.world;let view=eye/max(length(eye),0.001);
