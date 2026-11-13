@@ -229,6 +229,17 @@ pub fn boundary(geometry: &Resolved, half: f32) -> Vec<[Point; 2]> {
         .map(|q| intersection(q.to_vec(), &clip))
         .filter(|p| area(p).abs() > 1e-14)
         .collect();
+    polygon_boundary(&polygons)
+}
+
+/// Exterior edges of a set of disjoint physical surface patches. Splitting at
+/// neighboring vertices removes internal edges even when clipping made T joins.
+pub fn patch_boundary<'a>(patches: impl IntoIterator<Item = &'a Patch>) -> Vec<[Point; 2]> {
+    let polygons: Vec<_> = patches.into_iter().map(|p| p.points.clone()).collect();
+    polygon_boundary(&polygons)
+}
+
+fn polygon_boundary(polygons: &[Vec<Point>]) -> Vec<[Point; 2]> {
     let polygon_bounds: Vec<_> = polygons.iter().map(|p| bounds(p)).collect();
     let covered = |point: Point| {
         polygons.iter().zip(&polygon_bounds).any(|(poly, b)| {
@@ -251,7 +262,7 @@ pub fn boundary(geometry: &Resolved, half: f32) -> Vec<[Point; 2]> {
         })
     };
     let mut result: Vec<[Point; 2]> = Vec::new();
-    for poly in &polygons {
+    for poly in polygons {
         for (&a, &b) in poly
             .iter()
             .zip(poly.iter().cycle().skip(1))

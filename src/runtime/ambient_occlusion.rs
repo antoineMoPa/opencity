@@ -199,24 +199,34 @@ fn box_hit(min: V, max: V, origin: V, direction: V, limit: f32) -> Option<f32> {
 /// `radius` and `ground` use the mesh's own coordinates; colors retain at least 52% energy.
 /// Geometry, normals, material metadata and triangle count remain unchanged.
 pub fn bake(mesh: &mut Mesh, radius: f32, ground: Option<f32>) {
+    bake_samples(mesh, radius, ground, 16);
+}
+/// Four directions retain broad contact shading while prioritizing authoring latency.
+pub fn bake_fast(mesh: &mut Mesh, radius: f32, ground: Option<f32>) {
+    bake_samples(mesh, radius, ground, 4);
+}
+fn bake_samples(mesh: &mut Mesh, radius: f32, ground: Option<f32>, samples: u32) {
     if !radius.is_finite() || radius <= 0. {
         return;
     }
     let tree = Tree::new(mesh);
-    colors(mesh, radius, ground, tree);
+    colors(mesh, radius, ground, tree, samples);
 }
 
 /// Architecture emits consecutive closed cuboids; intersect those solids directly.
 pub(super) fn bake_cuboids(mesh: &mut Mesh, radius: f32, ground: Option<f32>) {
     let tree = Tree::cuboids(mesh);
-    colors(mesh, radius, ground, tree);
+    colors(mesh, radius, ground, tree, 16);
 }
-fn colors(mesh: &mut Mesh, radius: f32, ground: Option<f32>, tree: Tree) {
+pub(super) fn bake_cuboids_fast(mesh: &mut Mesh, radius: f32, ground: Option<f32>) {
+    let tree = Tree::cuboids(mesh);
+    colors(mesh, radius, ground, tree, 4);
+}
+fn colors(mesh: &mut Mesh, radius: f32, ground: Option<f32>, tree: Tree, samples: u32) {
     if tree.nodes.is_empty() {
         return;
     }
     let epsilon = radius * 0.0001;
-    let samples = 16;
     let mut interiors: HashMap<[u32; 6], (V, usize)> = HashMap::new();
     for triangle in mesh.vertices.chunks_exact(3) {
         let center: V = std::array::from_fn(|i| triangle.iter().map(|v| v.position[i] / 3.).sum());

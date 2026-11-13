@@ -1,5 +1,7 @@
 //! Deterministic road-end proposals. Accepted edits remain ordinary `.road` calls.
+mod junctions;
 mod obstacles;
+mod source;
 use crate::{
     map::{self, Segment, SegmentSource, WorldPoint},
     *,
@@ -19,6 +21,8 @@ pub enum Kind {
     RemoveElement,
     SplitLeft,
     SplitRight,
+    ThreeWay,
+    FourWay,
 }
 impl Kind {
     pub fn label(self) -> &'static str {
@@ -35,6 +39,8 @@ impl Kind {
             Self::RemoveElement => "End element",
             Self::SplitLeft => "Split left lane",
             Self::SplitRight => "Split right lane",
+            Self::ThreeWay => "3-way city intersection",
+            Self::FourWay => "4-way city intersection",
         }
     }
 }
@@ -275,6 +281,8 @@ pub fn possibilities_with_shape(
 #[derive(Clone, Copy)]
 pub struct Options {
     pub length: f32,
+    /// Road beyond each city junction face, in map units (0.01 = one metre).
+    pub junction_extension: f32,
     pub curve: f32,
     pub grade: f32,
     pub element: RoadElementKind,
@@ -283,6 +291,7 @@ impl Default for Options {
     fn default() -> Self {
         Self {
             length: 1.,
+            junction_extension: 0.01,
             curve: 0.8,
             grade: 0.04,
             element: RoadElementKind::CarLane,
@@ -292,6 +301,7 @@ impl Default for Options {
 pub fn propose(program: &Program, end: &End, options: Options) -> Vec<Proposal> {
     let Options {
         length,
+        junction_extension,
         curve,
         grade,
         element,
@@ -307,7 +317,12 @@ pub fn propose(program: &Program, end: &End, options: Options) -> Vec<Proposal> 
         return vec![];
     };
     let end = &current;
-    if !length.is_finite() || length <= 0. || length > 100. {
+    if !length.is_finite()
+        || length <= 0.
+        || length > 100.
+        || !junction_extension.is_finite()
+        || !(0. ..=100.).contains(&junction_extension)
+    {
         return vec![];
     }
     let original = map::project(program);
@@ -326,8 +341,12 @@ pub fn propose(program: &Program, end: &End, options: Options) -> Vec<Proposal> 
         Kind::RemoveElement,
         Kind::SplitLeft,
         Kind::SplitRight,
+        Kind::ThreeWay,
+        Kind::FourWay,
     ] {
-        if kind != Kind::Stop && length <= width(&end.road) * 2. {
+        if !matches!(kind, Kind::Stop | Kind::ThreeWay | Kind::FourWay)
+            && length <= width(&end.road) * 2.
+        {
             continue;
         }
         let mut after = program.clone();
@@ -378,6 +397,11 @@ pub fn propose(program: &Program, end: &End, options: Options) -> Vec<Proposal> 
         }
         let before_count = map::project(&after).segments.len();
         match kind {
+            Kind::ThreeWay | Kind::FourWay => {
+                if !junctions::append(&mut after, end, &reference, junction_extension, kind) {
+                    continue;
+                }
+            }
             Kind::Stop => after.statements.push(Statement::Call(Call {
                 assigns: vec![],
                 name: "expansion_stop".into(),
@@ -465,7 +489,9 @@ pub fn propose(program: &Program, end: &End, options: Options) -> Vec<Proposal> 
             .into_iter()
             .filter(|s| !original.segments.iter().any(|o| o.source == s.source))
             .collect();
-        if kind == Kind::Stop || !obstacles.clashes(&after, &ghosts, end) {
+        let junction_clear = !matches!(kind, Kind::ThreeWay | Kind::FourWay)
+            || junctions::clear(&after, end, &obstacles);
+        if kind == Kind::Stop || junction_clear && !obstacles.clashes(&after, &ghosts, end) {
             result.push(Proposal {
                 kind,
                 end: end.clone(),
@@ -525,7 +551,10 @@ pub fn grow_with_options(
         let mut grew = false;
         for offset in 0..ends.len() {
             let choices = propose(program, &ends[(first + offset) % ends.len()], options);
-            let choices: Vec<_> = choices.iter().filter(|p| p.kind != Kind::Stop).collect();
+            let choices: Vec<_> = choices
+                .iter()
+                .filter(|p| !matches!(p.kind, Kind::Stop | Kind::ThreeWay | Kind::FourWay))
+                .collect();
             if choices.is_empty() {
                 continue;
             }
@@ -549,6 +578,9 @@ pub fn grow_with_options(
 /// Preserve comments and untouched formatting when the game accepts a proposal.
 /// Expansion changes road calls and appends definitions/calls.
 pub fn edited_source(source: &str, before: &Program, after: &Program) -> Result<String, String> {
+    if after.statements.len() < before.statements.len() {
+        return self::source::removed_source(source, before, after);
+    }
     if parse(source).map_err(|e| e.to_string())? != *before
         || after.statements.len() < before.statements.len()
     {

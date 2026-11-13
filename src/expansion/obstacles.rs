@@ -11,7 +11,7 @@ struct Footprint {
     high: f32,
     closed: bool,
     bounds: [f32; 4],
-    joins: Vec<String>,
+    joins: Vec<Anchor>,
 }
 pub(super) struct Obstacles {
     roads: Vec<Corridor>,
@@ -39,21 +39,29 @@ fn nearby(p: WorldPoint, b: [f32; 4], margin: f32) -> bool {
 }
 impl Obstacles {
     pub fn new(program: &Program) -> Self {
-        let roads = map::project(program)
+        let projection = map::project(program);
+        let profiles = crate::road_profiles::road_profiles(program, &projection);
+        let roads = projection
             .segments
             .iter()
-            .map(|s| {
+            .zip(&profiles)
+            .filter_map(|(s, profile)| {
+                let start = profile.start_clip.unwrap_or(0.);
+                let end = profile.end_clip.unwrap_or(1.);
+                if end - start <= 0.000001 {
+                    return None;
+                }
                 let points: Vec<_> = (0..=128)
                     .map(|i| {
-                        let t = i as f32 / 128.;
+                        let t = start + (end - start) * i as f32 / 128.;
                         (s.point_at(t), s.height_at(t))
                     })
                     .collect();
-                Corridor {
+                Some(Corridor {
                     bounds: bounds(points.iter().map(|(p, _)| *p)),
                     points,
                     half: definition(program, s).map(width).unwrap_or(0.) / 2.,
-                }
+                })
             })
             .collect();
         let landscape = project_landscape_features(program);
@@ -108,7 +116,6 @@ impl Obstacles {
                 });
             }
         }
-        let projection = map::project(program);
         for junction in map::intersections(program, &projection) {
             let Some(road) = program.statements.iter().find_map(|s| match s {
                 Statement::Road(r) if r.name == junction.road_name => Some(r),
@@ -137,13 +144,30 @@ impl Obstacles {
                 },
             ];
             let z = elevation_of(program, &junction.point_ref).unwrap_or(0.);
+            let mut joins: Vec<_> = junction
+                .ports
+                .iter()
+                .map(|p| Anchor::IntersectionPort(p.point_ref.clone()))
+                .collect();
+            for segment in &projection.segments {
+                for (reference, at_end) in [(&segment.start_ref, true), (&segment.end_ref, false)] {
+                    if reference.as_ref().is_some_and(|r| {
+                        r == &junction.point_ref || junction.ports.iter().any(|p| &p.point_ref == r)
+                    }) {
+                        joins.push(Anchor::Road {
+                            source: segment.source,
+                            at_end,
+                        });
+                    }
+                }
+            }
             polygons.push(Footprint {
                 bounds: bounds(points.iter().copied()),
                 points,
                 low: z - 0.06,
                 high: z + 0.06,
                 closed: true,
-                joins: junction.ports.iter().map(|p| p.point_ref.clone()).collect(),
+                joins,
             });
         }
         for instance in crate::network::project(program).instances {
@@ -188,62 +212,62 @@ impl Obstacles {
                 let t = i as f32 / steps as f32;
                 let p = ghost.point_at(t);
                 let z = ghost.height_at(t);
-                for road in &self.roads {
-                    let clearance = half + road.half;
-                    if !nearby(p, road.bounds, clearance) {
-                        continue;
-                    }
-                    let joins = road
-                        .points
-                        .first()
-                        .into_iter()
-                        .chain(road.points.last())
-                        .any(|(p, z)| {
-                            distance(*p, end.point) < 0.001 && (*z - end.height).abs() < 0.001
-                        });
-                    if joins && distance(p, end.point) < clearance * 1.5 {
-                        continue;
-                    }
-                    for pair in road.points.windows(2) {
-                        if (z - (pair[0].1 + pair[1].1) / 2.).abs() < 0.06
-                            && point_line(p, pair[0].0, pair[1].0) < clearance
-                        {
-                            return true;
-                        }
-                    }
+                if self.point_clashes(p, z, half, end) {
+                    return true;
                 }
-                for polygon in &self.polygons {
-                    if matches!(&end.anchor,Anchor::IntersectionPort(reference)
-                        if polygon.joins.contains(reference))
-                        && distance(p, end.point) < half * 3.
-                    {
-                        continue;
-                    }
-                    if z < polygon.low || z > polygon.high || !nearby(p, polygon.bounds, half) {
-                        continue;
-                    }
-                    let mut inside = false;
-                    let count = if polygon.closed {
-                        polygon.points.len()
-                    } else {
-                        polygon.points.len().saturating_sub(1)
-                    };
-                    for j in 0..count {
-                        let a = polygon.points[j];
-                        let b = polygon.points[(j + 1) % polygon.points.len()];
-                        if point_line(p, a, b) < half {
-                            return true;
-                        }
-                        if (a.y > p.y) != (b.y > p.y)
-                            && p.x < (b.x - a.x) * (p.y - a.y) / (b.y - a.y) + a.x
-                        {
-                            inside = !inside;
-                        }
-                    }
-                    if polygon.closed && inside {
-                        return true;
-                    }
+            }
+        }
+        false
+    }
+    pub(super) fn point_clashes(&self, p: WorldPoint, z: f32, half: f32, end: &End) -> bool {
+        for road in &self.roads {
+            let clearance = half + road.half;
+            if !nearby(p, road.bounds, clearance) {
+                continue;
+            }
+            let joins = road
+                .points
+                .first()
+                .into_iter()
+                .chain(road.points.last())
+                .any(|(p, z)| distance(*p, end.point) < 0.001 && (*z - end.height).abs() < 0.001);
+            if joins && distance(p, end.point) < clearance * 1.5 {
+                continue;
+            }
+            for pair in road.points.windows(2) {
+                if (z - (pair[0].1 + pair[1].1) / 2.).abs() < 0.06
+                    && point_line(p, pair[0].0, pair[1].0) < clearance
+                {
+                    return true;
                 }
+            }
+        }
+        for polygon in &self.polygons {
+            if polygon.joins.contains(&end.anchor) && distance(p, end.point) < half * 3. {
+                continue;
+            }
+            if z < polygon.low || z > polygon.high || !nearby(p, polygon.bounds, half) {
+                continue;
+            }
+            let mut inside = false;
+            let count = if polygon.closed {
+                polygon.points.len()
+            } else {
+                polygon.points.len().saturating_sub(1)
+            };
+            for j in 0..count {
+                let a = polygon.points[j];
+                let b = polygon.points[(j + 1) % polygon.points.len()];
+                if point_line(p, a, b) < half {
+                    return true;
+                }
+                if (a.y > p.y) != (b.y > p.y) && p.x < (b.x - a.x) * (p.y - a.y) / (b.y - a.y) + a.x
+                {
+                    inside = !inside;
+                }
+            }
+            if polygon.closed && inside {
+                return true;
             }
         }
         false

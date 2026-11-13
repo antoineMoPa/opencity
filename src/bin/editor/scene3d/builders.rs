@@ -250,7 +250,12 @@ impl WebSceneBuild {
 
     pub fn finish(self) -> Scene {
         assert_eq!(self.gpu_index, self.scene.vertices.len());
-        assert!(self.scene.gpu_vertices.set(self.gpu_build).is_ok());
+        let end = self.scene.road_span.as_ref().map_or(0, |s| s.end as usize);
+        assert!(self
+            .scene
+            .gpu_vertices
+            .set(super::contact_gpu::prepare_vertices(self.gpu_build, end))
+            .is_ok());
         self.scene
     }
 }

@@ -31,7 +31,7 @@ git submodule update --init --recursive
 cargo run                       # bundled map
 cargo run -- path/to/city.road
 make fmt                        # format Rust and wrap Markdown prose
-make lint                       # read-only formatting and source limits
+make lint                       # read-only formatting check
 make hooks                      # enable pre-commit checks
 cargo test
 ```
@@ -42,8 +42,7 @@ crate is built inside a workspace. Use `cargo build --bin editor --timings` to i
 reserve `--release` for production builds. The first build after changing profiles rebuilds affected
 dependencies. Parser-only consumers should disable default features, as shown below.
 
-Source limits: 100 columns for Markdown/Rust; 1,200 lines per Rust file. Native scene preparation
-runs on a worker. Profile startup without a GPU:
+Native scene preparation runs on a worker. Profile startup without a GPU:
 `OPENCITY_SCENE_PROFILE=1 cargo test --bin editor profile_default_startup -- --ignored --nocapture`.
 
 ### Browser build
@@ -256,7 +255,10 @@ XYZ/exposure; daylight/three reserved floats; inverse view-projection; sun RGB/i
 density/size/brightness/angular footprint; star RGB/solar visibility. Matrices are column-major,
 clip depth 0..1; angular footprint is vertical FOV / target height.
 
-Group 1: 2048² depth texture + comparison sampler. Group 2: linear HDR sky cube + filtering sampler.
+Group 1: 2048² depth texture + comparison sampler at bindings 0/1, linear contact mask texture,
+trilinear sampler and settings vec4 at bindings 2/3/4. Group 2: linear HDR sky cube + filtering
+sampler. The contact atlas and settings are supplied by `runtime::contact_debris`; see
+[game-runtime.md](docs/game-runtime.md) for the upload and material contract.
 Scene pipelines use all groups and sRGB output; shadows use group 0. Fence shadows use
 `vs_shadow`/`fs_shadow` masking; opaque casters may omit the fragment stage. `fs_opaque` has no
 discard.

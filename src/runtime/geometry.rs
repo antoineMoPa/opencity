@@ -203,6 +203,7 @@ pub(super) fn compile(
             super::surface_weathering::concrete(t, |p| super::surface_weathering::base(a, b, p));
         }
     }
+    let wall_contacts = super::contact_debris::WallContacts::new(&geometry.safety_walls);
     for (id, seg) in projection.segments.iter().enumerate() {
         let road = crate::road_profiles::road_for_segment(program, seg)
             .ok_or_else(|| format!("missing road {}", seg.road_name))?;
@@ -211,6 +212,7 @@ pub(super) fn compile(
         let mut distance = 0.;
         let mut paving_distances = vec![0.; road.elements.len()];
         for (row_index, pair) in rows.windows(2).enumerate() {
+            let wall_edges = wall_contacts.at_rows(pair);
             for (band, e) in road.elements.iter().enumerate() {
                 let effective = geometry.surface_element(id, e.kind);
                 let k = kind(effective);
@@ -260,6 +262,7 @@ pub(super) fn compile(
                     band,
                     along,
                     length,
+                    wall_edges,
                 );
                 // Vertical curb faces share the pavement's subdivision and slopes.
                 if k == SurfaceKind::Sidewalk {
@@ -556,7 +559,43 @@ pub(super) fn compile(
                 .fold(0., f32::max);
             map::intersection_footprint_half(j, width)
         });
-        for patch in super::junction_mesh::patches(&instance.geometry, half) {
+        let patches = super::junction_mesh::patches(&instance.geometry, half);
+        if native.is_some() {
+            let sidewalks = patches.iter().filter(|patch| {
+                patch.kind == BandKind::Surface && material(patch.material) == SurfaceKind::Sidewalk
+            });
+            for edge in super::junction_mesh::patch_boundary(sidewalks) {
+                let [a, b] = edge.map(world);
+                // The adjoining road owns the pavement on the other side of a
+                // mouth. A face across that seam would create a false curb.
+                if seams.iter().any(|&(start, end, _)| {
+                    [a, b]
+                        .iter()
+                        .all(|p| distance_squared([p[0], p[1]], start, end) < 1e-12)
+                }) {
+                    continue;
+                }
+                let first = city.triangles.len();
+                quad(
+                    city,
+                    [
+                        [a[0], a[1], a[2] + 0.0015],
+                        [b[0], b[1], b[2] + 0.0015],
+                        b,
+                        a,
+                    ],
+                    SurfaceKind::Sidewalk,
+                    None,
+                    [118, 122, 124],
+                );
+                for t in &mut city.triangles[first..] {
+                    super::surface_weathering::concrete(t, |p| {
+                        super::surface_weathering::base(a, b, p)
+                    });
+                }
+            }
+        }
+        for patch in patches {
             let k = material(patch.material);
             let offset = if patch.kind == BandKind::Marking {
                 0.0002

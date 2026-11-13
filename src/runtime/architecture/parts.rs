@@ -592,7 +592,7 @@ pub(super) fn geometry(recipe: BuildingRecipe) -> (Mesh, Vec<BuildingVolume>) {
     };
     kit.build();
     // Bake before world placement: exact cuboids, stable precision and rotation-independent AO.
-    super::super::ambient_occlusion::bake_cuboids(
+    super::super::ambient_occlusion::bake_cuboids_fast(
         &mut kit.mesh,
         recipe.floor_height * 1.25,
         Some(0.),

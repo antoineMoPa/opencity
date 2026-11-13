@@ -117,6 +117,26 @@ impl RoadGeometry {
                     &segment.end_ref
                 };
                 if let Some(reference) = reference {
+                    let local = map::junction_local_direction(
+                        WorldPoint {
+                            x: other.x - junction.position.x,
+                            y: other.y - junction.position.y,
+                        },
+                        rotation,
+                    );
+                    // A zero-stub exit still owns an open mouth and its seam
+                    // height even when its ordinary road surface is fully clipped.
+                    if endpoints
+                        .get(reference.as_str())
+                        .is_some_and(|ends| ends.len() == 1)
+                        && (local.x.abs().max(local.y.abs()) - junction.footprint_half).abs()
+                            < 0.0001
+                    {
+                        let boundaries = &self.surfaces[index].endpoints[usize::from(!end)];
+                        if let (Some(&a), Some(&b)) = (boundaries.first(), boundaries.last()) {
+                            seams.push((index, a, b));
+                        }
+                    }
                     pending.extend(
                         endpoints
                             .get(reference.as_str())

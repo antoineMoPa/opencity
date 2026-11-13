@@ -4,6 +4,58 @@ use crate::{
     runtime::{City, Mesh, Region},
 };
 #[test]
+fn automatic_walls_reach_sidewalk_metadata_on_straight_curved_and_graded_roads() {
+    let program = parse(include_str!(
+        "../../../tests/fixtures/contact_guard_walls.road"
+    ))
+    .unwrap();
+    let projection = crate::map::project(&program);
+    let mut geometry = crate::road_geometry::RoadGeometry::compile(&program, &projection);
+    geometry.configure_safety(&program, &projection, None);
+    let contacts = super::super::contact_debris::WallContacts::new(&geometry.safety_walls);
+    for (index, _) in projection.segments.iter().enumerate() {
+        let raised = index != 1;
+        for pair in geometry.cross_sections(index).windows(2) {
+            assert_eq!(contacts.at_rows(pair), [raised; 2]);
+        }
+    }
+    let city = City::from_program(&program, None).unwrap();
+    let mesh = city.mesh(Region::WholeMap, 0.04).unwrap();
+    let mut walls = 0;
+    for v in mesh
+        .vertices
+        .iter()
+        .filter(|v| v.surface[0] == SurfaceKind::Sidewalk as u32 as f32 && v.surface[3] > 3.)
+    {
+        let bits = v.surface[3] as u32;
+        let codes = [(bits >> 14) & 31, (bits >> 19) & 31];
+        if v.position[1] > 0.65 {
+            assert!(!codes.contains(&31));
+        } else {
+            assert!(codes.contains(&31));
+            walls += 1;
+        }
+    }
+    assert!(walls > 20);
+    let pair = &geometry.cross_sections(0)[..2];
+    let mut wall = *geometry
+        .safety_walls
+        .iter()
+        .find(|w| w.segment == 0)
+        .unwrap();
+    std::mem::swap(&mut wall.start, &mut wall.end);
+    assert!(super::super::contact_debris::WallContacts::new(&[wall])
+        .at_rows(pair)
+        .into_iter()
+        .any(|v| v));
+    wall.start.height -= 0.1;
+    wall.end.height -= 0.1;
+    assert_eq!(
+        super::super::contact_debris::WallContacts::new(&[wall]).at_rows(pair),
+        [false; 2]
+    );
+}
+#[test]
 fn pavement_contacts_skip_flush_lanes_and_find_raised_sidewalks() {
     let source = "road street: sidewalk carlane carlane sidewalk; end street(0,0,1,0);";
     let city = City::from_program(&parse(source).unwrap(), None).unwrap();

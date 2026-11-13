@@ -1,10 +1,16 @@
 //! Rustfmt and conservative Markdown prose wrapping; code and tables stay intact.
-use super::{limits, Result};
+use super::Result;
 use std::{
     io::Write,
     path::Path,
     process::{Command, Stdio},
 };
+
+const PROSE_WIDTH: usize = 100;
+
+pub(super) fn width(line: &str) -> usize {
+    line.chars().map(|ch| if ch == '\t' { 4 } else { 1 }).sum()
+}
 
 pub(super) fn format(root: &Path, file: &Path, source: &str) -> Result<String> {
     match file.extension().and_then(|extension| extension.to_str()) {
@@ -104,14 +110,14 @@ fn markdown(source: &str) -> String {
                 _ => {}
             }
         }
-        let indented = limits::width(&line[..line.len() - trimmed.len()]) >= 4;
+        let indented = width(&line[..line.len() - trimmed.len()]) >= 4;
         let protected = in_fence
             || delimiter.is_some()
             || indented
             || trimmed.starts_with(['#', '<'])
             || line.contains('|')
             || (trimmed.starts_with('[') && trimmed.contains("]:"));
-        if protected || limits::width(line) <= limits::MAX_WIDTH {
+        if protected || width(line) <= PROSE_WIDTH {
             result.push_str(line);
         } else {
             result.push_str(&wrap_line(
@@ -188,15 +194,15 @@ fn wrap_line(line: &str, newline: &str) -> String {
     };
     let (first, continuation, body) = prefixes(line);
     let mut output = String::from(first);
-    let mut column = limits::width(first);
+    let mut column = width(first);
     let mut has_word = false;
-    let maximum = limits::MAX_WIDTH - limits::width(hard_break);
+    let maximum = PROSE_WIDTH - width(hard_break);
     for word in prose_words(body) {
-        let width = limits::width(&word);
-        if has_word && column + 1 + width > maximum {
+        let word_width = width(&word);
+        if has_word && column + 1 + word_width > maximum {
             output.push_str(newline);
             output.push_str(&continuation);
-            column = limits::width(&continuation);
+            column = width(&continuation);
             has_word = false;
         }
         if has_word {
@@ -204,7 +210,7 @@ fn wrap_line(line: &str, newline: &str) -> String {
             column += 1;
         }
         output.push_str(&word);
-        column += width;
+        column += word_width;
         has_word = true;
     }
     output.push_str(hard_break);

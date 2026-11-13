@@ -1,5 +1,8 @@
 struct Camera { view: vec4<f32>, focus: vec4<f32>, viewport: vec4<f32>, elevation: vec4<f32>, clip: array<vec4<f32>, 4> };
 @group(0) @binding(2) var<uniform> camera: Camera;
+@group(2) @binding(0) var contact_atlas: texture_2d<f32>;
+@group(2) @binding(1) var contact_sampler: sampler;
+@group(2) @binding(2) var<uniform> contact_settings: vec4<f32>;
 struct VertexInput { @location(0) world: vec4<f32>, @location(1) color: vec4<f32>, @location(2) surface: vec4<f32> };
 struct VertexOutput { @builtin(position) position: vec4<f32>, @location(0) color: vec4<f32>, @location(1) world: vec3<f32>, @location(2) surface: vec4<f32>, @location(3) @interpolate(flat) material:vec2<f32> };
 @vertex fn scene_vs(input: VertexInput) -> VertexOutput {
@@ -87,6 +90,15 @@ fn bed_height(point: vec2<f32>) -> f32 {
     let panel = 0.5 + 0.5 * cos(across * 180.0);
     let brick_row = floor(floor_position * 7.0);
     let brick = 0.5 + 0.5*cos(across*340.0 + (brick_row % 2.0)*3.141593);
+    // Editor IDs 7/8 are pavement, 9 is infrastructure concrete. Other IDs stay unchanged.
+    if input.material.x>6.5&&input.material.x<9.5 {
+        let linear=pow(max(color,vec3<f32>(0.0)),vec3<f32>(2.2));
+        var shaded=linear;
+        if input.material.x>8.5 {
+            if abs(normal.z)<0.5 {shaded=contact_deposits(linear,input.surface.yz,facade_aa,true);}
+        } else {shaded=pavement_deposits(linear,input.surface.yz,facade_aa,input.material.y);}
+        return vec4<f32>(pow(max(shaded,vec3<f32>(0.0)),vec3<f32>(1.0/2.2)),input.color.a);
+    }
     if input.material.x>2.5&&input.material.x<5.5 {
         let radius=max(0.6,camera.viewport.x/max(camera.view.z,1.0)*0.7);
         var eye=vec3<f32>(camera.focus.xy+vec2<f32>(camera.focus.z,-camera.focus.w)*radius,

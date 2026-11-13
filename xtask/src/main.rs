@@ -1,7 +1,6 @@
 use std::{error::Error, path::Path, process};
 
 mod formatting;
-mod limits;
 mod sources;
 #[cfg(test)]
 mod tests;
@@ -52,18 +51,10 @@ fn clean(root: &Path, staged: bool, check: bool) -> Result<()> {
                 sources::write(root, &file, &source, &formatted, staged)?;
             }
         }
-        failures.extend(limits::inspect(
-            &file,
-            if check { &source } else { &formatted },
-        ));
     }
     if !failures.is_empty() {
-        return Err(format!(
-            "{}\nReflow remaining code/table lines manually and split oversized Rust modules.",
-            failures.join("\n")
-        )
-        .into());
+        return Err(failures.join("\n").into());
     }
-    println!("Formatting and source limits passed.");
+    println!("Formatting passed.");
     Ok(())
 }

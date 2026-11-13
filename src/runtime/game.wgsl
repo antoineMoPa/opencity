@@ -5,6 +5,9 @@ struct Camera { view_projection: mat4x4<f32>, light_view_projection: mat4x4<f32>
 @group(0) @binding(0) var<uniform> camera: Camera;
 @group(1) @binding(0) var shadow_map: texture_depth_2d;
 @group(1) @binding(1) var shadow_sampler: sampler_comparison;
+@group(1) @binding(2) var contact_atlas: texture_2d<f32>;
+@group(1) @binding(3) var contact_sampler: sampler;
+@group(1) @binding(4) var<uniform> contact_settings: vec4<f32>;
 // Group 2: shared linear HDR atmosphere cube and filtering sampler.
 @group(2) @binding(0) var sky_environment: texture_cube<f32>;
 @group(2) @binding(1) var sky_sampler: sampler;
@@ -171,6 +174,10 @@ fn prepare_surface(v:Output)->SurfaceData {
     return shade_surface(v,front,1.0,prepare_surface(v));
 }
 fn shade_surface(v:Output,front:bool,coverage:f32,surface:SurfaceData)->vec4<f32> {
+    return shade_surface_lit(v,front,coverage,surface,vec3<f32>(0.0));
+}
+// Consumers supply local diffuse irradiance before exposure, fog and tone mapping.
+fn shade_surface_lit(v:Output,front:bool,coverage:f32,surface:SurfaceData,local:vec3<f32>)->vec4<f32> {
     var base=v.color;let p=v.world.xy;let kind=v.surface.x;var facade_glow=0.0;
     // Only imported building models opt into these local weathering coordinates.
     if kind>6.5&&kind<7.5&&v.surface.w== -1.0 {
@@ -190,13 +197,14 @@ fn shade_surface(v:Output,front:bool,coverage:f32,surface:SurfaceData)->vec4<f32
         base*=0.35*(0.80+0.20*grain+0.15*broad-crack);
         let edge=pavement_edges(v.fence_uv.y,v.surface.w);
         base=pavement_weather(p,surface.world_footprint.xy,base,true,edge,0.0);
+        base=pavement_deposits(base,v.fence_uv,surface.paving_footprint,v.surface.w);
     } else if kind<1.5 { // Multi-scale grass cover, soil and blades.
         base=mix(base,vec3<f32>(0.18,0.22,0.15),0.45);
         base=mix(base*0.72,base*1.22,broad)*(0.90+0.18*grain);
     } else if kind<2.5 {
         // Only authored top surfaces carry joints. Curb faces stay plain.
         var joint_coverage=0.0;
-        let paving_style=u32(max(round(v.surface.w),0.0))&3u;
+        let paving_style=select(u32(max(round(v.surface.w),0.0))&3u,2u,v.surface.w< -4.0);
         if paving_style==2u && n.z>0.5 {
             // A single distance coordinate makes every gap cross the full band;
             // there is no across-width repetition to create longitudinal lines.
@@ -207,10 +215,12 @@ fn shade_surface(v:Output,front:bool,coverage:f32,surface:SurfaceData)->vec4<f32
         }
         if v.surface.w== -2.0 {
             base=concrete_weather(v.world,surface.world_footprint,v.fence_uv.y,n,base);
+            if abs(n.z)<0.5 {base=contact_deposits(base,v.fence_uv,surface.paving_footprint,true);}
         } else {
             let edge=select(vec2<f32>(0.0),pavement_edges(v.fence_uv.y,v.surface.w),paving_style==2u);
             base*=mix(1.0,0.65,joint_coverage);
             base=pavement_weather(p,surface.world_footprint.xy,base,false,edge,joint_coverage);
+            base=pavement_deposits(base,v.fence_uv,surface.paving_footprint,v.surface.w);
         }
     }
     else if kind<3.5 { // Editor facade palette/floor spacing with game lighting.
@@ -247,6 +257,7 @@ fn shade_surface(v:Output,front:bool,coverage:f32,surface:SurfaceData)->vec4<f32
     } else if kind<5.5 {base*=0.86+0.25*grain;}
     else if kind>6.5&&kind<7.5&&v.surface.w== -2.0 {
         base=concrete_weather(v.world,surface.world_footprint,v.fence_uv.y,n,base);
+        if abs(n.z)<0.5 {base=contact_deposits(base,v.fence_uv,surface.paving_footprint,true);}
     }
     else if kind>9.5&&kind<10.5 {
         // A small, anti-aliased shingle pattern scaled by the consumer's unit.
@@ -264,7 +275,7 @@ fn shade_surface(v:Output,front:bool,coverage:f32,surface:SurfaceData)->vec4<f32
         let sun=camera.sun_exposure.xyz/max(length(camera.sun_exposure.xyz),0.001);
         let direct=max(dot(n,sun),0.0)*visibility(v.world,n);
         let lighting=vec3<f32>(mix(0.12,0.43,daylight))
-            +camera.sun_color.rgb*direct*mix(0.15,0.85,daylight);
+            +camera.sun_color.rgb*direct*mix(0.15,0.85,daylight)+local;
         let reflected=reflect(-view,n);
         let sky=textureSampleLevel(sky_environment,sky_sampler,reflected,0.0).rgb;
         // Soften the clear-sky chroma on architectural glass while retaining
@@ -290,7 +301,7 @@ fn shade_surface(v:Output,front:bool,coverage:f32,surface:SurfaceData)->vec4<f32
         if kind>3.5&&kind<4.5 {spec=pow(max(dot(n,halfway),0.0),120.0)*1.3;}
         let ambient_tint=mix(vec3<f32>(0.42,0.56,0.85),vec3<f32>(1.0),daylight);
         let sunlight=mix(vec3<f32>(0.40,0.52,0.80),camera.sun_color.rgb*camera.sun_color.w,daylight);
-        lit=base*(ambient_tint*hemi+sunlight*diffuse*mix(0.12,0.95,daylight))+sunlight*spec*mix(0.15,1.0,daylight);
+        lit=base*(ambient_tint*hemi+sunlight*diffuse*mix(0.12,0.95,daylight)+local)+sunlight*spec*mix(0.15,1.0,daylight);
         let darkness=pow(1.0-daylight,2.0);
         lit+=vec3<f32>(0.9,0.48,0.18)*facade_glow*darkness;
         if room_mask>0.0 {lit=mix(lit,room_glass(facade_room,n,view,daylight),room_mask);}
@@ -300,7 +311,7 @@ fn shade_surface(v:Output,front:bool,coverage:f32,surface:SurfaceData)->vec4<f32
             lit+=vec3<f32>(1.3,0.85,0.4)*darkness;
         }
     }
-    let distance=length(eye);let fog=1.0-exp(-distance*0.025)*(1.0-smoothstep(5.8,7.6,distance));
+    let distance=length(eye);let fog=(1.0-exp(-distance*0.025)*(1.0-smoothstep(5.8,7.6,distance)))*(1.0-camera.daylight_sky.y);
     // Exposure and filmic compression. Surface target is sRGB.
     lit*=camera.sun_exposure.w;lit=lit/(lit+vec3<f32>(1.0));
     let sky=textureSampleLevel(sky_environment,sky_sampler,-view,0.0).rgb*camera.sun_exposure.w;

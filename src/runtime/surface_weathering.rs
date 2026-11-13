@@ -8,13 +8,15 @@ enum Edge {
     Flush,
     Exposed,
     Raised(f32),
+    Wall,
 }
 impl Edge {
     fn bits(self) -> u32 {
         match self {
             Self::Flush => 0,
             Self::Exposed => 1,
-            Self::Raised(height) => 1 + (height * 10000.).round().clamp(1., 30.) as u32,
+            Self::Raised(height) => 1 + (height * 10000.).round().clamp(1., 29.) as u32,
+            Self::Wall => 31,
         }
     }
 }
@@ -51,12 +53,29 @@ pub(super) fn band(
     band: usize,
     distance: f32,
     length: f32,
+    walls: [bool; 2],
 ) {
+    let Some(data) = band_coordinates(road, rows, band, distance, length, walls) else {
+        return;
+    };
+    for (t, ids) in triangles.iter_mut().zip([[0, 1, 2], [0, 2, 3]]) {
+        t.data[2] = data[0][2];
+        t.facade_uv = Some(ids.map(|i| [data[i][0], data[i][1]]));
+    }
+}
+pub(super) fn band_coordinates(
+    road: &RoadDefinition,
+    rows: &[CrossSection],
+    band: usize,
+    distance: f32,
+    length: f32,
+    walls: [bool; 2],
+) -> Option<[[f32; 3]; 4]> {
     let kind = road.elements[band].kind;
     let layout = match geometry::kind(kind) {
         SurfaceKind::Sidewalk => 2,
         SurfaceKind::Asphalt => 3,
-        _ => return,
+        _ => return None,
     };
     let width = |row: &CrossSection| {
         let a = row.boundaries[band].point;
@@ -64,8 +83,16 @@ pub(super) fn band(
         (b.x - a.x).hypot(b.y - a.y)
     };
     let w = (width(&rows[0]) + width(&rows[1])) * 0.5;
-    let left = edge(kind, band.checked_sub(1).map(|i| road.elements[i].kind));
-    let right = edge(kind, road.elements.get(band + 1).map(|e| e.kind));
+    let left = if band == 0 && walls[0] {
+        Edge::Wall
+    } else {
+        edge(kind, band.checked_sub(1).map(|i| road.elements[i].kind))
+    };
+    let right = if band + 1 == road.elements.len() && walls[1] {
+        Edge::Wall
+    } else {
+        edge(kind, road.elements.get(band + 1).map(|e| e.kind))
+    };
     let metadata = packed(w, layout, left, right);
     let uv = [
         [distance, 0.],
@@ -73,10 +100,7 @@ pub(super) fn band(
         [distance + length, w],
         [distance, w],
     ];
-    for (t, ids) in triangles.iter_mut().zip([[0, 1, 2], [0, 2, 3]]) {
-        t.data[2] = metadata;
-        t.facade_uv = Some(ids.map(|i| uv[i]));
-    }
+    Some(uv.map(|uv| [uv[0], uv[1], metadata]))
 }
 pub(super) fn base(a: [f32; 3], b: [f32; 3], p: [f32; 3]) -> f32 {
     let d = [b[0] - a[0], b[1] - a[1]];

@@ -106,6 +106,14 @@ fn render_test_callback(callback: SceneCallback) -> Option<Vec<u8>> {
     render_test_callback_at(callback, 128, 128)
 }
 fn render_test_callback_at(callback: SceneCallback, width: u32, height: u32) -> Option<Vec<u8>> {
+    render_test_callback_with_contacts(callback, width, height, true)
+}
+fn render_test_callback_with_contacts(
+    callback: SceneCallback,
+    width: u32,
+    height: u32,
+    enabled: bool,
+) -> Option<Vec<u8>> {
     assert_eq!(width % 64, 0);
     let instance = wgpu::Instance::default();
     let Ok(adapter) = block_on(instance.request_adapter(&wgpu::RequestAdapterOptions::default()))
@@ -134,6 +142,13 @@ fn render_test_callback_at(callback: SceneCallback, width: u32, height: u32) -> 
         &mut encoder,
         &mut resources,
     );
+    let contact = resources.get::<RenderResources>().unwrap();
+    let settings = opencity::runtime::contact_debris::Settings {
+        enabled,
+        ..Default::default()
+    }
+    .uniform();
+    queue.write_buffer(&contact.contact.settings, 0, bytes_of(&settings));
     let output = device.create_texture(&wgpu::TextureDescriptor {
         label: Some("scene test output"),
         size: wgpu::Extent3d {
@@ -784,3 +799,5 @@ mod surface_gpu_tests;
 
 #[path = "architecture_gpu_tests.rs"]
 mod architecture_gpu_tests;
+#[path = "contact_gpu_tests.rs"]
+mod contact_gpu_tests;

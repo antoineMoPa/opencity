@@ -163,8 +163,19 @@ pub(super) fn add_resolved_road_surface(
                 height: a.height + (b.height - a.height) * t,
             }
         };
+    let mut along = 0.;
     for pair in rows.windows(2) {
+        let wall_edges = scene
+            .contact_walls
+            .get_or_init(|| {
+                opencity::runtime::contact_debris::WallContacts::new(&geometry.safety_walls)
+            })
+            .at_rows(pair);
+        let a = pair[0].boundaries.first().unwrap().point;
+        let b = pair[1].boundaries.first().unwrap().point;
+        let length = (b.x - a.x).hypot(b.y - a.y);
         for (band, element) in road.elements.iter().enumerate() {
+            let start = scene.vertices.len();
             emit(
                 scene,
                 [
@@ -176,7 +187,23 @@ pub(super) fn add_resolved_road_surface(
                 kind_color(geometry.surface_element(index, element.kind), palette.theme),
                 0.0,
             );
+            if let Some(metadata) = opencity::runtime::contact_debris::pavement_band_with_walls(
+                road, pair, band, along, length, wall_edges,
+            ) {
+                let id = match element.kind {
+                    RoadElementKind::Sidewalk
+                    | RoadElementKind::BusStop
+                    | RoadElementKind::BuildingEdge
+                    | RoadElementKind::Barrier => 8.,
+                    RoadElementKind::Verge | RoadElementKind::Middle => continue,
+                    _ => 7.,
+                };
+                for (v, i) in scene.vertices[start..].iter_mut().zip([0, 1, 2, 0, 2, 3]) {
+                    v.surface = [id, metadata[i][0], metadata[i][1], metadata[i][2]];
+                }
+            }
         }
+        along += length;
         let left = [pair[0].boundaries[0], pair[1].boundaries[0]];
         let right = [
             *pair[0].boundaries.last().unwrap(),
@@ -278,6 +305,7 @@ pub(super) fn append_intersection(
     intersection: &map::Intersection,
     palette: EditorPalette,
 ) {
+    let first = scene.vertices.len();
     let mut seams = Vec::new();
     for (index, segment) in projection.segments.iter().enumerate() {
         for (reference, is_end) in [(&segment.start_ref, false), (&segment.end_ref, true)] {
@@ -317,6 +345,15 @@ pub(super) fn append_intersection(
         |point| intersection_surface_height(point, &seams),
         scene,
     );
+    let sidewalk = kind_color(RoadElementKind::Sidewalk, palette.theme);
+    let asphalt = kind_color(RoadElementKind::CarLane, palette.theme);
+    for v in &mut scene.vertices[first..] {
+        if v.color == sidewalk {
+            v.surface = [8., 0., 0., 0.];
+        } else if v.color == asphalt {
+            v.surface = [7., 0., 0., 0.];
+        }
+    }
 }
 
 pub(super) fn append_road(
@@ -335,12 +372,24 @@ pub(super) fn append_road(
         for face in wall.barrier_faces() {
             for i in [0, 1, 2, 0, 2, 3] {
                 let p = face[i];
+                let a = wall.start;
+                let b = wall.end;
+                let d = [b.point.x - a.point.x, b.point.y - a.point.y];
+                let along = (((p[0] - a.point.x) * d[0] + (p[1] - a.point.y) * d[1])
+                    / (d[0] * d[0] + d[1] * d[1]).max(1e-12))
+                .clamp(0., 1.);
+                let foot = a.height + (b.height - a.height) * along;
                 scene.vertices.push(WorldVertex {
                     point: WorldPoint { x: p[0], y: p[1] },
                     height: p[2] + PAVEMENT_OFFSET,
                     depth_bias: 0.,
                     color: kind_color(RoadElementKind::Barrier, palette.theme),
-                    surface: [0.; 4],
+                    surface: [
+                        9.,
+                        if d[0].abs() > d[1].abs() { p[0] } else { p[1] },
+                        (p[2] - foot).max(0.),
+                        -2.,
+                    ],
                 });
             }
         }

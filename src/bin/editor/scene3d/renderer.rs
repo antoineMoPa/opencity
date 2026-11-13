@@ -19,6 +19,8 @@ pub struct SceneCallback {
 
 struct RenderResources {
     water: water_gpu::WaterResources,
+    contact: contact_gpu::ContactTexture,
+    contact_group: wgpu::BindGroup,
     scene_pipeline: wgpu::RenderPipeline,
     close_zoom_pipeline: wgpu::RenderPipeline,
     camera_buffer: wgpu::Buffer,
@@ -271,6 +273,7 @@ impl egui_wgpu::CallbackTrait for SceneCallback {
             });
             pass.set_bind_group(0, &renderer.camera_bind_group, &[]);
             pass.set_bind_group(1, &renderer.water.bind_group, &[]);
+            pass.set_bind_group(2, &renderer.contact_group, &[]);
             pass.set_vertex_buffer(0, renderer.scene_buffer.as_ref().unwrap().1.slice(..));
             if let Some(span) = &self.scene.road_span {
                 if span.start > 0 {
@@ -296,11 +299,11 @@ impl egui_wgpu::CallbackTrait for SceneCallback {
                         pass.draw(range, 0..1);
                     }
                 }
-                if span.end < self.scene.vertices.len() as u32 {
-                    pass.draw(span.end..self.scene.vertices.len() as u32, 0..1);
+                if span.end < self.scene.gpu_vertices().len() as u32 {
+                    pass.draw(span.end..self.scene.gpu_vertices().len() as u32, 0..1);
                 }
             } else {
-                pass.draw(0..self.scene.vertices.len() as u32, 0..1);
+                pass.draw(0..self.scene.gpu_vertices().len() as u32, 0..1);
             }
         }
         let vertex_buffer = renderer.scene_buffer.as_ref().unwrap().1.clone();
@@ -310,7 +313,7 @@ impl egui_wgpu::CallbackTrait for SceneCallback {
         let bind_group = target.bind_group.clone();
         resources.insert(FrameResources {
             vertex_buffer,
-            vertices: self.scene.vertices.len() as u32,
+            vertices: self.scene.gpu_vertices().len() as u32,
             color,
             multisampled_color,
             depth,
@@ -343,6 +346,16 @@ impl egui_wgpu::CallbackTrait for SceneCallback {
 impl RenderResources {
     fn new(device: &wgpu::Device, queue: &wgpu::Queue, target_format: wgpu::TextureFormat) -> Self {
         let water = water_gpu::WaterResources::new(device, queue);
+        let contact = contact_gpu::ContactTexture::new(device, queue);
+        let contact_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("contact masks"),
+            entries: &contact_gpu::ContactTexture::layout(0),
+        });
+        let contact_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("contact masks"),
+            layout: &contact_layout,
+            entries: &contact.entries(0),
+        });
         let scene_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("opencity scene shader"),
             source: wgpu::ShaderSource::Wgsl(SCENE_SHADER.into()),
@@ -380,7 +393,11 @@ impl RenderResources {
         });
         let scene_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("opencity scene layout"),
-            bind_group_layouts: &[Some(&camera_layout), Some(&water.layout)],
+            bind_group_layouts: &[
+                Some(&camera_layout),
+                Some(&water.layout),
+                Some(&contact_layout),
+            ],
             immediate_size: 0,
         });
         let make_scene_pipeline = |samples| {
@@ -503,6 +520,8 @@ impl RenderResources {
         Self {
             water,
             scene_pipeline,
+            contact,
+            contact_group,
             close_zoom_pipeline,
             camera_buffer,
             camera_bind_group,

@@ -4,7 +4,8 @@ fn pavement_edges(across:f32,packed:f32)->vec2<f32> {
     let width=f32((bits>>2u)&4095u)*0.0001;
     if width<=0.0 {return vec2<f32>(0.0);}
     let codes=vec2<u32>((bits>>14u)&31u,(bits>>19u)&31u);
-    let distance=max(vec2<f32>(across,width-across),vec2<f32>(0.0));
+    let foot=select(vec2<f32>(0.0),vec2<f32>(0.002),codes==vec2<u32>(31u));
+    let distance=max(vec2<f32>(across,width-across)-foot,vec2<f32>(0.0));
     let height=max(vec2<f32>(codes)-vec2<f32>(1.0),vec2<f32>(0.0))*0.0001;
     let contact=select(vec2<f32>(0.0),vec2<f32>(1.0)-distance/
         sqrt(distance*distance+height*height+vec2<f32>(1e-12)),codes>vec2<u32>(1u));

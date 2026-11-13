@@ -25,7 +25,9 @@ pub(super) fn order(kind: Kind) -> usize {
         Kind::RemoveElement => 8,
         Kind::SplitLeft => 9,
         Kind::SplitRight => 10,
-        Kind::Stop => 11,
+        Kind::ThreeWay => 11,
+        Kind::FourWay => 12,
+        Kind::Stop => 13,
     }
 }
 
@@ -92,6 +94,17 @@ fn paint(painter: &egui::Painter, rect: Rect, icon: Icon, color: Color32) {
             painter.circle_filled(at(12., 17.), 1., color);
         }
         Icon::Proposal(kind) => match kind {
+            Kind::ThreeWay | Kind::FourWay => {
+                // Road edges leave an open, connected T or cross at the centre.
+                line(&[(8., 21.), (8., 16.), (3., 16.)]);
+                line(&[(16., 21.), (16., 16.), (21., 16.)]);
+                if matches!(kind, Kind::FourWay) {
+                    line(&[(3., 8.), (8., 8.), (8., 3.)]);
+                    line(&[(21., 8.), (16., 8.), (16., 3.)]);
+                } else {
+                    line(&[(3., 8.), (21., 8.)]);
+                }
+            }
             Kind::Continue => {
                 line(&[(12., 21.), (12., 3.)]);
                 line(&[(7., 8.), (12., 3.), (17., 8.)]);

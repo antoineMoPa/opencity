@@ -85,6 +85,7 @@ pub struct CrossSection {
 
 struct Surface {
     rows: Vec<CrossSection>,
+    endpoints: [Vec<Vertex>; 2],
     forbidden: Vec<(Triangle, RoadElementKind)>,
     lanes: Vec<Triangle>,
     pavement: Vec<Triangle>,
@@ -521,6 +522,25 @@ impl RoadGeometry {
         &self.surfaces[segment].rows
     }
 
+    /// Surface-only authoring pass: share profile resolution without building
+    /// collision triangles, wall intersections, bridges or terrain protection.
+    pub fn placement_cross_sections_all(
+        program: &Program,
+        projection: &Projection,
+    ) -> Vec<Vec<CrossSection>> {
+        let profiles = crate::road_profiles::road_profiles(program, projection);
+        projection
+            .segments
+            .iter()
+            .enumerate()
+            .map(|(index, segment)| {
+                definition(program, segment)
+                    .map(|road| surface_rows(segment, road, &profiles[index]).0)
+                    .unwrap_or_default()
+            })
+            .collect()
+    }
+
     /// Compile only one road's surface rows while resolving its profile against
     /// the complete projection (including attached parent roads).
     pub fn placement_cross_sections(
@@ -545,6 +565,7 @@ impl RoadGeometry {
                 let Some(road) = definition(program, segment) else {
                     return Surface {
                         rows: vec![],
+                        endpoints: [vec![], vec![]],
                         forbidden: vec![],
                         lanes: vec![],
                         pavement: vec![],
@@ -552,6 +573,16 @@ impl RoadGeometry {
                     };
                 };
                 let (rows, ok) = surface_rows(segment, road, &profiles[index]);
+                let endpoints = [0., 1.].map(|t| {
+                    let (widths, mut offset) =
+                        crate::road_profiles::section_widths(road, &profiles[index], t);
+                    let mut boundaries = vec![offset_vertex(segment, t, offset)];
+                    for width in widths {
+                        offset += width;
+                        boundaries.push(offset_vertex(segment, t, offset));
+                    }
+                    boundaries
+                });
                 if !ok {
                     unresolved.push(index);
                 }
@@ -596,6 +627,7 @@ impl RoadGeometry {
                 }
                 Surface {
                     rows,
+                    endpoints,
                     forbidden,
                     lanes,
                     pavement,

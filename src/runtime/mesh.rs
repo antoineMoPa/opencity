@@ -9,9 +9,12 @@ use std::collections::HashSet;
 /// Entrance paving uses [Sidewalk, local X / unit, local Y / unit, 1].
 /// Road bands use [kind, distance along band, distance across band, packed pavement].
 /// Pavement bits: layout (2=sidewalk, 3=road), width in cm (12 bits), then two 5-bit edges.
-/// Edge 0=flush, 1=exposed; 2..31=raised contact with height (edge-1) cm.
+/// Edge 0=flush, 1=exposed; 2..30=raised contact with height (edge-1) cm.
+/// Edge 31=automatic guard wall: its face extends 20 cm inward from the band edge.
 /// Legacy junction tops retain [Sidewalk, distance along band, 0, 2].
 /// Infrastructure concrete uses [kind, world horizontal coordinate, height above foot, -2].
+/// Clipped junction contacts use [kind, edge texture distance, distance from contact, -4-length].
+/// Their finite footprint is baked at mesh preparation; support/collision geometry is unchanged.
 /// Procedural facades use [Facade, bay U, floor V, packed architecture flags].
 #[derive(Clone, Copy, Debug)]
 #[repr(C)]
@@ -304,6 +307,7 @@ impl City {
                 wall.append(&mut mesh);
             }
         }
+        super::contact_debris::prepare_mesh(&mut mesh);
         Ok(mesh)
     }
     /// Deterministic placements anchored to sidewalk bands, independent of camera motion.

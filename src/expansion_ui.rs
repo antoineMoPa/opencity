@@ -21,6 +21,7 @@ pub struct Picker {
     pub selected: usize,
     end: Option<usize>,
     length: f32,
+    junction_extension: f32,
     curve_degrees: f32,
     grade: f32,
     element: crate::RoadElementKind,
@@ -42,6 +43,7 @@ impl Default for Picker {
             selected: 0,
             end: None,
             length: 1.,
+            junction_extension: 0.01,
             curve_degrees: 45.,
             grade: 0.04,
             element: crate::RoadElementKind::CarLane,
@@ -241,6 +243,7 @@ impl Picker {
             &self.ends[index],
             expansion::Options {
                 length: self.length,
+                junction_extension: self.junction_extension,
                 curve: self.curve_degrees.to_radians(),
                 grade: self.grade,
                 element: self.element,
@@ -416,6 +419,7 @@ impl Picker {
                                 self.steps,
                                 expansion::Options {
                                     length: self.length,
+                                    junction_extension: self.junction_extension,
                                     curve: self.curve_degrees.to_radians(),
                                     grade: self.grade,
                                     element: self.element,
@@ -488,15 +492,32 @@ impl Picker {
             return;
         }
         ui.separator();
-        let mut changed = ui
-            .add(
+        let junction = matches!(kind, expansion::Kind::ThreeWay | expansion::Kind::FourWay);
+        let mut changed = if junction {
+            let mut metres = self.junction_extension * 100.;
+            let changed = ui
+                .add(
+                    egui::DragValue::new(&mut metres)
+                        .range(0. ..=10000.)
+                        .speed(0.25)
+                        .suffix(" m"),
+                )
+                .on_hover_text("Street extension after the intersection; 0 m ends at its edge")
+                .changed();
+            if changed {
+                self.junction_extension = metres / 100.;
+            }
+            changed
+        } else {
+            ui.add(
                 egui::DragValue::new(&mut self.length)
                     .range(0.05..=100.)
                     .speed(0.05)
                     .suffix(" u"),
             )
             .on_hover_text("Length in map units")
-            .changed();
+            .changed()
+        };
         match kind {
             expansion::Kind::CurveLeft | expansion::Kind::CurveRight => {
                 changed |= ui
@@ -807,3 +828,5 @@ mod tests {
 
 #[cfg(test)]
 mod follow_tests;
+#[cfg(test)]
+mod sizing_tests;

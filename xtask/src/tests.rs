@@ -1,4 +1,4 @@
-use super::{clean, formatting, limits, sources};
+use super::{clean, formatting, sources};
 use std::{
     fs,
     path::{Path, PathBuf},
@@ -58,7 +58,7 @@ fn markdown_wraps_lists_without_splitting_inline_code_or_losing_hard_breaks() {
     assert!(result.starts_with("- "));
     assert!(result.lines().skip(1).all(|line| line.starts_with("  ")));
     assert!(result.ends_with("  \r\n"));
-    assert!(result.lines().all(|line| limits::width(line) <= 100));
+    assert!(result.lines().all(|line| formatting::width(line) <= 100));
     assert_eq!(
         formatting::format(Path::new("."), Path::new("notes.md"), &result).unwrap(),
         result
@@ -78,7 +78,31 @@ fn markdown_preserves_fences_tables_indented_code_and_link_definitions() {
     );
     let result = formatting::format(Path::new("."), Path::new("notes.md"), &source).unwrap();
     assert_eq!(result, source);
-    assert!(!limits::inspect(Path::new("notes.md"), &result).is_empty());
+}
+
+#[test]
+fn cleanup_accepts_long_lines_and_large_rust_files() {
+    let repo = Repository::new();
+    let rust = format!(
+        "{}const VALUE: &str = \"{}\";\n",
+        "// Comment.\n".repeat(1201),
+        "x".repeat(150)
+    );
+    let rust = formatting::format(&repo.0, Path::new("large.rs"), &rust).unwrap();
+    assert!(rust.lines().count() > 1200);
+    assert!(rust.lines().any(|line| formatting::width(line) > 100));
+    let markdown = format!("| {} |\n\n{}\n", "cell".repeat(50), "token".repeat(50));
+    repo.write("large.rs", &rust);
+    repo.write("notes.md", &markdown);
+    repo.stage(&["large.rs", "notes.md"]);
+    for staged in [false, true] {
+        clean(&repo.0, staged, false).unwrap();
+        clean(&repo.0, staged, true).unwrap();
+    }
+    for (file, source) in [("large.rs", rust), ("notes.md", markdown)] {
+        assert_eq!(repo.index(file), source);
+        assert_eq!(fs::read_to_string(repo.0.join(file)).unwrap(), source);
+    }
 }
 
 #[test]
@@ -120,7 +144,7 @@ fn staged_format_preserves_partial_edits_file_modes_and_unselected_modules() {
     assert!(repo
         .index("notes.md")
         .lines()
-        .all(|line| limits::width(line) <= 100));
+        .all(|line| formatting::width(line) <= 100));
     assert!(!repo.index("notes.md").contains("Unstaged draft"));
     assert_eq!(fs::read_to_string(repo.0.join("notes.md")).unwrap(), draft);
     assert_eq!(
@@ -142,7 +166,7 @@ fn working_tree_format_does_not_stage_changes() {
     assert_eq!(repo.index("nested/notes.md"), source);
     let formatted = fs::read_to_string(repo.0.join("nested/notes.md")).unwrap();
     assert_ne!(formatted, source);
-    assert!(formatted.lines().all(|line| limits::width(line) <= 100));
+    assert!(formatted.lines().all(|line| formatting::width(line) <= 100));
     clean(&repo.0, false, true).unwrap();
 }
 

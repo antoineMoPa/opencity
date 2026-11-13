@@ -37,6 +37,7 @@ pub struct Scene {
     road_span: Option<Range<u32>>,
     road_ranges: Vec<RoadDrawRange>,
     gpu_vertices: std::sync::OnceLock<Vec<GpuVertex>>,
+    contact_walls: std::sync::OnceLock<opencity::runtime::contact_debris::WallContacts>,
 }
 
 struct RoadDrawRange {
@@ -53,8 +54,12 @@ impl Scene {
     }
 
     fn gpu_vertices(&self) -> &[GpuVertex] {
-        self.gpu_vertices
-            .get_or_init(|| self.vertices.iter().map(gpu_vertex_from_world).collect())
+        self.gpu_vertices.get_or_init(|| {
+            contact_gpu::prepare_vertices(
+                self.vertices.iter().map(gpu_vertex_from_world).collect(),
+                self.road_span.as_ref().map_or(0, |s| s.end as usize),
+            )
+        })
     }
 }
 
@@ -167,5 +172,7 @@ pub use renderer::SceneCallback;
 #[path = "scene3d/tests.rs"]
 mod tests;
 
+#[path = "scene3d/contact_gpu.rs"]
+mod contact_gpu;
 #[path = "scene3d/water_gpu.rs"]
 mod water_gpu;

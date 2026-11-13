@@ -14,6 +14,8 @@ fn accepted_shapes_select_the_new_tip_and_emit_one_camera_target() {
         expansion::Kind::BranchRight,
         expansion::Kind::SplitLeft,
         expansion::Kind::SplitRight,
+        expansion::Kind::ThreeWay,
+        expansion::Kind::FourWay,
     ] {
         for at_end in [false, true] {
             if !at_end
@@ -59,7 +61,12 @@ fn accepted_shapes_select_the_new_tip_and_emit_one_camera_target() {
             assert!(picker.take_follow_target().is_none());
             let next = &picker.ends[picker.end.unwrap()];
             assert_eq!([next.point.x, next.point.y, next.height], expected);
-            assert_eq!(picker.selected().unwrap().kind, expansion::Kind::Continue);
+            assert_eq!(
+                picker.selected().unwrap().kind,
+                expansion::Kind::Continue,
+                "{kind:?} at_end={at_end}: {:?}",
+                picker.selected().unwrap().end.point
+            );
             picker.accept(&mut program);
             assert!(
                 picker.take_follow_target().is_some(),

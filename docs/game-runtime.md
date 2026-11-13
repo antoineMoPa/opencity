@@ -163,6 +163,25 @@ the same five-face rooms. `SurfaceKind::Light` glows at night; `SurfaceKind::Roo
 texture unit in `surface.y`. Games can replace the shader or bind an all-lit depth texture to omit
 shadowing.
 
+The shared editor and game shaders use the same baked contact texture for curb gutters and
+infrastructure wall bases. Defaults are 72% grime, 0.0063 map units of spread (63 cm with the
+infrastructure shader's 100 m/unit convention), and 86% debris visibility. Debris is a flat material
+approximation with mipmaps and footprint fading, without particles, physics, or added draw calls.
+Ordinary bands reuse their edge coordinates; mesh preparation clips legacy junction pavement at
+supported contacts without changing collision/support geometry. Curved bands retain their source
+texture phase. Flush lanes and surfaces on other decks remain clean.
+Automatic guard walls are indexed once from their actual rendered spans, so adjacent sidewalk
+bands collect deposits even without an authored barrier element. The reserved wall edge code
+accounts for the guard's 20 cm half-width. The darker gradient uses the full spread on wall faces.
+
+For `GAME_SHADER`, group 1 additionally requires a linear `Rgba8Unorm` contact atlas at binding 2,
+a repeat-U/clamp-V trilinear sampler at binding 3, and a 16-byte `vec4<f32>` uniform at binding 4.
+Upload the complete mip chain from `runtime::contact_debris::atlas()` once per device; it occupies
+699,068 texture bytes before driver overhead. `Settings::default().uniform()` supplies grime,
+map-space spread, debris opacity, and the enabled flag. Bind the resources even when disabled.
+The original vertex stride stays 52 bytes. `EDITOR_SHADER` uses group 2 bindings 0/1/2 for the same
+resources; editor pavement IDs 7/8 and infrastructure ID 9 select the shared material functions.
+
 Validate the library with `cargo test --no-default-features --features game-runtime`. Runtime
 integration tests cover structured selection, one-way lanes, polygon containment, stacked
 roads/grades, support/mesh consistency, footprint collision, deterministic details and

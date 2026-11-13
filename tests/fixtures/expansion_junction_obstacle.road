@@ -1,0 +1,2 @@
+# Inside the junction corner, clear of the narrow approach centrelines.
+building(0.2, 0.06,0.12, 0.11,0.12, 0.11,0.17, 0.06,0.17);

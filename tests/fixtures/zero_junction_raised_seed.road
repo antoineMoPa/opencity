@@ -1,0 +1,7 @@
+# Raised, rotated road end from the recorded junction regression.
+road cross_street: sidewalk carlane middle carlane sidewalk; end
+far = map_point(1.3823,-2.6841);
+tip = map_point(0.6965,-3.4119);
+approach = cross_street(tip,0.9251,-3.1693,1.1537,-2.9267,far);
+grade(approach,0.142,0.102);
+land(-2,-5,3,-5,3,1,-2,1);

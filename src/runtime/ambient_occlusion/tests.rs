@@ -70,6 +70,27 @@ fn ground_only_shades_low_walls_and_bad_radius_is_a_noop() {
 }
 
 #[test]
+fn fast_bake_retains_contact_shading_and_leaves_mesh_topology_unchanged() {
+    let mut mesh = floor();
+    mesh.quad(
+        [[0., 0., 0.], [0., 1., 0.], [0., 1., 1.], [0., 0., 1.]],
+        [0.5; 3],
+        SurfaceKind::Prop,
+    );
+    let original = mesh.clone();
+    bake_fast(&mut mesh, 0.3, Some(0.));
+    assert_eq!(mesh.vertices.len(), original.vertices.len());
+    assert!(mesh.vertices[0].color[0] < 0.45);
+    assert_eq!(mesh.vertices[1].color, original.vertices[1].color);
+    for (a, b) in mesh.vertices.iter().zip(&original.vertices) {
+        assert_eq!(a.position, b.position);
+        assert_eq!(a.normal, b.normal);
+        assert_eq!(a.surface, b.surface);
+        assert!(a.color.iter().all(|c| (0.26..=0.5).contains(c)));
+    }
+}
+
+#[test]
 fn acceleration_tree_finds_the_nearest_box_face_from_every_axis() {
     let mut mesh = Mesh::default();
     for x in 0..12 {

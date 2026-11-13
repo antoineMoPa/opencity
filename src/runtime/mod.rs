@@ -2,6 +2,7 @@
 //! A map unit is deliberately not assigned a physical length; consumers choose a scale.
 //! Load once, query borrowed structured records, and request camera-local triangle meshes.
 mod bridges;
+pub mod contact_debris;
 mod geometry;
 mod retaining;
 mod surface_weathering;
@@ -31,11 +32,13 @@ use std::{collections::HashMap, path::Path};
 
 /// Optional standalone wgpu shader: Z-up positions, linear RGB, surface metadata.
 /// Group 0: 288-byte camera/lighting/star uniform (see docs/game-runtime.md).
-/// Group 1: 2048² shadow depth texture and comparison sampler (see shader).
+/// Group 1: shadow depth/comparison sampler (0/1), contact RGBA8 tile/sampler/settings (2/3/4).
 pub const GAME_SHADER: &str = concat!(
     include_str!("architecture/facade.wgsl"),
     "\n",
     include_str!("surfaces.wgsl"),
+    "\n",
+    include_str!("contact_debris.wgsl"),
     "\n",
     include_str!("sky_stars.wgsl"),
     "\n",
@@ -46,6 +49,8 @@ pub const SKY_STARS_SHADER: &str = include_str!("sky_stars.wgsl");
 /// Original editor shader, for consumers implementing its documented bindings.
 pub const EDITOR_SHADER: &str = concat!(
     include_str!("architecture/facade.wgsl"),
+    "\n",
+    include_str!("contact_debris.wgsl"),
     "\n",
     include_str!("../bin/editor/shaders/scene.wgsl")
 );

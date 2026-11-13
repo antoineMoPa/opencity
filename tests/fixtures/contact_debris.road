@@ -1,0 +1,4 @@
+road contact_street: sidewalk carlane carlane sidewalk; end
+straight = contact_street(-0.3, 0, 0.3, 0);
+curve = contact_street(-0.3, 0.2, -0.1, 0.12, 0.1, 0.28, 0.3, 0.2);
+place(four_way, contact_crossing, 0.45, 0, 0);
