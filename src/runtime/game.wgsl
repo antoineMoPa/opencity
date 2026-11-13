@@ -12,8 +12,8 @@ struct Camera { view_projection: mat4x4<f32>, light_view_projection: mat4x4<f32>
 @group(2) @binding(0) var sky_environment: texture_cube<f32>;
 @group(2) @binding(1) var sky_sampler: sampler;
 struct Input { @location(0) position: vec3<f32>, @location(1) normal: vec3<f32>, @location(2) color: vec3<f32>, @location(3) surface: vec4<f32> };
-struct Output { @builtin(position) clip: vec4<f32>, @location(0) world: vec3<f32>, @location(1) normal: vec3<f32>, @location(2) color: vec3<f32>, @location(3) @interpolate(flat) surface: vec4<f32>, @location(4) fence_uv: vec2<f32> };
-@vertex fn vs(v: Input) -> Output { var o: Output; o.clip=camera.view_projection*vec4<f32>(v.position,1.0);o.world=v.position;o.normal=v.normal;o.color=v.color;o.surface=v.surface;o.fence_uv=v.surface.yz;return o; }
+struct Output { @builtin(position) clip: vec4<f32>, @location(0) world: vec3<f32>, @location(1) normal: vec3<f32>, @location(2) color: vec3<f32>, @location(3) @interpolate(flat) surface: vec4<f32>, @location(4) fence_uv: vec2<f32>, @location(5) @interpolate(flat) snow_control:vec2<f32> };
+@vertex fn vs(v: Input) -> Output { var o: Output; o.clip=camera.view_projection*vec4<f32>(v.position,1.0);o.world=v.position;o.normal=v.normal;o.color=v.color;o.surface=v.surface;o.fence_uv=v.surface.yz;o.snow_control=vec2<f32>(select(1.0,0.0,v.surface.w== -3.0),0.0);return o; }
 fn hash(p:vec2<f32>)->f32 {let q=bitcast<vec2<u32>>(vec2<i32>(p));var h=q.x*374761393u+q.y*668265263u;h=(h^(h>>13u))*1274126177u;return f32(h^(h>>16u))/4294967295.0;}
 fn noise(p:vec2<f32>)->f32 {let i=floor(p);let f=fract(p);let u=f*f*(3.0-2.0*f);return mix(mix(hash(i),hash(i+vec2<f32>(1.0,0.0)),u.x),mix(hash(i+vec2<f32>(0.0,1.0)),hash(i+vec2<f32>(1.0,1.0)),u.x),u.y);}
 fn mortar_color(material:f32)->vec3<f32> {
@@ -139,6 +139,8 @@ struct SurfaceData {
     brick_row:f32, brick_coord:f32, brick_footprint:vec2<f32>,
     roof_row:f32, roof_tile:f32, roof_detail:f32, paving_footprint:vec2<f32>,
     world_footprint:vec3<f32>,
+    // Optional consumer-supplied coverage, applied after material detail and before lighting.
+    snow:f32,
 };
 fn prepare_surface(v:Output)->SurfaceData {
     let p=v.world.xy;
@@ -156,7 +158,7 @@ fn prepare_surface(v:Output)->SurfaceData {
     let roof_row=(p.x+p.y)/(roof_unit*0.15);
     let roof_tile=(p.y-p.x)/(roof_unit*0.32)+floor(roof_row)*0.5;
     let roof_detail=1.0-smoothstep(0.25,0.8,max(fwidth(roof_row),fwidth(roof_tile)));
-    return SurfaceData(n,detail,floor_position,band,brick_row,brick_coord,brick_footprint,roof_row,roof_tile,roof_detail,fwidth(v.fence_uv),max(abs(dpdx(v.world)),abs(dpdy(v.world))));
+    return SurfaceData(n,detail,floor_position,band,brick_row,brick_coord,brick_footprint,roof_row,roof_tile,roof_detail,fwidth(v.fence_uv),max(abs(dpdx(v.world)),abs(dpdy(v.world))),0.0);
 }
 @fragment fn fs(v:Output,@builtin(front_facing) front:bool)->@location(0) vec4<f32> {
     let fence_footprint=fwidth(v.fence_uv);
@@ -180,7 +182,7 @@ fn shade_surface(v:Output,front:bool,coverage:f32,surface:SurfaceData)->vec4<f32
 fn shade_surface_lit(v:Output,front:bool,coverage:f32,surface:SurfaceData,local:vec3<f32>)->vec4<f32> {
     var base=v.color;let p=v.world.xy;let kind=v.surface.x;var facade_glow=0.0;
     // Only imported building models opt into these local weathering coordinates.
-    if kind>6.5&&kind<7.5&&v.surface.w== -1.0 {
+    if kind>6.5&&kind<7.5&&(v.surface.w== -1.0 || (v.surface.w== -3.0&&v.snow_control.y==0.0)) {
         base=architecture_weather(v.fence_uv,surface.paving_footprint,17.0,0.25,surface.normal,base);
     }
     var facade_room=vec3<f32>(0.0);var room_mask=0.0;
@@ -268,6 +270,11 @@ fn shade_surface_lit(v:Output,front:bool,coverage:f32,surface:SurfaceData,local:
         base=concrete_weather(v.world,surface.world_footprint,
             max(v.world.z-v.surface.y,0.0),n,base);
     }
+    if surface.snow>0.0 {
+        let snow_grain=mix(0.94,1.0,noise(p*2300.0));
+        base=mix(base,vec3<f32>(0.86,0.92,0.96)*snow_grain,clamp(surface.snow,0.0,1.0));
+        facade_glow*=1.0-surface.snow;
+    }
     let daylight=clamp(camera.daylight_sky.x,0.0,1.0);
     let eye=camera.eye_time.xyz-v.world;let view=eye/max(length(eye),0.001);
     var lit:vec3<f32>;
@@ -298,6 +305,7 @@ fn shade_surface_lit(v:Output,front:bool,coverage:f32,surface:SurfaceData,local:
         let hemi=mix(0.12,0.35,daylight)+mix(0.05,0.15,daylight)*max(n.z,0.0);
         let halfway=(sun+view)/max(length(sun+view),0.001);
         var spec=pow(max(dot(n,halfway),0.0),48.0)*0.06;
+        spec*=1.0-clamp(surface.snow,0.0,1.0)*0.85;
         if kind>3.5&&kind<4.5 {spec=pow(max(dot(n,halfway),0.0),120.0)*1.3;}
         let ambient_tint=mix(vec3<f32>(0.42,0.56,0.85),vec3<f32>(1.0),daylight);
         let sunlight=mix(vec3<f32>(0.40,0.52,0.80),camera.sun_color.rgb*camera.sun_color.w,daylight);
