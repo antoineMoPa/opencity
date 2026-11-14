@@ -7,6 +7,7 @@ mod geometry;
 mod retaining;
 pub mod surface_materials;
 mod surface_weathering;
+pub mod tree_textures;
 use crate::junction_mesh;
 pub mod ambient_occlusion;
 pub mod architecture;
@@ -92,6 +93,21 @@ pub enum SurfaceKind {
     Masonry = 13,
     /// Thin architectural glazing, such as balcony guards.
     Glazing = 14,
+    TreeLeafMaple = 15,
+    TreeLeafLinden = 16,
+    TreeLeafLocust = 17,
+    TreeBark = 18,
+    TreeWinter = 19,
+    TreeBarkLinden = 20,
+    TreeBarkLocust = 21,
+    TreeWinterLinden = 22,
+    TreeWinterLocust = 23,
+    TreeImageMaple = 24,
+    TreeImageMaple2 = 25,
+    TreeImageLinden = 26,
+    TreeImageLinden2 = 27,
+    TreeImageLocust = 28,
+    TreeImageLocust2 = 29,
 }
 impl SurfaceKind {
     /// Dry-surface tire friction coefficient, used by the example vehicle.

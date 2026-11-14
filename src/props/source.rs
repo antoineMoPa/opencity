@@ -43,7 +43,7 @@ pub fn read(program: &Program) -> Result<Vec<Entry>, String> {
             return Err(format!("{} has invalid arguments", c.name));
         }
         let Some(A::Identifier(kind)) = c.args.first() else {
-            return Err("Expected cone, tree, bench or lamp".into());
+            return Err("Expected a prop kind".into());
         };
         let kind = Kind::from_keyword(kind).ok_or("Unknown prop kind")?;
         let options = match c.args.get(count) {

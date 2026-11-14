@@ -45,8 +45,8 @@ pub use attachments::{
 #[path = "map/placement.rs"]
 mod placement;
 pub use placement::{
-    append, append_connected, append_connected_curve, attach_endpoint_to_port, link_endpoint,
-    rotate_endpoint,
+    append, append_connected, append_connected_curve, attach_endpoint_to_port, join_open_ends,
+    link_endpoint, rotate_endpoint,
 };
 use placement::{
     attachment_direction, ensure_point, junction_direction, name_available, number_arg,

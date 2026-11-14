@@ -329,6 +329,82 @@ pub fn link_endpoint(
     Some((point, if is_end { end_ref } else { start_ref }))
 }
 
+/// Add a road between two free ends, retaining their positions, grades, and tangents.
+pub fn join_open_ends(
+    program: &mut Program,
+    first: (SegmentSource, bool),
+    second: (SegmentSource, bool),
+) -> Result<SegmentSource, String> {
+    if first == second || !first.0.editable() || !second.0.editable() {
+        return Err("Choose two different editable road ends".into());
+    }
+    let projection = project(program);
+    let endpoint = |(source, is_end): (SegmentSource, bool)| {
+        let segment = projection.segments.iter().find(|s| s.source == source)?;
+        let (point, reference) = if is_end {
+            (segment.end, segment.end_ref.as_deref())
+        } else {
+            (segment.start, segment.start_ref.as_deref())
+        };
+        let occupied = projection
+            .segments
+            .iter()
+            .flat_map(|s| {
+                [
+                    (s.start, s.start_ref.as_deref()),
+                    (s.end, s.end_ref.as_deref()),
+                ]
+            })
+            .filter(|(other, other_ref)| {
+                if let Some(reference) = reference {
+                    *other_ref == Some(reference)
+                } else {
+                    other_ref.is_none() && *other == point
+                }
+            })
+            .count()
+            > 1;
+        (!occupied && !reference.is_some_and(|r| anchored_reference(program, r)))
+            .then_some((point, segment.road_name.clone()))
+    };
+    let (start, first_road) =
+        endpoint(first).ok_or("First road end is already connected or anchored")?;
+    let (end, second_road) =
+        endpoint(second).ok_or("Second road end is already connected or anchored")?;
+    if first_road != second_road {
+        return Err("Road ends need the same cross section".into());
+    }
+    if (start.x - end.x).hypot(start.y - end.y) < 0.0001 {
+        return Err("Road ends are too close to join".into());
+    }
+    let road = program
+        .statements
+        .iter()
+        .find_map(|statement| match statement {
+            Statement::Road(road) if road.name == first_road => Some(road.clone()),
+            _ => None,
+        })
+        .ok_or("Road profile no longer exists")?;
+    let mut next = program.clone();
+    let (_, start_ref) =
+        link_endpoint(&mut next, first.0, first.1).ok_or("First road end cannot be linked")?;
+    let (_, end_ref) =
+        link_endpoint(&mut next, second.0, second.1).ok_or("Second road end cannot be linked")?;
+    let (index, _) = append_connected(
+        &mut next,
+        &road,
+        start,
+        Some(&start_ref),
+        end,
+        Some(&end_ref),
+    );
+    if project(&next).unresolved > projection.unresolved {
+        return Err("Join would introduce unresolved geometry".into());
+    }
+    *program = next;
+    Ok(SegmentSource::TopLevel(index))
+}
+
 pub fn attach_endpoint_to_port(
     program: &mut Program,
     source: SegmentSource,

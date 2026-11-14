@@ -30,6 +30,36 @@ impl RoadEditor {
         projection: &map::Projection,
         iso: bool,
     ) -> bool {
+        if self.map_tool == MapTool::Select
+            && response.clicked_by(egui::PointerButton::Primary)
+            && ui.input(|i| i.modifiers.shift)
+            && !self.minimal.pointer_over_toolbar(ui.ctx())
+        {
+            let first = self
+                .point_options
+                .as_ref()
+                .filter(|options| options.lane.is_none())
+                .map(|options| (options.source, options.end))
+                .or(self.selected_endpoint);
+            if let (Some(first), Some(pointer)) = (first, response.interact_pointer_pos()) {
+                if let Some(second) = self.draw_endpoint_near(projection, rect, pointer, iso) {
+                    if first != second {
+                        match map::join_open_ends(&mut self.program, first, second) {
+                            Ok(source) => {
+                                self.selected_segment = Some(source);
+                                self.selected_segments = vec![source];
+                                self.selected_endpoint = None;
+                                self.dirty = self.program != self.saved_program;
+                                self.status = "Road ends joined".into();
+                            }
+                            Err(error) => self.status = error,
+                        }
+                        self.point_options = None;
+                        return true;
+                    }
+                }
+            }
+        }
         if self.minimal.input_suspended
             || self.pending.is_some()
             || self.map_tool != MapTool::Select
@@ -66,6 +96,9 @@ impl RoadEditor {
                         } else {
                             "Road end"
                         });
+                        if options.lane.is_none() {
+                            ui.label("Shift-click another open end to join");
+                        }
                         if options.lane.is_none()
                             || options.lane.is_some_and(|lane| {
                                 projection
@@ -126,7 +159,7 @@ impl RoadEditor {
                     PointAction::Profile => self.enter_section_editor(),
                     _ => {}
                 }
-            } else if ui.input(|i| i.pointer.any_pressed())
+            } else if ui.input(|i| i.pointer.any_pressed() && !i.modifiers.shift)
                 && ui
                     .ctx()
                     .pointer_hover_pos()

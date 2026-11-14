@@ -2,6 +2,60 @@ use super::*;
 use opencity::parse;
 
 #[test]
+fn joining_two_open_ends_keeps_shared_references_and_grades() {
+    let mut program = parse("road street: verge-carlane-verge; end;").unwrap();
+    let road = match &program.statements[0] {
+        Statement::Road(road) => road.clone(),
+        _ => unreachable!(),
+    };
+    let first = append(
+        &mut program,
+        &road,
+        WorldPoint { x: 0.0, y: 0.0 },
+        WorldPoint { x: 1.0, y: 0.0 },
+    );
+    let second = append(
+        &mut program,
+        &road,
+        WorldPoint { x: 3.0, y: 1.0 },
+        WorldPoint { x: 4.0, y: 1.0 },
+    );
+    placement_grade(&mut program, SegmentSource::TopLevel(first), 0.0, 1.5);
+    placement_grade(&mut program, SegmentSource::TopLevel(second), 2.5, 3.0);
+    let bridge = join_open_ends(
+        &mut program,
+        (SegmentSource::TopLevel(first), true),
+        (SegmentSource::TopLevel(second), false),
+    )
+    .unwrap();
+    let projection = project(&program);
+    let segment = |source| {
+        projection
+            .segments
+            .iter()
+            .find(|s| s.source == source)
+            .unwrap()
+    };
+    assert_eq!(
+        segment(SegmentSource::TopLevel(first)).end_ref,
+        segment(bridge).start_ref
+    );
+    assert_eq!(
+        segment(bridge).end_ref,
+        segment(SegmentSource::TopLevel(second)).start_ref
+    );
+    assert!((segment(bridge).start_z - 1.5).abs() < 0.0001);
+    assert!((segment(bridge).end_z - 2.5).abs() < 0.0001);
+    let before = program.clone();
+    assert!(join_open_ends(
+        &mut program,
+        (SegmentSource::TopLevel(first), true),
+        (SegmentSource::TopLevel(second), false)
+    )
+    .is_err());
+    assert_eq!(program, before);
+}
+#[test]
 fn placed_segment_round_trips_and_moves_with_negative_coordinates() {
     let mut program = parse("road lane: verge-carlane-verge; end;").unwrap();
     let road = match &program.statements[0] {

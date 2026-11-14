@@ -298,6 +298,9 @@ impl Picker {
     pub fn selected(&self) -> Option<&Proposal> {
         self.proposals.get(self.selected)
     }
+    pub fn selected_end(&self) -> Option<&End> {
+        self.end.and_then(|index| self.ends.get(index))
+    }
     /// Consumers move their camera only after accepting the edit (and saving it, if needed).
     pub fn take_follow_target(&mut self) -> Option<FollowTarget> {
         self.follow_target.take()

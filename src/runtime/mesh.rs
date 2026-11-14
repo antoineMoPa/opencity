@@ -483,14 +483,16 @@ impl City {
                     );
                 }
                 StreetFeatureKind::Tree => {
-                    mesh.cylinder(p, 0.007, 0.075, [0.16, 0.08, 0.03], SurfaceKind::Prop);
-                    mesh.cylinder(
-                        [p[0], p[1], p[2] + 0.045],
-                        0.045,
-                        0.075,
-                        [0.055, 0.17, 0.045],
-                        SurfaceKind::Grass,
-                    );
+                    let kind = crate::props::Kind::street_tree(p);
+                    mesh.vertices
+                        .extend(kind.far_parts()[0].vertices.iter().map(|source| {
+                            let mut vertex = *source;
+                            for axis in 0..3 {
+                                vertex.position[axis] += p[axis];
+                            }
+                            vertex.surface[3] = p[2];
+                            vertex
+                        }));
                 }
             }
             let (sin, cos) = f.heading.sin_cos();

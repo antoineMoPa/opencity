@@ -24,7 +24,7 @@ pub(super) fn tools() -> Value {
             "set_prop_tool",
             "Open native prop placement or selection controls",
             json!({
-                "kind":{"type":"string","enum":["cone","tree","bench","lamp"]},
+                "kind":{"type":"string","enum":["cone","random_tree","tree","bench","trash_can","lamp"]},
                 "mode":{"type":"string","enum":["select","single","row"]},
                 "spacing":{"type":"number","minimum":0.6,"maximum":50},
                 "view":{"type":"string","enum":["top","isometric","vehicular"]}

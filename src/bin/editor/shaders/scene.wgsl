@@ -6,6 +6,8 @@ struct Camera { view: vec4<f32>, focus: vec4<f32>, viewport: vec4<f32>, elevatio
 @group(2) @binding(3) var pavement_color: texture_2d_array<f32>;
 @group(2) @binding(4) var pavement_detail: texture_2d_array<f32>;
 @group(2) @binding(5) var pavement_sampler: sampler;
+@group(2) @binding(6) var tree_atlas: texture_2d_array<f32>;
+@group(2) @binding(7) var tree_sampler: sampler;
 @group(3) @binding(0) var editor_sky:texture_cube<f32>;
 @group(3) @binding(1) var editor_sky_sampler:sampler;
 @group(3) @binding(2) var editor_environment:texture_cube<f32>;
@@ -101,6 +103,18 @@ fn bed_height(point: vec2<f32>) -> f32 {
     let facade_aa=fwidth(input.surface.yz);
     let cross_normal=cross(dpdx(input.world),dpdy(input.world));
     let normal=cross_normal/max(length(cross_normal),0.000000000001);
+    if input.material.x>=15.0 && input.material.x<=23.0 {
+        let kind=i32(input.material.x);
+        if kind==19 || kind==22 || kind==23 { discard; }
+        var layer=0;
+        if kind==16 || kind==20 {layer=1;}
+        if kind==17 || kind==21 {layer=2;}
+        if kind>=18 {layer+=3;}
+        let tex=textureSample(tree_atlas,tree_sampler,input.surface.yz,layer);
+        if kind<=17 && tex.a<0.42 {discard;}
+        let light=0.62+max(dot(select(-normal,normal,normal.z>=0.0),normalize(vec3<f32>(-0.35,0.5,0.8))),0.0)*0.38;
+        return vec4<f32>(pow(tex.rgb*color*light,vec3<f32>(1.0/2.2)),1.0);
+    }
     let world_dx=dpdx(input.world);let world_dy=dpdy(input.world);
     // Derivatives are evaluated uniformly, including along water/roof edges.
     let floor_height = max(input.surface.z, 0.0001);

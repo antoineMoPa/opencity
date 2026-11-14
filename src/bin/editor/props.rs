@@ -434,11 +434,10 @@ fn pick(samples: &[Sample], view: Projection, pos: egui::Pos2, city: &City) -> O
             let mut placement = s.placement.clone();
             placement.position = display_position(city, placement.position);
             let matrix = placement.transform();
-            s.placement
-                .kind
+            placement
                 .parts()
                 .iter()
-                .flat_map(|mesh| mesh.vertices.chunks_exact(3))
+                .flat_map(|part| part.mesh.vertices.chunks_exact(3))
                 .filter_map(|tri| {
                     hit_triangle(
                         a,
@@ -1151,19 +1150,26 @@ pub(super) fn append_scene(scene: &mut scene3d::Scene, program: &Program, base: 
                 p.position = display_position(&city, p.position);
                 for part in p.parts() {
                     for vertex in &part.mesh.vertices {
-                        let p = part
+                        let world = part
                             .transform
                             .transform_point3(Vec3::from_array(vertex.position));
                         scene.vertices.push(scene3d::WorldVertex {
-                            point: WorldPoint { x: p.x, y: p.y },
-                            height: p.z,
+                            point: WorldPoint {
+                                x: world.x,
+                                y: world.y,
+                            },
+                            height: world.z,
                             depth_bias: -0.001,
                             color: Color32::from_rgb(
                                 (vertex.color[0].clamp(0., 1.) * 255.) as u8,
                                 (vertex.color[1].clamp(0., 1.) * 255.) as u8,
                                 (vertex.color[2].clamp(0., 1.) * 255.) as u8,
                             ),
-                            surface: [0.; 4],
+                            surface: if p.kind.is_tree() {
+                                vertex.surface
+                            } else {
+                                [0.; 4]
+                            },
                         });
                     }
                 }
@@ -1395,7 +1401,7 @@ impl RoadEditor {
         use serde_json::json;
         if name == "set_prop_tool" {
             let kind = Kind::from_keyword(args["kind"].as_str().unwrap_or("cone"))
-                .ok_or("Expected cone, tree, bench or lamp")?;
+                .ok_or("Expected a prop kind from the editor catalogue")?;
             let tool = match args["mode"].as_str().unwrap_or("single") {
                 "select" => Tool::Select,
                 "single" => Tool::Single,

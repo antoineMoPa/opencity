@@ -17,7 +17,14 @@ struct Camera { view_projection: mat4x4<f32>, light_view_projection: mat4x4<f32>
 @group(2) @binding(2) var filtered_environment: texture_cube<f32>;
 struct Input { @location(0) position: vec3<f32>, @location(1) normal: vec3<f32>, @location(2) color: vec3<f32>, @location(3) surface: vec4<f32> };
 struct Output { @builtin(position) clip: vec4<f32>, @location(0) world: vec3<f32>, @location(1) normal: vec3<f32>, @location(2) color: vec3<f32>, @location(3) @interpolate(flat) surface: vec4<f32>, @location(4) fence_uv: vec2<f32>, @location(5) @interpolate(flat) snow_control:vec2<f32> };
-@vertex fn vs(v: Input) -> Output { var o: Output; o.clip=camera.view_projection*vec4<f32>(v.position,1.0);o.world=v.position;o.normal=v.normal;o.color=v.color;o.surface=v.surface;o.fence_uv=v.surface.yz;o.snow_control=vec2<f32>(select(1.0,0.0,v.surface.w== -3.0),0.0);return o; }
+fn tree_vertex(world:vec3<f32>,base:vec3<f32>)->vec3<f32> {
+    let height=max(0.0,(world.z-base.z)*100.0);
+    let weight=pow(height/10.0,1.8);
+    let phase=base.x*0.7+base.y*0.9+height*0.34;
+    let sway=(sin(camera.eye_time.w*1.25+phase)*1.5+sin(camera.eye_time.w*0.47+phase*0.63)*0.25)*0.64*0.64*0.64*weight/100.0;
+    return world+vec3<f32>(sway,sway*0.55,0.0);
+}
+@vertex fn vs(v: Input) -> Output { var o: Output; var world=v.position;if v.surface.x>=15.0 && v.surface.x<=23.0 {world=tree_vertex(world,vec3<f32>(world.xy,v.surface.w));}o.clip=camera.view_projection*vec4<f32>(world,1.0);o.world=world;o.normal=v.normal;o.color=v.color;o.surface=v.surface;o.fence_uv=v.surface.yz;o.snow_control=vec2<f32>(select(1.0,0.0,v.surface.w== -3.0),0.0);return o; }
 fn hash(p:vec2<f32>)->f32 {let q=bitcast<vec2<u32>>(vec2<i32>(p));var h=q.x*374761393u+q.y*668265263u;h=(h^(h>>13u))*1274126177u;return f32(h^(h>>16u))/4294967295.0;}
 fn noise(p:vec2<f32>)->f32 {let i=floor(p);let f=fract(p);let u=f*f*(3.0-2.0*f);return mix(mix(hash(i),hash(i+vec2<f32>(1.0,0.0)),u.x),mix(hash(i+vec2<f32>(0.0,1.0)),hash(i+vec2<f32>(1.0,1.0)),u.x),u.y);}
 fn mortar_color(material:f32)->vec3<f32> {
@@ -72,7 +79,7 @@ fn fence_coverage(uv:vec2<f32>,style:f32,footprint:vec2<f32>)->f32 {
 }
 struct ShadowOutput { @builtin(position) clip:vec4<f32>, @location(0) fence_uv:vec2<f32>, @location(1) @interpolate(flat) kind_pattern:vec2<f32> };
 @vertex fn vs_shadow(v:Input)->ShadowOutput {
-    var o:ShadowOutput;o.clip=camera.light_view_projection*vec4<f32>(v.position,1.0);
+    var o:ShadowOutput;var world=v.position;if v.surface.x>=15.0 && v.surface.x<=23.0 {world=tree_vertex(world,vec3<f32>(world.xy,v.surface.w));}o.clip=camera.light_view_projection*vec4<f32>(world,1.0);
     o.fence_uv=v.surface.yz;o.kind_pattern=v.surface.xw;return o;
 }
 @fragment fn fs_shadow(v:ShadowOutput) {

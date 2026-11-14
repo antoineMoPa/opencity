@@ -374,12 +374,15 @@ impl RenderResources {
         let pavement = opencity::runtime::surface_materials::SurfaceTextures::new(device, queue);
         let mut material_layout = contact_gpu::ContactTexture::layout(0).to_vec();
         material_layout.extend(opencity::runtime::surface_materials::SurfaceTextures::layout(3));
+        material_layout.extend(opencity::runtime::tree_textures::TreeTextures::layout(6));
         let contact_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("contact masks"),
             entries: &material_layout,
         });
         let mut material_entries = contact.entries(0).to_vec();
         material_entries.extend(pavement.entries(3));
+        let trees = opencity::runtime::tree_textures::TreeTextures::new(device, queue);
+        material_entries.extend(trees.entries(6));
         let contact_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("contact masks"),
             layout: &contact_layout,

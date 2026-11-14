@@ -1,27 +1,113 @@
 use super::*;
 use std::sync::OnceLock;
 pub(super) fn parts(kind: Kind) -> &'static [Arc<Mesh>] {
-    static MODELS: OnceLock<[Vec<Arc<Mesh>>; 4]> = OnceLock::new();
-    let index = match kind {
-        Kind::Cone => 0,
-        Kind::Tree => 1,
-        Kind::Bench => 2,
-        Kind::Lamp => 3,
-    };
+    static MODELS: OnceLock<[Vec<Arc<Mesh>>; 10]> = OnceLock::new();
     &MODELS.get_or_init(|| {
-        [vec![cone()], vec![tree()], street(false), street(true)].map(|parts| {
+        [
+            vec![cone()],
+            tree(Kind::Tree, false),
+            tree(Kind::TreeMaple2, false),
+            tree(Kind::TreeLinden, false),
+            tree(Kind::TreeLinden2, false),
+            tree(Kind::TreeLocust, false),
+            tree(Kind::TreeLocust2, false),
+            street(Kind::Bench),
+            street(Kind::Lamp),
+            street(Kind::TrashCan),
+        ]
+        .map(|parts| {
             parts
                 .into_iter()
                 .map(|mut mesh| {
                     // The shared instance shader carries coverage in surface.y.
                     for vertex in &mut mesh.vertices {
-                        vertex.surface[1] = 1.;
+                        if vertex.surface[0] < SurfaceKind::TreeLeafMaple as u32 as f32 {
+                            vertex.surface[1] = 1.;
+                        }
                     }
                     Arc::new(mesh)
                 })
                 .collect()
         })
-    })[index]
+    })[index(kind)]
+}
+pub(super) fn far_parts(kind: Kind) -> &'static [Arc<Mesh>] {
+    if !kind.is_tree() {
+        return parts(kind);
+    }
+    static MODELS: OnceLock<[Vec<Arc<Mesh>>; 6]> = OnceLock::new();
+    &MODELS.get_or_init(|| {
+        [
+            Kind::Tree,
+            Kind::TreeMaple2,
+            Kind::TreeLinden,
+            Kind::TreeLinden2,
+            Kind::TreeLocust,
+            Kind::TreeLocust2,
+        ]
+        .map(|kind| tree(kind, true).into_iter().map(Arc::new).collect())
+    })[index(kind) - 1]
+}
+pub(super) fn image_parts(kind: Kind) -> &'static [Arc<Mesh>] {
+    if !kind.is_tree() {
+        return parts(kind);
+    }
+    static MODELS: OnceLock<[Vec<Arc<Mesh>>; 6]> = OnceLock::new();
+    &MODELS.get_or_init(|| {
+        [
+            SurfaceKind::TreeImageMaple,
+            SurfaceKind::TreeImageMaple2,
+            SurfaceKind::TreeImageLinden,
+            SurfaceKind::TreeImageLinden2,
+            SurfaceKind::TreeImageLocust,
+            SurfaceKind::TreeImageLocust2,
+        ]
+        .map(|surface| {
+            let mut mesh = Mesh::default();
+            let positions = [
+                [-0.064, 0., -0.0095],
+                [0.064, 0., -0.0095],
+                [0.064, 0., 0.1025],
+                [-0.064, 0., -0.0095],
+                [0.064, 0., 0.1025],
+                [-0.064, 0., 0.1025],
+            ];
+            let uv = [[0., 1.], [1., 1.], [1., 0.], [0., 1.], [1., 0.], [0., 0.]];
+            for (position, uv) in positions.into_iter().zip(uv) {
+                mesh.vertices.push(crate::runtime::Vertex {
+                    position,
+                    normal: [0., -1., 0.],
+                    color: [1.; 3],
+                    surface: [surface as u32 as f32, uv[0], uv[1], 0.],
+                });
+            }
+            // Expand the culling bounds around the camera-facing plane.
+            for y in [-0.064, 0.064, 0.] {
+                mesh.vertices.push(crate::runtime::Vertex {
+                    position: [0., y, 0.],
+                    normal: [0., -1., 0.],
+                    color: [1.; 3],
+                    surface: [surface as u32 as f32, 0., 0., 0.],
+                });
+            }
+            vec![Arc::new(mesh)]
+        })
+    })[index(kind) - 1]
+}
+fn index(kind: Kind) -> usize {
+    match kind {
+        Kind::Cone => 0,
+        Kind::RandomTree => 1,
+        Kind::Tree => 1,
+        Kind::TreeMaple2 => 2,
+        Kind::TreeLinden => 3,
+        Kind::TreeLinden2 => 4,
+        Kind::TreeLocust => 5,
+        Kind::TreeLocust2 => 6,
+        Kind::Bench => 7,
+        Kind::Lamp => 8,
+        Kind::TrashCan => 9,
+    }
 }
 fn cone() -> Mesh {
     let mut mesh = Mesh::default();
@@ -146,30 +232,77 @@ fn cone() -> Mesh {
     }
     mesh
 }
-fn tree() -> Mesh {
-    let mut mesh = Mesh::default();
-    mesh.cylinder(
-        [0.; 3],
-        0.0014,
-        0.032,
-        [0.22, 0.12, 0.055],
-        SurfaceKind::Prop,
-    );
-    for (x, y, z, r, h) in [
-        (-0.005, 0., 0.023, 0.010, 0.018),
-        (0.005, 0.003, 0.026, 0.011, 0.019),
-        (0., -0.003, 0.032, 0.01, 0.018),
-    ] {
-        mesh.cylinder([x, y, z], r, h, [0.25, 0.39, 0.13], SurfaceKind::Grass);
+fn tree(kind: Kind, far: bool) -> Vec<Mesh> {
+    let bytes: &[u8] = match kind {
+        Kind::Tree => include_bytes!("../../assets/props/trees/maple-92374.glb"),
+        Kind::TreeMaple2 => include_bytes!("../../assets/props/trees/maple-18531.glb"),
+        Kind::TreeLinden => include_bytes!("../../assets/props/trees/linden-92374.glb"),
+        Kind::TreeLinden2 => include_bytes!("../../assets/props/trees/linden-18531.glb"),
+        Kind::TreeLocust => include_bytes!("../../assets/props/trees/locust-92374.glb"),
+        Kind::TreeLocust2 => include_bytes!("../../assets/props/trees/locust-18531.glb"),
+        _ => unreachable!(),
+    };
+    let glb = gltf::Gltf::from_slice(bytes).expect("bundled tree GLB");
+    let binary = glb.blob.as_deref().expect("bundled tree buffer");
+    let prefix = if far { "far_" } else { "near_" };
+    let leaf = match kind {
+        Kind::Tree | Kind::TreeMaple2 => SurfaceKind::TreeLeafMaple,
+        Kind::TreeLinden | Kind::TreeLinden2 => SurfaceKind::TreeLeafLinden,
+        Kind::TreeLocust | Kind::TreeLocust2 => SurfaceKind::TreeLeafLocust,
+        _ => unreachable!(),
+    };
+    let parts = ["bark", "leaves", "winter"].map(|part| {
+        let name = format!("{prefix}{part}");
+        let primitive = glb
+            .meshes()
+            .find(|mesh| mesh.name() == Some(name.as_str()))
+            .expect("bundled tree part")
+            .primitives()
+            .next()
+            .unwrap();
+        let reader = primitive.reader(|_| Some(binary));
+        let positions: Vec<_> = reader.read_positions().unwrap().collect();
+        let normals: Vec<_> = reader.read_normals().unwrap().collect();
+        let uvs: Vec<_> = reader.read_tex_coords(0).unwrap().into_f32().collect();
+        let colors: Vec<_> = reader.read_colors(0).unwrap().into_rgb_f32().collect();
+        let surface = match (part, kind) {
+            ("leaves", _) => leaf,
+            ("winter", Kind::TreeLinden | Kind::TreeLinden2) => SurfaceKind::TreeWinterLinden,
+            ("winter", Kind::TreeLocust | Kind::TreeLocust2) => SurfaceKind::TreeWinterLocust,
+            ("winter", _) => SurfaceKind::TreeWinter,
+            (_, Kind::TreeLinden | Kind::TreeLinden2) => SurfaceKind::TreeBarkLinden,
+            (_, Kind::TreeLocust | Kind::TreeLocust2) => SurfaceKind::TreeBarkLocust,
+            _ => SurfaceKind::TreeBark,
+        };
+        let mut mesh = Mesh::default();
+        for index in reader.read_indices().unwrap().into_u32() {
+            let i = index as usize;
+            mesh.vertices.push(crate::runtime::Vertex {
+                position: [
+                    positions[i][0] / UNITS,
+                    -positions[i][2] / UNITS,
+                    positions[i][1] / UNITS,
+                ],
+                normal: [normals[i][0], -normals[i][2], normals[i][1]],
+                color: colors[i],
+                surface: [surface as u32 as f32, uvs[i][0], uvs[i][1], 0.],
+            });
+        }
+        mesh
+    });
+    let mut merged = Mesh::default();
+    for part in parts {
+        merged.vertices.extend(part.vertices);
     }
-    mesh
+    vec![merged]
 }
 
-fn street(lamp: bool) -> Vec<Mesh> {
-    let bytes: &[u8] = if lamp {
-        include_bytes!("../../assets/props/lamp.glb")
-    } else {
-        include_bytes!("../../assets/props/bench.glb")
+fn street(kind: Kind) -> Vec<Mesh> {
+    let bytes: &[u8] = match kind {
+        Kind::Bench => include_bytes!("../../assets/props/bench.glb"),
+        Kind::Lamp => include_bytes!("../../assets/props/lamp.glb"),
+        Kind::TrashCan => include_bytes!("../../assets/props/bin.glb"),
+        _ => unreachable!("only street furniture uses GLB street models"),
     };
     let glb = gltf::Gltf::from_slice(bytes).expect("bundled prop GLB");
     let binary = glb.blob.as_deref().expect("bundled prop buffer");
@@ -177,7 +310,7 @@ fn street(lamp: bool) -> Vec<Mesh> {
     fn axis(v: Vec3) -> Vec3 {
         Vec3::new(v.x, -v.z, v.y)
     }
-    fn node(node: gltf::Node<'_>, parent: Mat4, bytes: &[u8], out: &mut Mesh, lamp: bool) {
+    fn node(node: gltf::Node<'_>, parent: Mat4, bytes: &[u8], out: &mut Mesh, kind: Kind) {
         let transform = parent * Mat4::from_cols_array_2d(&node.transform().matrix());
         let normals = transform.inverse().transpose();
         if let Some(mesh) = node.mesh() {
@@ -213,7 +346,7 @@ fn street(lamp: bool) -> Vec<Mesh> {
                     let i = index as usize;
                     let mut p = axis(transform.transform_point3(Vec3::from_array(positions[i])));
                     let mut n = axis(normals.transform_vector3(Vec3::from_array(normal[i])));
-                    if !lamp {
+                    if kind == Kind::Bench {
                         p = Vec3::new(-p.y, p.x, p.z);
                         n = Vec3::new(-n.y, n.x, n.z);
                     }
@@ -237,11 +370,11 @@ fn street(lamp: bool) -> Vec<Mesh> {
             }
         }
         for child in node.children() {
-            node_walk(child, transform, bytes, out, lamp);
+            node_walk(child, transform, bytes, out, kind);
         }
     }
-    fn node_walk(n: gltf::Node<'_>, m: Mat4, b: &[u8], out: &mut Mesh, lamp: bool) {
-        node(n, m, b, out, lamp);
+    fn node_walk(n: gltf::Node<'_>, m: Mat4, b: &[u8], out: &mut Mesh, kind: Kind) {
+        node(n, m, b, out, kind);
     }
     for n in glb
         .default_scene()
@@ -249,12 +382,12 @@ fn street(lamp: bool) -> Vec<Mesh> {
         .unwrap()
         .nodes()
     {
-        node(n, Mat4::IDENTITY, binary, &mut mesh, lamp);
+        node(n, Mat4::IDENTITY, binary, &mut mesh, kind);
     }
     let mut lower = Mesh::default();
     let mut upper = Mesh::default();
     for triangle in mesh.vertices.chunks_exact(3) {
-        let target = if lamp && triangle.iter().all(|v| v.position[2] > 0.047) {
+        let target = if kind == Kind::Lamp && triangle.iter().all(|v| v.position[2] > 0.047) {
             &mut upper
         } else {
             &mut lower
