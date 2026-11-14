@@ -12,9 +12,10 @@ crate-type = ["rlib", "cdylib"]
 
 [features]
 expansion-ui = ["dep:egui"]
-game-runtime = ["dep:earcutr", "dep:base64"]
+game-runtime = ["dep:earcutr", "dep:base64", "dep:glam", "dep:gltf"]
+render-materials = ["game-runtime", "dep:wgpu"]
 default = ["editor"]
-editor = ["game-runtime", "expansion-ui", "dep:eframe", "dep:egui_command_palette", "dep:moon_toggle_switch", "dep:rfd", "dep:muda", "dep:serde_json", "dep:base64"]
+editor = ["render-materials", "expansion-ui", "dep:eframe", "dep:egui_command_palette", "dep:moon_toggle_switch", "dep:rfd", "dep:muda", "dep:serde_json", "dep:base64"]
 
 [[bin]]
 name = "editor"
@@ -35,6 +36,9 @@ rfd = { version = "0.17", optional = true }
 serde_json = { version = "=1.0.151", optional = true }
 base64 = { version = "0.22", optional = true }
 png = "0.17"
+wgpu = { version = "30.0.1", optional = true }
+glam = { version = "0.29", optional = true }
+gltf = { version = "1.4.1", default-features = false, features = ["utils", "names"], optional = true }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 muda = { version = "0.19", default-features = false, optional = true }

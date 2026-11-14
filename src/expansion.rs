@@ -278,11 +278,31 @@ pub fn possibilities_with_shape(
     )
 }
 
+/// Closed side relative to the incoming road's outward heading.
+/// The incoming side always stays connected.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum ThreeWayClosedSide {
+    #[default]
+    Ahead,
+    Left,
+    Right,
+}
+impl ThreeWayClosedSide {
+    pub fn next(self) -> Self {
+        match self {
+            Self::Ahead => Self::Left,
+            Self::Left => Self::Right,
+            Self::Right => Self::Ahead,
+        }
+    }
+}
+
 #[derive(Clone, Copy)]
 pub struct Options {
     pub length: f32,
     /// Road beyond each city junction face, in map units (0.01 = one metre).
     pub junction_extension: f32,
+    pub three_way_closed_side: ThreeWayClosedSide,
     pub curve: f32,
     pub grade: f32,
     pub element: RoadElementKind,
@@ -292,6 +312,7 @@ impl Default for Options {
         Self {
             length: 1.,
             junction_extension: 0.01,
+            three_way_closed_side: ThreeWayClosedSide::Ahead,
             curve: 0.8,
             grade: 0.04,
             element: RoadElementKind::CarLane,
@@ -302,6 +323,7 @@ pub fn propose(program: &Program, end: &End, options: Options) -> Vec<Proposal> 
     let Options {
         length,
         junction_extension,
+        three_way_closed_side,
         curve,
         grade,
         element,
@@ -398,7 +420,14 @@ pub fn propose(program: &Program, end: &End, options: Options) -> Vec<Proposal> 
         let before_count = map::project(&after).segments.len();
         match kind {
             Kind::ThreeWay | Kind::FourWay => {
-                if !junctions::append(&mut after, end, &reference, junction_extension, kind) {
+                if !junctions::append(
+                    &mut after,
+                    end,
+                    &reference,
+                    junction_extension,
+                    kind,
+                    three_way_closed_side,
+                ) {
                     continue;
                 }
             }

@@ -22,6 +22,7 @@ pub struct Picker {
     end: Option<usize>,
     length: f32,
     junction_extension: f32,
+    three_way_closed_side: expansion::ThreeWayClosedSide,
     curve_degrees: f32,
     grade: f32,
     element: crate::RoadElementKind,
@@ -44,6 +45,7 @@ impl Default for Picker {
             end: None,
             length: 1.,
             junction_extension: 0.01,
+            three_way_closed_side: Default::default(),
             curve_degrees: 45.,
             grade: 0.04,
             element: crate::RoadElementKind::CarLane,
@@ -244,6 +246,7 @@ impl Picker {
             expansion::Options {
                 length: self.length,
                 junction_extension: self.junction_extension,
+                three_way_closed_side: self.three_way_closed_side,
                 curve: self.curve_degrees.to_radians(),
                 grade: self.grade,
                 element: self.element,
@@ -251,6 +254,34 @@ impl Picker {
         );
         self.proposals.sort_by_key(|p| icons::order(p.kind));
         self.reveal_selected = true;
+    }
+    fn rotate_three_way(&mut self, program: &Program) {
+        let Some(index) = self.end else { return };
+        let original = self.three_way_closed_side;
+        let selected = self.selected().map(|p| p.kind);
+        for _ in 0..3 {
+            self.three_way_closed_side = self.three_way_closed_side.next();
+            self.choose_end(program, index);
+            if let Some(choice) = self
+                .proposals
+                .iter()
+                .position(|p| p.kind == expansion::Kind::ThreeWay)
+            {
+                self.selected = choice;
+                self.message = if self.three_way_closed_side == original {
+                    "No other clear 3-way orientation".into()
+                } else {
+                    String::new()
+                };
+                return;
+            }
+        }
+        self.selected = self
+            .proposals
+            .iter()
+            .position(|p| Some(p.kind) == selected)
+            .unwrap_or(0);
+        self.message = "No clear 3-way orientation at this end".into();
     }
     fn step_end(&mut self, program: &Program, previous: bool) {
         if self.ends.is_empty() {
@@ -336,6 +367,9 @@ impl Picker {
         let before = program.clone();
         let mut enter = false;
         if keyboard_free && !self.growth {
+            if ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::R)) {
+                self.rotate_three_way(program);
+            }
             if !self.proposals.is_empty() {
                 let previous =
                     ctx.input_mut(|i| i.consume_key(egui::Modifiers::SHIFT, egui::Key::Tab));
@@ -420,6 +454,7 @@ impl Picker {
                                 expansion::Options {
                                     length: self.length,
                                     junction_extension: self.junction_extension,
+                                    three_way_closed_side: self.three_way_closed_side,
                                     curve: self.curve_degrees.to_radians(),
                                     grade: self.grade,
                                     element: self.element,
@@ -483,6 +518,15 @@ impl Picker {
         }
         if let Some(i) = pick {
             self.selected = i;
+        }
+        if self.end.is_some() {
+            let rotate = ui
+                .button("Rotate 3-way")
+                .on_hover_text("Rotate 3-way intersection · R · skips blocked orientations");
+            if rotate.clicked() {
+                rotate.surrender_focus();
+                self.rotate_three_way(program);
+            }
         }
         let kind = self.selected().map(|p| p.kind);
         let Some(kind) = kind else {
@@ -736,7 +780,7 @@ mod tests {
         picker.start();
         picker.refresh(&program);
         picker.choose_end(&program, 1);
-        for trigger in [egui::Key::Enter, egui::Key::Tab] {
+        for trigger in [egui::Key::Enter, egui::Key::Tab, egui::Key::R] {
             let ctx = egui::Context::default();
             let mut text = String::from("1.0");
             let id = egui::Id::new("focused-geometry-value");
@@ -823,6 +867,61 @@ mod tests {
             .proposals
             .iter()
             .any(|p| p.kind == expansion::Kind::Continue));
+    }
+
+    #[test]
+    fn rotate_key_previews_three_orientations_before_accepting() {
+        let mut program =
+            crate::parse(include_str!("../tests/fixtures/expansion_junctions.road")).unwrap();
+        let before = program.clone();
+        let ctx = egui::Context::default();
+        let mut picker = Picker::default();
+        picker.start();
+        picker.refresh(&program);
+        let index = picker.ends.iter().position(|e| e.at_end).unwrap();
+        picker.choose_end(&program, index);
+        for expected in [
+            expansion::ThreeWayClosedSide::Left,
+            expansion::ThreeWayClosedSide::Right,
+            expansion::ThreeWayClosedSide::Ahead,
+        ] {
+            frame(&mut picker, &ctx, &mut program, key(egui::Key::R), true);
+            assert_eq!(picker.three_way_closed_side, expected);
+            assert_eq!(picker.selected().unwrap().kind, expansion::Kind::ThreeWay);
+            assert_eq!(program, before, "rotation only changes the preview");
+        }
+        frame(&mut picker, &ctx, &mut program, key(egui::Key::Enter), true);
+        assert_ne!(program, before);
+        let projection = map::project(&program);
+        assert_eq!(
+            map::intersections(&program, &projection)[0].kind,
+            map::IntersectionKind::ThreeWay
+        );
+    }
+
+    #[test]
+    fn rotate_skips_blocked_orientations_without_applying() {
+        let mut program =
+            crate::parse(include_str!("../tests/fixtures/expansion_junctions.road")).unwrap();
+        program.statements.extend(
+            crate::parse("building(0.3, 0.6,-0.05, 0.7,-0.05, 0.7,0.05, 0.6,0.05);")
+                .unwrap()
+                .statements,
+        );
+        let before = program.clone();
+        let mut picker = Picker::default();
+        picker.junction_extension = 1.;
+        picker.refresh(&program);
+        let index = picker.ends.iter().position(|e| e.at_end).unwrap();
+        picker.choose_end(&program, index);
+        picker.rotate_three_way(&program);
+        assert_eq!(
+            picker.three_way_closed_side,
+            expansion::ThreeWayClosedSide::Ahead
+        );
+        assert_eq!(picker.selected().unwrap().kind, expansion::Kind::ThreeWay);
+        assert_eq!(program, before);
+        assert_eq!(picker.message, "No other clear 3-way orientation");
     }
 }
 

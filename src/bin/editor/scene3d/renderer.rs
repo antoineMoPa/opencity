@@ -23,6 +23,9 @@ struct RenderResources {
     contact_group: wgpu::BindGroup,
     scene_pipeline: wgpu::RenderPipeline,
     close_zoom_pipeline: wgpu::RenderPipeline,
+    sky_pipeline: wgpu::RenderPipeline,
+    sky_msaa_pipeline: wgpu::RenderPipeline,
+    environment: opencity::runtime::surface_materials::EnvironmentMap,
     camera_buffer: wgpu::Buffer,
     camera_bind_group: wgpu::BindGroup,
     scene_buffer: Option<(Arc<Scene>, wgpu::Buffer)>,
@@ -274,6 +277,7 @@ impl egui_wgpu::CallbackTrait for SceneCallback {
             pass.set_bind_group(0, &renderer.camera_bind_group, &[]);
             pass.set_bind_group(1, &renderer.water.bind_group, &[]);
             pass.set_bind_group(2, &renderer.contact_group, &[]);
+            pass.set_bind_group(3, &renderer.environment.group, &[]);
             pass.set_vertex_buffer(0, renderer.scene_buffer.as_ref().unwrap().1.slice(..));
             if let Some(span) = &self.scene.road_span {
                 if span.start > 0 {
@@ -304,6 +308,14 @@ impl egui_wgpu::CallbackTrait for SceneCallback {
                 }
             } else {
                 pass.draw(0..self.scene.gpu_vertices().len() as u32, 0..1);
+            }
+            if self.camera == CameraView::Vehicular && self.transition.is_none() {
+                pass.set_pipeline(if samples == 1 {
+                    &renderer.sky_pipeline
+                } else {
+                    &renderer.sky_msaa_pipeline
+                });
+                pass.draw(0..3, 0..1);
             }
         }
         let vertex_buffer = renderer.scene_buffer.as_ref().unwrap().1.clone();
@@ -346,15 +358,32 @@ impl egui_wgpu::CallbackTrait for SceneCallback {
 impl RenderResources {
     fn new(device: &wgpu::Device, queue: &wgpu::Queue, target_format: wgpu::TextureFormat) -> Self {
         let water = water_gpu::WaterResources::new(device, queue);
+        let environment = opencity::runtime::surface_materials::EnvironmentMap::new(device);
+        let mut bake = device.create_command_encoder(&Default::default());
+        environment.bake(
+            queue,
+            &mut bake,
+            [
+                [-0.494, -0.500, 0.712, 1.],
+                [0.94, 0.82, 0.65, 2.5],
+                [1., 0., 0., 0.],
+            ],
+        );
+        queue.submit([bake.finish()]);
         let contact = contact_gpu::ContactTexture::new(device, queue);
+        let pavement = opencity::runtime::surface_materials::SurfaceTextures::new(device, queue);
+        let mut material_layout = contact_gpu::ContactTexture::layout(0).to_vec();
+        material_layout.extend(opencity::runtime::surface_materials::SurfaceTextures::layout(3));
         let contact_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("contact masks"),
-            entries: &contact_gpu::ContactTexture::layout(0),
+            entries: &material_layout,
         });
+        let mut material_entries = contact.entries(0).to_vec();
+        material_entries.extend(pavement.entries(3));
         let contact_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("contact masks"),
             layout: &contact_layout,
-            entries: &contact.entries(0),
+            entries: &material_entries,
         });
         let scene_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("opencity scene shader"),
@@ -397,6 +426,7 @@ impl RenderResources {
                 Some(&camera_layout),
                 Some(&water.layout),
                 Some(&contact_layout),
+                Some(&environment.layout),
             ],
             immediate_size: 0,
         });
@@ -450,6 +480,44 @@ impl RenderResources {
         };
         let scene_pipeline = make_scene_pipeline(SCENE_SAMPLES);
         let close_zoom_pipeline = make_scene_pipeline(1);
+        let make_sky = |samples| {
+            device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                label: Some("editor blue atmosphere"),
+                layout: Some(&scene_layout),
+                vertex: wgpu::VertexState {
+                    module: &scene_shader,
+                    entry_point: Some("sky_vs"),
+                    buffers: &[],
+                    compilation_options: Default::default(),
+                },
+                fragment: Some(wgpu::FragmentState {
+                    module: &scene_shader,
+                    entry_point: Some("sky_fs"),
+                    compilation_options: Default::default(),
+                    targets: &[Some(wgpu::ColorTargetState {
+                        format: wgpu::TextureFormat::Rgba8Unorm,
+                        blend: None,
+                        write_mask: wgpu::ColorWrites::ALL,
+                    })],
+                }),
+                primitive: Default::default(),
+                depth_stencil: Some(wgpu::DepthStencilState {
+                    format: wgpu::TextureFormat::Depth32Float,
+                    depth_write_enabled: Some(false),
+                    depth_compare: Some(wgpu::CompareFunction::GreaterEqual),
+                    stencil: Default::default(),
+                    bias: Default::default(),
+                }),
+                multisample: wgpu::MultisampleState {
+                    count: samples,
+                    ..Default::default()
+                },
+                multiview_mask: None,
+                cache: None,
+            })
+        };
+        let sky_pipeline = make_sky(1);
+        let sky_msaa_pipeline = make_sky(SCENE_SAMPLES);
         let composite_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("opencity composite image layout"),
             entries: &[
@@ -523,6 +591,9 @@ impl RenderResources {
             contact,
             contact_group,
             close_zoom_pipeline,
+            sky_pipeline,
+            sky_msaa_pipeline,
+            environment,
             camera_buffer,
             camera_bind_group,
             scene_buffer: None,

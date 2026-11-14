@@ -65,11 +65,16 @@ impl RoadEditor {
                     );
                 }
             }
-            let intersection_block = self.intersection_placement_input(ui, &response, rect);
-            let annotation_block = self.annotation_input(ui, &response, rect);
-            let box_block = self.box_select_input(ui, &response, rect, &projection, true);
-            let network_block = self.network_map_ui(ui, &response, rect, &projection, true);
-            let building_block = network_block
+            let prop_block = self.prop_input(ui, &response, rect);
+            let intersection_block =
+                !prop_block && self.intersection_placement_input(ui, &response, rect);
+            let annotation_block = !prop_block && self.annotation_input(ui, &response, rect);
+            let box_block =
+                !prop_block && self.box_select_input(ui, &response, rect, &projection, true);
+            let network_block =
+                !prop_block && self.network_map_ui(ui, &response, rect, &projection, true);
+            let building_block = prop_block
+                || network_block
                 || self.zone_options_ui(ui, &response, rect, true)
                 || self.building_options_ui(ui, &response, rect, true);
 
@@ -922,6 +927,7 @@ impl RoadEditor {
 
             self.paint_frontage_zones(ui, rect, true);
             self.paint_annotations(ui, rect);
+            self.paint_props(ui, rect);
             self.paint_network_overlays(ui, rect, true);
             self.paint_intersection_preview(ui, rect);
             if self.point_options.is_none()

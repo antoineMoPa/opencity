@@ -3,6 +3,7 @@ use super::*;
 
 impl RoadEditor {
     pub(super) fn restore_history(&mut self, undo: bool) -> bool {
+        let prop_tools = (self.minimal.props.active, self.minimal.props.kind);
         self.camera_transition = None;
         self.cancel_placement();
         let target = if undo {
@@ -15,6 +16,8 @@ impl RoadEditor {
             let vehicle_initialized = self.minimal.vehicle_initialized;
             let last_edit_view = self.minimal.last_edit_view;
             self.minimal = minimal::MinimalEditor::default();
+            self.minimal.props.active = prop_tools.0;
+            self.minimal.props.kind = prop_tools.1;
             self.minimal.vehicle_initialized = vehicle_initialized;
             self.minimal.last_edit_view = last_edit_view;
             #[cfg(not(target_arch = "wasm32"))]

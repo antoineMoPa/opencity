@@ -10,7 +10,7 @@ use std::{collections::HashMap, sync::Mutex};
 use wgpu::util::DeviceExt;
 
 const GEOMETRY_SCALE: f32 = 100.0;
-const PAVEMENT_OFFSET: f32 = 0.005;
+pub(super) const PAVEMENT_OFFSET: f32 = 0.005;
 const SCENE_SAMPLES: u32 = 4;
 const MULTISAMPLE_MAX_ZOOM: f32 = 240.0;
 const GEOMETRY_RECT: egui::Rect = egui::Rect::from_min_max(

@@ -8,9 +8,13 @@ struct Camera { view_projection: mat4x4<f32>, light_view_projection: mat4x4<f32>
 @group(1) @binding(2) var contact_atlas: texture_2d<f32>;
 @group(1) @binding(3) var contact_sampler: sampler;
 @group(1) @binding(4) var<uniform> contact_settings: vec4<f32>;
+@group(1) @binding(8) var pavement_color: texture_2d_array<f32>;
+@group(1) @binding(9) var pavement_detail: texture_2d_array<f32>;
+@group(1) @binding(10) var pavement_sampler: sampler;
 // Group 2: shared linear HDR atmosphere cube and filtering sampler.
 @group(2) @binding(0) var sky_environment: texture_cube<f32>;
 @group(2) @binding(1) var sky_sampler: sampler;
+@group(2) @binding(2) var filtered_environment: texture_cube<f32>;
 struct Input { @location(0) position: vec3<f32>, @location(1) normal: vec3<f32>, @location(2) color: vec3<f32>, @location(3) surface: vec4<f32> };
 struct Output { @builtin(position) clip: vec4<f32>, @location(0) world: vec3<f32>, @location(1) normal: vec3<f32>, @location(2) color: vec3<f32>, @location(3) @interpolate(flat) surface: vec4<f32>, @location(4) fence_uv: vec2<f32>, @location(5) @interpolate(flat) snow_control:vec2<f32> };
 @vertex fn vs(v: Input) -> Output { var o: Output; o.clip=camera.view_projection*vec4<f32>(v.position,1.0);o.world=v.position;o.normal=v.normal;o.color=v.color;o.surface=v.surface;o.fence_uv=v.surface.yz;o.snow_control=vec2<f32>(select(1.0,0.0,v.surface.w== -3.0),0.0);return o; }
@@ -141,6 +145,7 @@ struct SurfaceData {
     world_footprint:vec3<f32>,
     // Optional consumer-supplied coverage, applied after material detail and before lighting.
     snow:f32,
+    world_dx:vec3<f32>,world_dy:vec3<f32>,finish:vec3<f32>,
 };
 fn prepare_surface(v:Output)->SurfaceData {
     let p=v.world.xy;
@@ -158,7 +163,7 @@ fn prepare_surface(v:Output)->SurfaceData {
     let roof_row=(p.x+p.y)/(roof_unit*0.15);
     let roof_tile=(p.y-p.x)/(roof_unit*0.32)+floor(roof_row)*0.5;
     let roof_detail=1.0-smoothstep(0.25,0.8,max(fwidth(roof_row),fwidth(roof_tile)));
-    return SurfaceData(n,detail,floor_position,band,brick_row,brick_coord,brick_footprint,roof_row,roof_tile,roof_detail,fwidth(v.fence_uv),max(abs(dpdx(v.world)),abs(dpdy(v.world))),0.0);
+    return SurfaceData(n,detail,floor_position,band,brick_row,brick_coord,brick_footprint,roof_row,roof_tile,roof_detail,fwidth(v.fence_uv),max(abs(dpdx(v.world)),abs(dpdy(v.world))),0.0,dpdx(v.world),dpdy(v.world),vec3<f32>(0.75,0.0,-1.0));
 }
 @fragment fn fs(v:Output,@builtin(front_facing) front:bool)->@location(0) vec4<f32> {
     let fence_footprint=fwidth(v.fence_uv);
@@ -187,19 +192,24 @@ fn shade_surface_lit(v:Output,front:bool,coverage:f32,surface:SurfaceData,local:
     }
     var facade_room=vec3<f32>(0.0);var room_mask=0.0;
     var n=surface.normal;
+    var roughness=surface.finish.x;let metalness=surface.finish.y;
+    let pavement=kind<0.5 || (kind>1.5&&kind<2.5) || (kind==7.0&&v.surface.w== -2.0&&v.snow_control.y==0.0);
+    let physical=pavement || surface.finish.z>=0.0;
+    if pavement {
+        let scan=scanned_pavement(v.world*100.0,surface.world_dx*100.0,surface.world_dy*100.0,n,select(0,1,kind>1.5));
+        base=pavement_lane_color(scan.color,v.color);n=scan.normal;roughness=scan.roughness;
+    }
     if kind>10.5&&kind<11.5&&!front {n=-n;}
     let detail=surface.detail;let floor_position=surface.floor_position;let band=surface.band;
     let brick_row=surface.brick_row;let brick_coord=surface.brick_coord;let brick_footprint=surface.brick_footprint;
     let roof_row=surface.roof_row;let roof_tile=surface.roof_tile;let roof_detail=surface.roof_detail;
     var grain=0.5;var broad=0.0;
-    if kind<2.5 || (kind>=4.5&&kind<5.5) {grain=mix(0.5,noise(p*1600.0),detail);}
-    if kind<1.5 {broad=noise(p*28.0)*0.65+noise(p*83.0)*0.35;}
-    if kind<0.5 { // Asphalt aggregate, weathering, occasional repaired cracks.
-        let crack=pow(1.0-abs(sin(p.x*307.0+noise(p*16.0)*14.0)),32.0)*0.16;
-        base*=0.35*(0.80+0.20*grain+0.15*broad-crack);
+    if (kind>0.5&&kind<1.5) || (kind>=4.5&&kind<5.5) {grain=mix(0.5,noise(p*1600.0),detail);}
+    if kind>0.5&&kind<1.5 {broad=noise(p*28.0)*0.65+noise(p*83.0)*0.35;}
+    if kind<0.5 { // Scanned aggregate plus existing authored road contact masks.
         let edge=pavement_edges(v.fence_uv.y,v.surface.w);
         base=pavement_weather(p,surface.world_footprint.xy,base,true,edge,0.0);
-        base=pavement_deposits(base,v.fence_uv,surface.paving_footprint,v.surface.w);
+        base=seasonal_pavement_deposits(base,v.fence_uv,surface.paving_footprint,v.surface.w,camera.daylight_sky.z);
     } else if kind<1.5 { // Multi-scale grass cover, soil and blades.
         base=mix(base,vec3<f32>(0.18,0.22,0.15),0.45);
         base=mix(base*0.72,base*1.22,broad)*(0.90+0.18*grain);
@@ -217,12 +227,12 @@ fn shade_surface_lit(v:Output,front:bool,coverage:f32,surface:SurfaceData,local:
         }
         if v.surface.w== -2.0 {
             base=concrete_weather(v.world,surface.world_footprint,v.fence_uv.y,n,base);
-            if abs(n.z)<0.5 {base=contact_deposits(base,v.fence_uv,surface.paving_footprint,true);}
+            if abs(n.z)<0.5 {base=seasonal_contact_deposits(base,v.fence_uv,surface.paving_footprint,true,camera.daylight_sky.z);}
         } else {
             let edge=select(vec2<f32>(0.0),pavement_edges(v.fence_uv.y,v.surface.w),paving_style==2u);
             base*=mix(1.0,0.65,joint_coverage);
             base=pavement_weather(p,surface.world_footprint.xy,base,false,edge,joint_coverage);
-            base=pavement_deposits(base,v.fence_uv,surface.paving_footprint,v.surface.w);
+            base=seasonal_pavement_deposits(base,v.fence_uv,surface.paving_footprint,v.surface.w,camera.daylight_sky.z);
         }
     }
     else if kind<3.5 { // Editor facade palette/floor spacing with game lighting.
@@ -259,7 +269,7 @@ fn shade_surface_lit(v:Output,front:bool,coverage:f32,surface:SurfaceData,local:
     } else if kind<5.5 {base*=0.86+0.25*grain;}
     else if kind>6.5&&kind<7.5&&v.surface.w== -2.0 {
         base=concrete_weather(v.world,surface.world_footprint,v.fence_uv.y,n,base);
-        if abs(n.z)<0.5 {base=contact_deposits(base,v.fence_uv,surface.paving_footprint,true);}
+        if abs(n.z)<0.5 {base=seasonal_contact_deposits(base,v.fence_uv,surface.paving_footprint,true,camera.daylight_sky.z);}
     }
     else if kind>9.5&&kind<10.5 {
         // A small, anti-aliased shingle pattern scaled by the consumer's unit.
@@ -274,11 +284,31 @@ fn shade_surface_lit(v:Output,front:bool,coverage:f32,surface:SurfaceData,local:
         let snow_grain=mix(0.94,1.0,noise(p*2300.0));
         base=mix(base,vec3<f32>(0.86,0.92,0.96)*snow_grain,clamp(surface.snow,0.0,1.0));
         facade_glow*=1.0-surface.snow;
+        roughness=mix(roughness,0.94,clamp(surface.snow,0.0,1.0));
+        n=mix(n,surface.normal,clamp(surface.snow,0.0,1.0));n*=inverseSqrt(max(dot(n,n),0.000001));
     }
     let daylight=clamp(camera.daylight_sky.x,0.0,1.0);
     let eye=camera.eye_time.xyz-v.world;let view=eye/max(length(eye),0.001);
     var lit:vec3<f32>;
-    if kind>11.5&&kind<14.5 {
+    if physical {
+        let sun=camera.sun_exposure.xyz/max(length(camera.sun_exposure.xyz),0.001);
+        let sunlight=mix(vec3<f32>(0.08,0.11,0.18),camera.sun_color.rgb*camera.sun_color.w*3.0,daylight);
+        var shadow=1.0;
+        if dot(n,sun)>0.0 {shadow=visibility(v.world,surface.normal);}
+        let diffuse_env=textureSampleLevel(filtered_environment,sky_sampler,n,7.0).rgb*0.55;
+        let reflected=reflect(-view,n);
+        let specular_env=textureSampleLevel(filtered_environment,sky_sampler,reflected,roughness*6.0).rgb;
+        let metal=metalness*(1.0-clamp(surface.snow,0.0,1.0));
+        lit=material_direct(base,n,view,sun,roughness,metal)*sunlight*shadow
+            +material_environment(base,n,view,roughness,metal,diffuse_env,specular_env)
+            +base*(1.0-metal)*local;
+        if surface.finish.z>0.0 {
+            let coat=surface.finish.z*(1.0-clamp(surface.snow,0.0,1.0));
+            let fresnel=0.04+0.96*pow(1.0-max(dot(n,view),0.0),5.0);
+            let reflection=textureSampleLevel(filtered_environment,sky_sampler,reflected,0.8).rgb;
+            lit=lit*(1.0-coat*fresnel)+coat*(reflection*fresnel+material_direct(vec3<f32>(0.0),n,view,sun,0.16,0.0)*sunlight*shadow);
+        }
+    } else if kind>11.5&&kind<14.5 {
         let sun=camera.sun_exposure.xyz/max(length(camera.sun_exposure.xyz),0.001);
         let direct=max(dot(n,sun),0.0)*visibility(v.world,n);
         let lighting=vec3<f32>(mix(0.12,0.43,daylight))
@@ -321,7 +351,6 @@ fn shade_surface_lit(v:Output,front:bool,coverage:f32,surface:SurfaceData,local:
     }
     let distance=length(eye);let fog=(1.0-exp(-distance*0.025)*(1.0-smoothstep(5.8,7.6,distance)))*(1.0-camera.daylight_sky.y);
     // Exposure and filmic compression. Surface target is sRGB.
-    lit*=camera.sun_exposure.w;lit=lit/(lit+vec3<f32>(1.0));
-    let sky=textureSampleLevel(sky_environment,sky_sampler,-view,0.0).rgb*camera.sun_exposure.w;
-return vec4<f32>(mix(lit,sky/(sky+vec3<f32>(1.0)),fog),coverage);
+    let sky=textureSampleLevel(sky_environment,sky_sampler,-view,0.0).rgb;
+    return vec4<f32>(filmic_display(mix(lit,sky,fog)*camera.sun_exposure.w),coverage);
 }

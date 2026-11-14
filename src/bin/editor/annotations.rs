@@ -69,6 +69,7 @@ impl RoadEditor {
         }
     }
     pub(super) fn cancel_placement(&mut self) {
+        self.minimal.props.close();
         self.minimal.pending_road = None;
         self.minimal.placement_error = None;
         self.rollback_road_placement();

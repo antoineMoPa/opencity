@@ -1,6 +1,9 @@
 // Hosts bind a linear RGBA8 mip chain, repeat-U/clamp-V sampler and settings uniform.
 // Coordinates and footprints are in map units (100 meters per unit).
 fn contact_deposits(base:vec3<f32>,uv:vec2<f32>,aa:vec2<f32>,vertical:bool)->vec3<f32> {
+    return seasonal_contact_deposits(base,uv,aa,vertical,0.0);
+}
+fn seasonal_contact_deposits(base:vec3<f32>,uv:vec2<f32>,aa:vec2<f32>,vertical:bool,winter:f32)->vec3<f32> {
     // The full spread keeps wall grime visible above the raised sidewalk surface.
     let spread=contact_settings.y;
     if contact_settings.w<0.5 || uv.y<0.0 || uv.y>=spread {return base;}
@@ -11,6 +14,12 @@ fn contact_deposits(base:vec3<f32>,uv:vec2<f32>,aa:vec2<f32>,vertical:bool)->vec
     let masks=textureSampleLevel(contact_atlas,contact_sampler,uv/scale,lod);
     let band=pow(max(0.0,1.0-uv.y/spread),1.5);
     let grime=band*(0.3+0.7*masks.r)*contact_settings.x;
+    if winter>0.0 {
+        // Reuse the contact atlas for irregular snow caught along curbs and crevices.
+        // This narrow deposit survives road clearing, including on vertical curb bases.
+        let snow=band*(0.75+0.25*masks.r)*clamp(winter,0.0,1.0);
+        return mix(base,vec3<f32>(0.86,0.92,0.96),snow);
+    }
     var color=mix(base,base*vec3<f32>(0.27,0.235,0.19),grime);
     if !vertical {
         let footprint=max(aa.x,aa.y)*100.0;
@@ -25,9 +34,12 @@ fn contact_deposits(base:vec3<f32>,uv:vec2<f32>,aa:vec2<f32>,vertical:bool)->vec
     return color;
 }
 fn pavement_deposits(base:vec3<f32>,uv:vec2<f32>,aa:vec2<f32>,packed:f32)->vec3<f32> {
+    return seasonal_pavement_deposits(base,uv,aa,packed,0.0);
+}
+fn seasonal_pavement_deposits(base:vec3<f32>,uv:vec2<f32>,aa:vec2<f32>,packed:f32,winter:f32)->vec3<f32> {
     if packed< -4.0 {
         // CPU clipping already restricts the finite edge; U retains the source arc phase.
-        return contact_deposits(base,uv,aa,false);
+        return seasonal_contact_deposits(base,uv,aa,false,winter);
     }
     let bits=u32(max(round(packed),0.0));
     let width=f32((bits>>2u)&4095u)*0.0001;
@@ -38,5 +50,5 @@ fn pavement_deposits(base:vec3<f32>,uv:vec2<f32>,aa:vec2<f32>,packed:f32)->vec3<
     let a=select(1e6,max(uv.y-select(0.0,0.002,left==31u),0.0),left>1u);
     let b=select(1e6,max(width-uv.y-select(0.0,0.002,right==31u),0.0),right>1u);
     // Select one contact; overlapping narrow bands cannot multiply darkness twice.
-    return contact_deposits(base,vec2<f32>(uv.x,min(a,b)),aa,false);
+    return seasonal_contact_deposits(base,vec2<f32>(uv.x,min(a,b)),aa,false,winter);
 }

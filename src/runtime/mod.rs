@@ -5,6 +5,7 @@ mod bridges;
 pub mod contact_debris;
 mod geometry;
 mod retaining;
+pub mod surface_materials;
 mod surface_weathering;
 use crate::junction_mesh;
 pub mod ambient_occlusion;
@@ -33,7 +34,13 @@ use std::{collections::HashMap, path::Path};
 /// Optional standalone wgpu shader: Z-up positions, linear RGB, surface metadata.
 /// Group 0: 288-byte camera/lighting/star uniform (see docs/game-runtime.md).
 /// Group 1: shadow depth/comparison sampler (0/1), contact RGBA8 tile/sampler/settings (2/3/4).
+/// Group 1 bindings 8/9/10: scanned pavement sRGB color/linear normal-roughness arrays/sampler.
+/// Bindings 5..7 remain reserved for consumer snow data. Group 2: sharp sky/sampler/filtered lighting.
 pub const GAME_SHADER: &str = concat!(
+    include_str!("filmic.wgsl"),
+    "\n",
+    include_str!("material_lighting.wgsl"),
+    "\n",
     include_str!("architecture/facade.wgsl"),
     "\n",
     include_str!("surfaces.wgsl"),
@@ -46,8 +53,13 @@ pub const GAME_SHADER: &str = concat!(
 );
 /// Native-resolution world-fixed stellar detail, shared with consumer sky backgrounds.
 pub const SKY_STARS_SHADER: &str = include_str!("sky_stars.wgsl");
+pub const FILMIC_SHADER: &str = include_str!("filmic.wgsl");
 /// Original editor shader, for consumers implementing its documented bindings.
 pub const EDITOR_SHADER: &str = concat!(
+    include_str!("filmic.wgsl"),
+    "\n",
+    include_str!("material_lighting.wgsl"),
+    "\n",
     include_str!("architecture/facade.wgsl"),
     "\n",
     include_str!("contact_debris.wgsl"),

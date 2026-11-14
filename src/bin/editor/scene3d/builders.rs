@@ -93,6 +93,7 @@ pub fn build_scene_with_model_base(
             started.elapsed() - roads_time
         );
     }
+    super::super::props::append_scene(&mut scene, program, model_base);
     // Convert vertices while the scene builder still runs on its worker thread.
     scene.gpu_vertices();
     scene
@@ -154,6 +155,7 @@ impl WebSceneBuild {
             scene.vertices.extend_from_slice(grid_vertices(palette));
         }
         landscape.sort_by(|a, b| a.elevation.total_cmp(&b.elevation));
+        super::super::props::append_scene(&mut scene, &program, None);
         Self {
             program,
             theme: palette.theme,

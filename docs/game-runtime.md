@@ -127,8 +127,10 @@ remains an independently removable object.
 
 ## Optional shaders
 
-Exported shader strings are optional; the library creates no GPU resources. `runtime::EDITOR_SHADER`
-is the original editor shader, including its camera, coast elevation texture and facade metadata
+Exported shader strings are optional; CPU-only consumers create no GPU resources. The optional
+`render-materials` feature supplies shared pavement textures and cached environment resources.
+`runtime::EDITOR_SHADER` is the editor shader, including its camera, coast elevation texture and
+facade metadata
 contract. See `src/bin/editor/shaders/scene.wgsl` and `scene3d/renderer.rs` for its bindings. It
 uses editor-specific depth bias and camera conventions; it is not interchangeable with the game
 shader.
@@ -152,7 +154,9 @@ objects.
 
 See the [runtime shader contract](../docs.md#runtime-shader-contract) for uniforms, sky/shadow
 bindings, pipeline setup and sidewalk metadata. The shader provides procedural surfaces, animated
-water, PCF shadows, fog and exposure compression.
+water, PCF shadows, fog and a hue-preserving filmic shoulder. Scanned pavement and cached
+environment lighting use the [material rendering contract](material-rendering.md); building
+material code remains separate and unchanged.
 
 `SurfaceKind::Window` supports five-face parallax interiors with seeded
 lighting and edge AO. Detailed panes store `[Window, U, V, 16 * (1 + seed % 256) + aspect]`, with

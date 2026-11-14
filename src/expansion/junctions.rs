@@ -7,6 +7,7 @@ pub(super) fn append(
     reference: &str,
     extension: f32,
     kind: Kind,
+    closed_side: ThreeWayClosedSide,
 ) -> bool {
     if end.road.role != RoadRole::Ordinary
         || end.road.direction != RoadDirection::Both
@@ -36,12 +37,12 @@ pub(super) fn append(
         return false;
     };
     let reference = reference.clone();
-    for turn in [
-        std::f32::consts::FRAC_PI_2,
-        -std::f32::consts::FRAC_PI_2,
-        0.,
+    for (side, turn) in [
+        (ThreeWayClosedSide::Left, std::f32::consts::FRAC_PI_2),
+        (ThreeWayClosedSide::Right, -std::f32::consts::FRAC_PI_2),
+        (ThreeWayClosedSide::Ahead, 0.),
     ] {
-        if turn == 0. && kind == Kind::ThreeWay {
+        if side == closed_side && kind == Kind::ThreeWay {
             continue;
         }
         let mut arm = end.clone();
@@ -92,6 +93,99 @@ pub(super) fn clear(program: &Program, end: &End, obstacles: &obstacles::Obstacl
 mod tests {
     use super::*;
     const SOURCE: &str = include_str!("../../tests/fixtures/expansion_junctions.road");
+
+    #[test]
+    fn rotated_three_ways_keep_the_incoming_arm_and_round_trip() {
+        for at_end in [false, true] {
+            for closed in [
+                ThreeWayClosedSide::Ahead,
+                ThreeWayClosedSide::Left,
+                ThreeWayClosedSide::Right,
+            ] {
+                let before = parse(SOURCE).unwrap();
+                let end = ends(&before)
+                    .into_iter()
+                    .find(|e| e.at_end == at_end)
+                    .unwrap();
+                let proposal = propose(
+                    &before,
+                    &end,
+                    Options {
+                        three_way_closed_side: closed,
+                        ..Default::default()
+                    },
+                )
+                .into_iter()
+                .find(|p| p.kind == Kind::ThreeWay)
+                .unwrap();
+                let mut after = before.clone();
+                proposal.apply(&mut after).unwrap();
+                assert_eq!(
+                    parse(&edited_source(SOURCE, &before, &after).unwrap()).unwrap(),
+                    after
+                );
+                let projection = map::project(&after);
+                assert_eq!(projection.unresolved, 0);
+                let junction = map::intersections(&after, &projection).pop().unwrap();
+                assert_eq!(
+                    map::intersection_arms(&projection, &junction.point_ref).len(),
+                    3
+                );
+                let turn = match closed {
+                    ThreeWayClosedSide::Ahead => 0.,
+                    ThreeWayClosedSide::Left => std::f32::consts::FRAC_PI_2,
+                    ThreeWayClosedSide::Right => -std::f32::consts::FRAC_PI_2,
+                };
+                let closed_heading = end.heading + turn;
+                for arm in &proposal.ghosts {
+                    let tip = if distance(arm.start, junction.position)
+                        > distance(arm.end, junction.position)
+                    {
+                        arm.start
+                    } else {
+                        arm.end
+                    };
+                    let heading = (tip.y - junction.position.y).atan2(tip.x - junction.position.x);
+                    assert!(
+                        (heading - closed_heading).cos() < 0.01,
+                        "road on closed side: {closed:?}"
+                    );
+                }
+                #[cfg(feature = "game-runtime")]
+                crate::runtime::City::from_program(&after, None).unwrap();
+            }
+        }
+    }
+
+    #[test]
+    fn rotated_exits_are_checked_for_obstacles() {
+        let mut program = parse(SOURCE).unwrap();
+        program.statements.extend(
+            parse("building(0.3, 0.6,-0.05, 0.7,-0.05, 0.7,0.05, 0.6,0.05);")
+                .unwrap()
+                .statements,
+        );
+        let end = ends(&program).into_iter().find(|e| e.at_end).unwrap();
+        for closed in [
+            ThreeWayClosedSide::Ahead,
+            ThreeWayClosedSide::Left,
+            ThreeWayClosedSide::Right,
+        ] {
+            let choices = propose(
+                &program,
+                &end,
+                Options {
+                    junction_extension: 1.,
+                    three_way_closed_side: closed,
+                    ..Default::default()
+                },
+            );
+            assert_eq!(
+                choices.iter().any(|p| p.kind == Kind::ThreeWay),
+                closed == ThreeWayClosedSide::Ahead
+            );
+        }
+    }
 
     #[test]
     #[cfg(feature = "game-runtime")]

@@ -15,6 +15,23 @@ fn tool(name: &str, description: &str, properties: Value, required: &[&str]) -> 
 pub(super) fn tools() -> Value {
     let tools = [
         tool(
+            "get_prop_state",
+            "Get authored props and row members, with the active prop tool",
+            json!({}),
+            &[],
+        ),
+        tool(
+            "set_prop_tool",
+            "Open native prop placement or selection controls",
+            json!({
+                "kind":{"type":"string","enum":["cone","tree","bench","lamp"]},
+                "mode":{"type":"string","enum":["select","single","row"]},
+                "spacing":{"type":"number","minimum":0.6,"maximum":50},
+                "view":{"type":"string","enum":["top","isometric","vehicular"]}
+            }),
+            &[],
+        ),
+        tool(
             "get_road_state",
             "Get the current road AST source and projected road segments",
             json!({}),

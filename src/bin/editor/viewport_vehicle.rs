@@ -16,7 +16,8 @@ impl RoadEditor {
                 self.place_vehicle_camera();
             }
             let previous_position = self.vehicle_position;
-            let keyboard_available = !ui.ctx().egui_wants_keyboard_input();
+            let prop_block = self.prop_input(ui, &response, rect);
+            let keyboard_available = !prop_block && !ui.ctx().egui_wants_keyboard_input();
             if keyboard_available && response.dragged_by(egui::PointerButton::Primary) {
                 self.vehicle_heading -= response.drag_delta().x * 0.006;
             }
@@ -82,6 +83,7 @@ impl RoadEditor {
                 ),
             ));
             self.paint_annotations(ui, rect);
+            self.paint_props(ui, rect);
         });
     }
 }

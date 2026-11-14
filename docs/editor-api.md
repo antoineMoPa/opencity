@@ -95,3 +95,21 @@ projection is ready; Box select changes only selection.
 
 [connection-guide]:
   road-building-guide-for-agents.md#8-inspect-and-edit-connections-through-the-rust-api
+
+## Props
+
+The palette includes `Place props: Cone`, `Tree`, `Bench`, and `Lamp`. The small floating toolbar
+supports single placement and rows with arbitrary endpoint/bend handles. Select and drag objects,
+Shift-click or drag a box to select several, double-click a member to edit its row, and use native
+Undo/Redo and Save. No instructional banner is shown. Prop calls survive `get_road_state`,
+`replace_document`, `save_document`, reopening, and the in-game loader:
+
+```road
+cone_1 = prop(cone, 0.05, 0, {heading: 0, elevation: 0.001});
+cones_2 = prop_row(cone, 0, 0, 0.05, 0.02, 0.1, 0, {spacing: 2.5, elevation: 0.001});
+```
+
+Coordinates and elevation use map units (100 metres per unit); heading is in degrees and spacing
+is in metres. A row stores start, quadratic bend control, and end coordinates. Its optional
+`offsets: {p1: {x: 0.002, y: 0, heading: 15}}` and `hidden: {p2: true}` preserve independent moves
+and deletions. The game and editor share the catalogue, parser, row sampling and models.

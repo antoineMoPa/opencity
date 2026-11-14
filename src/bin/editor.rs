@@ -39,6 +39,8 @@ mod model;
 mod network_ui;
 #[path = "editor/point_options.rs"]
 mod point_options;
+#[path = "editor/props.rs"]
+mod props;
 #[path = "editor/scene3d.rs"]
 mod scene3d;
 #[path = "editor/spatial_edit.rs"]

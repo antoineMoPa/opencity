@@ -256,9 +256,14 @@ density/size/brightness/angular footprint; star RGB/solar visibility. Matrices a
 clip depth 0..1; angular footprint is vertical FOV / target height.
 
 Group 1: 2048² depth texture + comparison sampler at bindings 0/1, linear contact mask texture,
-trilinear sampler and settings vec4 at bindings 2/3/4. Group 2: linear HDR sky cube + filtering
-sampler. The contact atlas and settings are supplied by `runtime::contact_debris`; see
+trilinear sampler and settings vec4 at bindings 2/3/4; scanned pavement color and normal/roughness
+arrays + sampler at bindings 8/9/10 (5..7 remain consumer-reserved).
+Group 2: sharp linear HDR sky cube at 0, filtering sampler at 1, filtered material-lighting
+cube at 2. The contact atlas and settings are supplied by `runtime::contact_debris`; see
 [game-runtime.md](docs/game-runtime.md) for the upload and material contract.
+The optional `render-materials` feature provides the shared GPU resources; see
+[material-rendering.md](docs/material-rendering.md) for texture color spaces, physical scale,
+environment convolution, editor bindings and the filmic display transform.
 Scene pipelines use all groups and sRGB output; shadows use group 0. Fence shadows use
 `vs_shadow`/`fs_shadow` masking; opaque casters may omit the fragment stage. `fs_opaque` has no
 discard.

@@ -396,6 +396,7 @@ impl RoadEditor {
 
     pub(super) fn call_mcp(&mut self, name: &str, args: &Value) -> Result<Value, String> {
         match name {
+            "get_prop_state" | "set_prop_tool" => self.prop_api(name, args),
             "get_connection_workspace" | "open_connection_editor" | "edit_connection" => {
                 self.connection_api(name, args)
             }

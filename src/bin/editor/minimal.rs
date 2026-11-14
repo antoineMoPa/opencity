@@ -3,6 +3,7 @@ use super::*;
 
 #[derive(Default)]
 pub(super) struct MinimalEditor {
+    pub(super) props: props::Editor,
     pub(super) expansion: opencity::expansion_ui::Picker,
     #[cfg(not(target_arch = "wasm32"))]
     pub(super) launch_feedback: Option<external_launch::LaunchFeedback>,
@@ -280,6 +281,7 @@ impl RoadEditor {
                 });
             self.minimal.toolbar_rect = Some(area.response.rect);
         }
+        self.prop_toolbar(root);
         self.map_rect = None;
         self.map_canvas(root);
         self.paint_hovered_road_name(root);

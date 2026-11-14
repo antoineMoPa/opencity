@@ -140,6 +140,16 @@ impl RoadEditor {
                 shortcut: String::new(),
             });
         }
+        commands.extend(opencity::props::Kind::ALL.into_iter().map(|kind| {
+            PaletteCommand {
+                id: format!("props:{}", kind.keyword()),
+                title: format!("Place props: {}", kind.label()),
+                description:
+                    "Place, move or duplicate props; draw rows with free endpoint and bend handles"
+                        .into(),
+                shortcut: String::new(),
+            }
+        }));
         commands.push(PaletteCommand {
             id: "clear".into(),
             title: "Clear".into(),
@@ -188,6 +198,14 @@ impl RoadEditor {
     }
 
     pub(super) fn execute_palette_command(&mut self, id: &str, ctx: &egui::Context) {
+        if let Some(kind) = id
+            .strip_prefix("props:")
+            .and_then(opencity::props::Kind::from_keyword)
+        {
+            self.start_props(kind);
+            ctx.request_repaint();
+            return;
+        }
         if id == "expand-network" || id == "grow-network" {
             if id == "grow-network" {
                 self.minimal.expansion.start_growth();
