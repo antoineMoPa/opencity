@@ -558,6 +558,7 @@ impl Picker {
         } else {
             ui.add(
                 egui::DragValue::new(&mut self.length)
+                    .update_while_editing(false)
                     .range(0.05..=100.)
                     .speed(0.05)
                     .suffix(" u"),
@@ -636,6 +637,7 @@ impl Picker {
         ui.add(egui::DragValue::new(&mut self.steps).range(1..=32));
         ui.add(
             egui::DragValue::new(&mut self.length)
+                .update_while_editing(false)
                 .range(0.05..=100.)
                 .speed(0.05)
                 .suffix(" u"),
@@ -727,7 +729,7 @@ mod tests {
         );
         output.textures_delta.clear();
     }
-    fn key(key: egui::Key) -> Vec<egui::Event> {
+    pub(super) fn key(key: egui::Key) -> Vec<egui::Event> {
         [true, false]
             .into_iter()
             .map(|pressed| egui::Event::Key {

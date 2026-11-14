@@ -4,12 +4,12 @@ pub struct TreeTextures {
     sampler: wgpu::Sampler,
 }
 const ART: [&[u8]; 6] = [
-    include_bytes!("../../assets/props/trees/maple-leaves.png"),
-    include_bytes!("../../assets/props/trees/linden-leaves.png"),
-    include_bytes!("../../assets/props/trees/locust-leaves.png"),
-    include_bytes!("../../assets/props/trees/maple-bark.png"),
-    include_bytes!("../../assets/props/trees/linden-bark.png"),
-    include_bytes!("../../assets/props/trees/locust-bark.png"),
+    include_bytes!("../../assets/props/trees/leaves.png"),
+    include_bytes!("../../assets/props/trees/grass.png"),
+    include_bytes!("../../assets/props/trees/leaves.png"),
+    include_bytes!("../../assets/props/trees/bark.png"),
+    include_bytes!("../../assets/props/trees/bark.png"),
+    include_bytes!("../../assets/props/trees/bark-normal.png"),
 ];
 impl TreeTextures {
     pub fn layout(first: u32) -> [wgpu::BindGroupLayoutEntry; 2] {
@@ -121,18 +121,18 @@ pub struct TreeImpostors {
     sampler: wgpu::Sampler,
 }
 const IMAGES: [&[u8]; 12] = [
-    include_bytes!("../../assets/props/trees/maple-92374-summer.png"),
-    include_bytes!("../../assets/props/trees/maple-18531-summer.png"),
-    include_bytes!("../../assets/props/trees/linden-92374-summer.png"),
-    include_bytes!("../../assets/props/trees/linden-18531-summer.png"),
-    include_bytes!("../../assets/props/trees/locust-92374-summer.png"),
-    include_bytes!("../../assets/props/trees/locust-18531-summer.png"),
-    include_bytes!("../../assets/props/trees/maple-92374-winter.png"),
-    include_bytes!("../../assets/props/trees/maple-18531-winter.png"),
-    include_bytes!("../../assets/props/trees/linden-92374-winter.png"),
-    include_bytes!("../../assets/props/trees/linden-18531-winter.png"),
-    include_bytes!("../../assets/props/trees/locust-92374-winter.png"),
-    include_bytes!("../../assets/props/trees/locust-18531-winter.png"),
+    include_bytes!("../../assets/props/trees/broad-summer.png"),
+    include_bytes!("../../assets/props/trees/broad-summer.png"),
+    include_bytes!("../../assets/props/trees/upright-summer.png"),
+    include_bytes!("../../assets/props/trees/upright-summer.png"),
+    include_bytes!("../../assets/props/trees/young-summer.png"),
+    include_bytes!("../../assets/props/trees/young-summer.png"),
+    include_bytes!("../../assets/props/trees/broad-winter.png"),
+    include_bytes!("../../assets/props/trees/broad-winter.png"),
+    include_bytes!("../../assets/props/trees/upright-winter.png"),
+    include_bytes!("../../assets/props/trees/upright-winter.png"),
+    include_bytes!("../../assets/props/trees/young-winter.png"),
+    include_bytes!("../../assets/props/trees/young-winter.png"),
 ];
 impl TreeImpostors {
     pub fn layout(first: u32) -> [wgpu::BindGroupLayoutEntry; 2] {
@@ -140,13 +140,13 @@ impl TreeImpostors {
     }
     pub fn new(device: &wgpu::Device, queue: &wgpu::Queue) -> Self {
         let texture = device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("street tree four-view impostors"),
+            label: Some("street tree single-plane impostors"),
             size: wgpu::Extent3d {
-                width: 256,
-                height: 256,
+                width: 1024,
+                height: 1024,
                 depth_or_array_layers: 12,
             },
-            mip_level_count: 4,
+            mip_level_count: 6,
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
             format: wgpu::TextureFormat::Rgba8UnormSrgb,
@@ -163,11 +163,11 @@ impl TreeImpostors {
                 .expect("bundled tree impostor RGBA");
             assert_eq!(
                 (info.width, info.height, info.color_type),
-                (256, 256, png::ColorType::Rgba)
+                (1024, 1024, png::ColorType::Rgba)
             );
             let mut level_pixels = pixels[..info.buffer_size()].to_vec();
-            for level in 0..4u32 {
-                let width = 256 >> level;
+            for level in 0..6u32 {
+                let width = 1024 >> level;
                 queue.write_texture(
                     wgpu::TexelCopyTextureInfo {
                         texture: &texture,
@@ -191,7 +191,7 @@ impl TreeImpostors {
                         depth_or_array_layers: 1,
                     },
                 );
-                if level == 3 {
+                if level == 5 {
                     break;
                 }
                 let next_width = width as usize / 2;

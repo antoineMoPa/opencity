@@ -64,15 +64,23 @@ pub(super) fn image_parts(kind: Kind) -> &'static [Arc<Mesh>] {
         ]
         .map(|surface| {
             let mut mesh = Mesh::default();
+            let (half, bottom, top) = match surface {
+                SurfaceKind::TreeImageLinden | SurfaceKind::TreeImageLinden2 => {
+                    (0.08, -0.025, 0.135)
+                }
+                SurfaceKind::TreeImageLocust | SurfaceKind::TreeImageLocust2 => (0.07, -0.04, 0.10),
+                _ => (0.07, -0.025, 0.115),
+            };
             let positions = [
-                [-0.064, 0., -0.0095],
-                [0.064, 0., -0.0095],
-                [0.064, 0., 0.1025],
-                [-0.064, 0., -0.0095],
-                [0.064, 0., 0.1025],
-                [-0.064, 0., 0.1025],
+                [-half, 0., bottom],
+                [half, 0., bottom],
+                [half, 0., top],
+                [-half, 0., bottom],
+                [half, 0., top],
+                [-half, 0., top],
             ];
-            let uv = [[0., 1.], [1., 1.], [1., 0.], [0., 1.], [1., 0.], [0., 0.]];
+            // Exported GLB images retain their bottom-origin texture convention.
+            let uv = [[0., 0.], [1., 0.], [1., 1.], [0., 0.], [1., 1.], [0., 1.]];
             for (position, uv) in positions.into_iter().zip(uv) {
                 mesh.vertices.push(crate::runtime::Vertex {
                     position,
@@ -82,7 +90,7 @@ pub(super) fn image_parts(kind: Kind) -> &'static [Arc<Mesh>] {
                 });
             }
             // Expand the culling bounds around the camera-facing plane.
-            for y in [-0.064, 0.064, 0.] {
+            for y in [-half, half, 0.] {
                 mesh.vertices.push(crate::runtime::Vertex {
                     position: [0., y, 0.],
                     normal: [0., -1., 0.],
@@ -234,24 +242,18 @@ fn cone() -> Mesh {
 }
 fn tree(kind: Kind, far: bool) -> Vec<Mesh> {
     let bytes: &[u8] = match kind {
-        Kind::Tree => include_bytes!("../../assets/props/trees/maple-92374.glb"),
-        Kind::TreeMaple2 => include_bytes!("../../assets/props/trees/maple-18531.glb"),
-        Kind::TreeLinden => include_bytes!("../../assets/props/trees/linden-92374.glb"),
-        Kind::TreeLinden2 => include_bytes!("../../assets/props/trees/linden-18531.glb"),
-        Kind::TreeLocust => include_bytes!("../../assets/props/trees/locust-92374.glb"),
-        Kind::TreeLocust2 => include_bytes!("../../assets/props/trees/locust-18531.glb"),
+        Kind::Tree => include_bytes!("../../assets/props/trees/broad.glb"),
+        Kind::TreeMaple2 => include_bytes!("../../assets/props/trees/broad.glb"),
+        Kind::TreeLinden => include_bytes!("../../assets/props/trees/upright.glb"),
+        Kind::TreeLinden2 => include_bytes!("../../assets/props/trees/upright.glb"),
+        Kind::TreeLocust => include_bytes!("../../assets/props/trees/young.glb"),
+        Kind::TreeLocust2 => include_bytes!("../../assets/props/trees/young.glb"),
         _ => unreachable!(),
     };
     let glb = gltf::Gltf::from_slice(bytes).expect("bundled tree GLB");
     let binary = glb.blob.as_deref().expect("bundled tree buffer");
     let prefix = if far { "far_" } else { "near_" };
-    let leaf = match kind {
-        Kind::Tree | Kind::TreeMaple2 => SurfaceKind::TreeLeafMaple,
-        Kind::TreeLinden | Kind::TreeLinden2 => SurfaceKind::TreeLeafLinden,
-        Kind::TreeLocust | Kind::TreeLocust2 => SurfaceKind::TreeLeafLocust,
-        _ => unreachable!(),
-    };
-    let parts = ["bark", "leaves", "winter"].map(|part| {
+    let parts = ["bark", "leaves", "grass", "winter"].map(|part| {
         let name = format!("{prefix}{part}");
         let primitive = glb
             .meshes()
@@ -265,17 +267,18 @@ fn tree(kind: Kind, far: bool) -> Vec<Mesh> {
         let normals: Vec<_> = reader.read_normals().unwrap().collect();
         let uvs: Vec<_> = reader.read_tex_coords(0).unwrap().into_f32().collect();
         let colors: Vec<_> = reader.read_colors(0).unwrap().into_rgb_f32().collect();
-        let surface = match (part, kind) {
-            ("leaves", _) => leaf,
-            ("winter", Kind::TreeLinden | Kind::TreeLinden2) => SurfaceKind::TreeWinterLinden,
-            ("winter", Kind::TreeLocust | Kind::TreeLocust2) => SurfaceKind::TreeWinterLocust,
-            ("winter", _) => SurfaceKind::TreeWinter,
-            (_, Kind::TreeLinden | Kind::TreeLinden2) => SurfaceKind::TreeBarkLinden,
-            (_, Kind::TreeLocust | Kind::TreeLocust2) => SurfaceKind::TreeBarkLocust,
+        let surface = match part {
+            "leaves" => SurfaceKind::TreeLeafMaple,
+            "grass" => SurfaceKind::TreeLeafLinden,
+            "winter" => SurfaceKind::TreeWinter,
             _ => SurfaceKind::TreeBark,
         };
         let mut mesh = Mesh::default();
-        for index in reader.read_indices().unwrap().into_u32() {
+        for index in reader
+            .read_indices()
+            .map(|i| i.into_u32().collect::<Vec<_>>())
+            .unwrap_or_else(|| (0..positions.len() as u32).collect())
+        {
             let i = index as usize;
             mesh.vertices.push(crate::runtime::Vertex {
                 position: [

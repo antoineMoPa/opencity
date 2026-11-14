@@ -107,9 +107,8 @@ fn bed_height(point: vec2<f32>) -> f32 {
         let kind=i32(input.material.x);
         if kind==19 || kind==22 || kind==23 { discard; }
         var layer=0;
-        if kind==16 || kind==20 {layer=1;}
-        if kind==17 || kind==21 {layer=2;}
-        if kind>=18 {layer+=3;}
+        if kind==16 {layer=1;}
+        if kind>=18 {layer=3;}
         let tex=textureSample(tree_atlas,tree_sampler,input.surface.yz,layer);
         if kind<=17 && tex.a<0.42 {discard;}
         let light=0.62+max(dot(select(-normal,normal,normal.z>=0.0),normalize(vec3<f32>(-0.35,0.5,0.8))),0.0)*0.38;
