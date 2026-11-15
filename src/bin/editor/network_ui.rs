@@ -585,7 +585,7 @@ impl RoadEditor {
                             if ui
                                 .selectable_label(
                                     viewer.movement == Some(index),
-                                    format!("{} → {} · {}", m.from, m.to, m.class),
+                                    format!("{} → {} - {}", m.from, m.to, m.class),
                                 )
                                 .clicked()
                             {
@@ -604,13 +604,13 @@ impl RoadEditor {
                         ui.separator();
                         ui.heading(format!("Paths ({})", viewer.geometry.paths.len()));
                         for path in &viewer.geometry.paths {
-                            ui.label(format!("{} · {:.2} units", path.name, path.length()));
+                            ui.label(format!("{} - {:.2} units", path.name, path.length()));
                         }
                         ui.separator();
                         ui.heading(format!("Ports ({})", viewer.geometry.ports.len()));
                         for port in &viewer.geometry.ports {
                             ui.label(format!(
-                                "{}.{} · {} · z {:.2}",
+                                "{}.{} - {} - z {:.2}",
                                 port.name,
                                 port.role.keyword(),
                                 port.heading.keyword(),
@@ -622,7 +622,7 @@ impl RoadEditor {
                         }
                     }
                     ui.separator();
-                    ui.weak("Drag to pan · Scroll to zoom · Esc to return");
+                    ui.weak("Drag to pan - Scroll to zoom - Esc to return");
                 });
             });
         let (rect, response) =

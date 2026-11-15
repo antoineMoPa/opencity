@@ -7,19 +7,19 @@ impl RoadEditor {
             (
                 "road:neighborhood_street",
                 "Add road",
-                "Neighborhood street · place with two clicks",
+                "Neighborhood street - place with two clicks",
                 "",
             ),
             (
                 "road:divided_highway",
                 "Add highway",
-                "Divided highway · place with two clicks",
+                "Divided highway - place with two clicks",
                 "",
             ),
             (
                 "road:interstate_three_lane",
                 "Add interstate",
-                "Interstate three lane · place with two clicks",
+                "Interstate three lane - place with two clicks",
                 "",
             ),
             ("landscape:terrain", "Add terrain", "Place terrain", ""),
@@ -27,19 +27,19 @@ impl RoadEditor {
             (
                 "intersection:intersection3",
                 "Add three-way intersection",
-                "Tee junction · click to place · R rotate · Esc cancel",
+                "Tee junction - click to place - R rotate - Esc cancel",
                 "",
             ),
             (
                 "intersection:intersection4",
                 "Add four-way intersection",
-                "Cross junction · click to place · R rotate · Esc cancel",
+                "Cross junction - click to place - R rotate - Esc cancel",
                 "",
             ),
             (
                 "intersection:intersection2",
                 "Add right-turn intersection",
-                "Corner junction · click to place · R rotate · Esc cancel",
+                "Corner junction - click to place - R rotate - Esc cancel",
                 "",
             ),
             (

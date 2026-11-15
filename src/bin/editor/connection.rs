@@ -29,7 +29,7 @@ fn connections(program: &Program) -> Vec<Connection> {
                 .collect();
             Connection {
                 id: format!("intersection:{}", item.point_ref),
-                label: format!("Intersection · {}", item.point_ref),
+                label: format!("Intersection - {}", item.point_ref),
                 center: item.position,
                 intersection: Some(item),
                 segments,
@@ -70,7 +70,7 @@ fn connections(program: &Program) -> Vec<Connection> {
         }
         result.push(Connection {
             id: format!("merge:{name}"),
-            label: format!("Merge · {name}"),
+            label: format!("Merge - {name}"),
             center: segment.point_at(0.5),
             intersection: None,
             segments,

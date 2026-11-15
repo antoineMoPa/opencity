@@ -285,18 +285,18 @@ impl RoadEditor {
             }
         }
         let hint = match self.map_tool {
-            MapTool::BoxSelect => Some("Box select · drag to select roads · Esc cancel".into()),
-            MapTool::Draw => Some("Road · click start and end · Esc cancel".into()),
+            MapTool::BoxSelect => Some("Box select - drag to select roads - Esc cancel".into()),
+            MapTool::Draw => Some("Road - click start and end - Esc cancel".into()),
             MapTool::Landscape(kind) => Some(format!(
-                "{} · click points ({} minimum) · Enter finish · Esc cancel",
+                "{} - click points ({} minimum) - Enter finish - Esc cancel",
                 landscape_label(kind),
                 if kind == LandscapeKind::River { 2 } else { 3 }
             )),
             MapTool::AnnotationSegment => {
-                Some("Annotation segment · click two points · Esc cancel".into())
+                Some("Annotation segment - click two points - Esc cancel".into())
             }
             MapTool::AnnotationText => {
-                Some("Annotation text · click anchor, type text · Enter finish · Esc cancel".into())
+                Some("Annotation text - click anchor, type text - Enter finish - Esc cancel".into())
             }
             _ => None,
         };
@@ -304,7 +304,7 @@ impl RoadEditor {
             self.minimal
                 .placement_error
                 .as_ref()
-                .map(|error| format!("{error} · choose another endpoint or Esc cancel"))
+                .map(|error| format!("{error} - choose another endpoint or Esc cancel"))
                 .or(hint)
         } else {
             hint

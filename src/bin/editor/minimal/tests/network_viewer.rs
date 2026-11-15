@@ -50,7 +50,7 @@ fn map_click_opens_read_only_viewer_and_back_restores_both_map_views() {
         for label in [
             "Read-only",
             "Movements (1)",
-            "A.in → B.out · vehicle",
+            "A.in → B.out - vehicle",
             "Paths (1)",
             "Ports (2)",
         ] {
@@ -63,7 +63,7 @@ fn map_click_opens_read_only_viewer_and_back_restores_both_map_views() {
         click(
             &mut editor,
             &ctx,
-            text_position(&output, "A.in → B.out · vehicle"),
+            text_position(&output, "A.in → B.out - vehicle"),
         );
         let output = frame(
             &mut editor,

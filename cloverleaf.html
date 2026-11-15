@@ -2,7 +2,7 @@
 <html lang="en">
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Cloverleaf · Traffic study</title>
+<title>Cloverleaf - Traffic study</title>
 <style>
   *{box-sizing:border-box}body{margin:0;background:#dce4d6;color:#25362e;font:13px system-ui,sans-serif;overflow:hidden}
   canvas{display:block;touch-action:none}header,footer{position:fixed;left:24px;right:24px;pointer-events:none}
@@ -15,7 +15,7 @@
 </style>
 <header><div class="panel"><small>Interchange / 01</small><h1>Cloverleaf</h1><span>Four loops. One continuous flow.</span></div><div class="panel status"><span id="count">0</span> vehicles</div></header>
 <div id="error" class="panel" role="alert"></div>
-<footer><div class="panel controls"><button id="pause" aria-pressed="false">Pause</button><label>Speed <input id="speed" type="range" min="0.25" max="3" step="0.25" value="1"><output id="rate">1×</output></label><label>Traffic <input id="density" type="range" min="20" max="180" step="10" value="100"></label><button id="view">Top view</button></div><div class="panel hint">Drag to orbit · Scroll to zoom<br>Illustrative traffic simulation</div></footer>
+<footer><div class="panel controls"><button id="pause" aria-pressed="false">Pause</button><label>Speed <input id="speed" type="range" min="0.25" max="3" step="0.25" value="1"><output id="rate">1×</output></label><label>Traffic <input id="density" type="range" min="20" max="180" step="10" value="100"></label><button id="view">Top view</button></div><div class="panel hint">Drag to orbit - Scroll to zoom<br>Illustrative traffic simulation</div></footer>
 <script type="module">
 try {
   const THREE = await import('https://cdn.jsdelivr.net/npm/three@0.160.1/build/three.module.js');

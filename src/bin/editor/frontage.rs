@@ -73,7 +73,7 @@ impl RoadEditor {
                     continue;
                 }
                 let label = painter.layout_no_wrap(
-                    format!("{} · {}", zone.name, zone.building_use.keyword()),
+                    format!("{} - {}", zone.name, zone.building_use.keyword()),
                     egui::FontId::proportional(11.0),
                     color,
                 );

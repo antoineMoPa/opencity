@@ -24,7 +24,7 @@ impl RoadEditor {
         }
         self.minimal.intersection_rotation = 0;
         self.map_tool = MapTool::Intersection(kind);
-        self.status = "Intersection · click to place · R rotate · Esc cancel".into();
+        self.status = "Intersection - click to place - R rotate - Esc cancel".into();
     }
 
     fn intersection_pointer(&self, rect: egui::Rect, pointer: egui::Pos2) -> WorldPoint {
@@ -227,7 +227,7 @@ impl RoadEditor {
             if let Some(reason) = blocked {
                 reason
             } else {
-                "Click to place · R rotate · Esc cancel"
+                "Click to place - R rotate - Esc cancel"
             },
             egui::FontId::proportional(12.0),
             color,

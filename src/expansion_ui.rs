@@ -441,7 +441,7 @@ impl Picker {
                     } else if self.growth {
                         "Grow network"
                     } else {
-                        "Place extension · Enter"
+                        "Place extension - Enter"
                     };
                     let enabled = editable && (self.growth || self.selected().is_some());
                     let apply = ui
@@ -469,7 +469,7 @@ impl Picker {
                             self.accept(program);
                         }
                     }
-                    if button(ui, Icon::Close, false, "Done · Esc").clicked() {
+                    if button(ui, Icon::Close, false, "Done - Esc").clicked() {
                         self.open = false;
                         ctx.request_repaint();
                     }
@@ -525,7 +525,7 @@ impl Picker {
         if self.end.is_some() {
             let rotate = ui
                 .button("Rotate 3-way")
-                .on_hover_text("Rotate 3-way intersection · R · skips blocked orientations");
+                .on_hover_text("Rotate 3-way intersection - R - skips blocked orientations");
             if rotate.clicked() {
                 rotate.surrender_focus();
                 self.rotate_three_way(program);

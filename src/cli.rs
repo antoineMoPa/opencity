@@ -2,7 +2,7 @@
 use crate::{network, parse_road_file, Statement};
 use std::{ffi::OsString, path::PathBuf};
 
-pub const HELP: &str = "OpenCity — road and intersection tools
+pub const HELP: &str = "OpenCity - road and intersection tools
 
 USAGE:
   opencity intersection-svg INPUT.road --name NAME --output OUTPUT.svg [OPTIONS]

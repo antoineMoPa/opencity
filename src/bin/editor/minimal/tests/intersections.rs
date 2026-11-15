@@ -36,7 +36,7 @@ fn intersection_clicks_create_native_ports_and_one_undo_in_both_views() {
             editor.execute_palette_command(&format!("intersection:{}", kind.call_name()), &ctx);
             let p = editor.map_rect.unwrap().center() + egui::vec2(70.0, 70.0);
             let preview = frame(&mut editor, &ctx, vec![egui::Event::PointerMoved(p)]);
-            assert!(labels(&preview).contains(&"Click to place · R rotate · Esc cancel".into()));
+            assert!(labels(&preview).contains(&"Click to place - R rotate - Esc cancel".into()));
             assert_eq!(editor.program, before);
             click(&mut editor, &ctx, p);
             let projection = map::project(&editor.program);

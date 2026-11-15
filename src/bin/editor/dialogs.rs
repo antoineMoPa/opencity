@@ -51,7 +51,7 @@ impl RoadEditor {
                                 self.selected_intersection = None;
                                 self.minimal.rename_source = None;
                                 self.dirty = self.program != self.saved_program;
-                                self.status = "Map cleared · Undo restores placements".into();
+                                self.status = "Map cleared - Undo restores placements".into();
                             }
                         });
                     });

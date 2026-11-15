@@ -1,5 +1,5 @@
 # Geography enlarged 3× per axis; road widths stay fixed for finer street detail.
-# New default scene — based on the broad geography of target.png.
+# New default scene - based on the broad geography of target.png.
 # Rebuild: cargo run --no-default-features --example bake_elevation
 # World X points east; world Y points north. Heights and distances are map units.
 # The 1024-square PNG covers a 76.8 × 51.2 rectangle without stretching the islands.
