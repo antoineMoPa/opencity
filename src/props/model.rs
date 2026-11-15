@@ -1,7 +1,7 @@
 use super::*;
 use std::sync::OnceLock;
 pub(super) fn parts(kind: Kind) -> &'static [Arc<Mesh>] {
-    static MODELS: OnceLock<[Vec<Arc<Mesh>>; 10]> = OnceLock::new();
+    static MODELS: OnceLock<[Vec<Arc<Mesh>>; 11]> = OnceLock::new();
     &MODELS.get_or_init(|| {
         [
             vec![cone()],
@@ -14,6 +14,7 @@ pub(super) fn parts(kind: Kind) -> &'static [Arc<Mesh>] {
             street(Kind::Bench),
             street(Kind::Lamp),
             street(Kind::TrashCan),
+            vec![bus_stop_sign()],
         ]
         .map(|parts| {
             parts
@@ -115,7 +116,40 @@ fn index(kind: Kind) -> usize {
         Kind::Bench => 7,
         Kind::Lamp => 8,
         Kind::TrashCan => 9,
+        Kind::BusStopSign => 10,
     }
+}
+fn bus_stop_sign() -> Mesh {
+    let mut mesh = Mesh::default();
+    let pole = [0.32, 0.38, 0.39];
+    let green = [0.14, 0.48, 0.41];
+    let white = [0.93, 0.96, 0.94];
+    // Prop geometry is authored in map units: 1 unit = 100 metres.
+    mesh.cuboid(
+        [-0.0004, -0.0004, 0.],
+        [0.0004, 0.0004, 0.026],
+        pole,
+        SurfaceKind::Prop,
+    );
+    mesh.cuboid(
+        [-0.003, -0.0006, 0.019],
+        [0.003, 0.0006, 0.026],
+        green,
+        SurfaceKind::Prop,
+    );
+    mesh.cuboid(
+        [-0.0024, -0.0007, 0.020],
+        [0.0024, -0.0006, 0.025],
+        white,
+        SurfaceKind::Prop,
+    );
+    mesh.cuboid(
+        [-0.0021, -0.0008, 0.022],
+        [0.0021, -0.0007, 0.024],
+        green,
+        SurfaceKind::Prop,
+    );
+    mesh
 }
 fn cone() -> Mesh {
     let mut mesh = Mesh::default();

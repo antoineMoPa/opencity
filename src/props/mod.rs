@@ -23,14 +23,16 @@ pub enum Kind {
     Bench,
     TrashCan,
     Lamp,
+    BusStopSign,
 }
 impl Kind {
-    pub const ALL: [Self; 5] = [
+    pub const ALL: [Self; 6] = [
         Self::Cone,
         Self::RandomTree,
         Self::Bench,
         Self::TrashCan,
         Self::Lamp,
+        Self::BusStopSign,
     ];
     pub fn is_tree(self) -> bool {
         matches!(
@@ -74,6 +76,7 @@ impl Kind {
             Self::Bench => "bench",
             Self::TrashCan => "trash_can",
             Self::Lamp => "lamp",
+            Self::BusStopSign => "bus_stop_sign",
         }
     }
     pub fn label(self) -> &'static str {
@@ -89,6 +92,7 @@ impl Kind {
             Self::Bench => "Bench",
             Self::TrashCan => "Trash Can",
             Self::Lamp => "Lamp",
+            Self::BusStopSign => "Bus stop sign",
         }
     }
     pub fn from_keyword(s: &str) -> Option<Self> {
@@ -104,6 +108,7 @@ impl Kind {
             "bench" => Some(Self::Bench),
             "trash_can" => Some(Self::TrashCan),
             "lamp" => Some(Self::Lamp),
+            "bus_stop_sign" => Some(Self::BusStopSign),
             _ => None,
         }
     }
@@ -120,6 +125,7 @@ impl Kind {
             Self::Bench => 0.010,
             Self::TrashCan => 0.004,
             Self::Lamp => 0.0025,
+            Self::BusStopSign => 0.0025,
         }
     }
     pub fn spacing(self) -> f32 {
@@ -135,6 +141,7 @@ impl Kind {
             Self::Bench => 3.,
             Self::TrashCan => 2.,
             Self::Lamp => 8.,
+            Self::BusStopSign => 12.,
         }
     }
     pub fn parts(self) -> &'static [Arc<Mesh>] {
