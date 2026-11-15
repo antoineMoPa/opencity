@@ -69,6 +69,23 @@ pub mod props;
 #[cfg(feature = "game-runtime")]
 pub mod runtime;
 
+#[cfg(all(target_arch = "wasm32", feature = "external-web-assets"))]
+pub mod web_assets;
+
+#[macro_export]
+macro_rules! game_asset {
+    ($source:expr, $url:expr) => {{
+        #[cfg(not(all(target_arch = "wasm32", feature = "external-web-assets")))]
+        {
+            include_bytes!($source).as_slice()
+        }
+        #[cfg(all(target_arch = "wasm32", feature = "external-web-assets"))]
+        {
+            $crate::web_assets::get($url)
+        }
+    }};
+}
+
 pub use frontage::{
     project_frontage_zones, BuildingForm, FrontageError, FrontageFrame, FrontageProjection,
     FrontageSide, FrontageZone, ZoneForm,

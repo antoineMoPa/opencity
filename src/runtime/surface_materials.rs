@@ -84,21 +84,33 @@ pub fn tiles() -> &'static [[Vec<Mip>; 2]; 2] {
         [
             [
                 mip_chain(
-                    include_bytes!("../../assets/materials/asphalt-color.png"),
+                    crate::game_asset!(
+                        "../../assets/materials/asphalt-color.png",
+                        "opencity/assets/materials/asphalt-color.png"
+                    ),
                     true,
                 ),
                 mip_chain(
-                    include_bytes!("../../assets/materials/asphalt-normal-roughness.png"),
+                    crate::game_asset!(
+                        "../../assets/materials/asphalt-normal-roughness.png",
+                        "opencity/assets/materials/asphalt-normal-roughness.png"
+                    ),
                     false,
                 ),
             ],
             [
                 mip_chain(
-                    include_bytes!("../../assets/materials/concrete-color.png"),
+                    crate::game_asset!(
+                        "../../assets/materials/concrete-color.png",
+                        "opencity/assets/materials/concrete-color.png"
+                    ),
                     true,
                 ),
                 mip_chain(
-                    include_bytes!("../../assets/materials/concrete-normal-roughness.png"),
+                    crate::game_asset!(
+                        "../../assets/materials/concrete-normal-roughness.png",
+                        "opencity/assets/materials/concrete-normal-roughness.png"
+                    ),
                     false,
                 ),
             ],

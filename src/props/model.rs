@@ -276,12 +276,30 @@ fn cone() -> Mesh {
 }
 fn tree(kind: Kind, far: bool) -> Vec<Mesh> {
     let bytes: &[u8] = match kind {
-        Kind::Tree => include_bytes!("../../assets/props/trees/broad.glb"),
-        Kind::TreeMaple2 => include_bytes!("../../assets/props/trees/broad.glb"),
-        Kind::TreeLinden => include_bytes!("../../assets/props/trees/upright.glb"),
-        Kind::TreeLinden2 => include_bytes!("../../assets/props/trees/upright.glb"),
-        Kind::TreeLocust => include_bytes!("../../assets/props/trees/young.glb"),
-        Kind::TreeLocust2 => include_bytes!("../../assets/props/trees/young.glb"),
+        Kind::Tree => crate::game_asset!(
+            "../../assets/props/trees/broad.glb",
+            "opencity/assets/props/trees/broad.glb"
+        ),
+        Kind::TreeMaple2 => crate::game_asset!(
+            "../../assets/props/trees/broad.glb",
+            "opencity/assets/props/trees/broad.glb"
+        ),
+        Kind::TreeLinden => crate::game_asset!(
+            "../../assets/props/trees/upright.glb",
+            "opencity/assets/props/trees/upright.glb"
+        ),
+        Kind::TreeLinden2 => crate::game_asset!(
+            "../../assets/props/trees/upright.glb",
+            "opencity/assets/props/trees/upright.glb"
+        ),
+        Kind::TreeLocust => crate::game_asset!(
+            "../../assets/props/trees/young.glb",
+            "opencity/assets/props/trees/young.glb"
+        ),
+        Kind::TreeLocust2 => crate::game_asset!(
+            "../../assets/props/trees/young.glb",
+            "opencity/assets/props/trees/young.glb"
+        ),
         _ => unreachable!(),
     };
     let glb = gltf::Gltf::from_slice(bytes).expect("bundled tree GLB");
@@ -336,9 +354,18 @@ fn tree(kind: Kind, far: bool) -> Vec<Mesh> {
 
 fn street(kind: Kind) -> Vec<Mesh> {
     let bytes: &[u8] = match kind {
-        Kind::Bench => include_bytes!("../../assets/props/bench.glb"),
-        Kind::Lamp => include_bytes!("../../assets/props/lamp.glb"),
-        Kind::TrashCan => include_bytes!("../../assets/props/bin.glb"),
+        Kind::Bench => crate::game_asset!(
+            "../../assets/props/bench.glb",
+            "opencity/assets/props/bench.glb"
+        ),
+        Kind::Lamp => crate::game_asset!(
+            "../../assets/props/lamp.glb",
+            "opencity/assets/props/lamp.glb"
+        ),
+        Kind::TrashCan => crate::game_asset!(
+            "../../assets/props/bin.glb",
+            "opencity/assets/props/bin.glb"
+        ),
         _ => unreachable!("only street furniture uses GLB street models"),
     };
     let glb = gltf::Gltf::from_slice(bytes).expect("bundled prop GLB");

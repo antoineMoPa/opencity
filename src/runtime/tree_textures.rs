@@ -3,14 +3,34 @@ pub struct TreeTextures {
     view: wgpu::TextureView,
     sampler: wgpu::Sampler,
 }
-const ART: [&[u8]; 6] = [
-    include_bytes!("../../assets/props/trees/leaves.png"),
-    include_bytes!("../../assets/props/trees/grass.png"),
-    include_bytes!("../../assets/props/trees/leaves.png"),
-    include_bytes!("../../assets/props/trees/bark.png"),
-    include_bytes!("../../assets/props/trees/bark.png"),
-    include_bytes!("../../assets/props/trees/bark-normal.png"),
-];
+fn art() -> [&'static [u8]; 6] {
+    [
+        crate::game_asset!(
+            "../../assets/props/trees/leaves.png",
+            "opencity/assets/props/trees/leaves.png"
+        ),
+        crate::game_asset!(
+            "../../assets/props/trees/grass.png",
+            "opencity/assets/props/trees/grass.png"
+        ),
+        crate::game_asset!(
+            "../../assets/props/trees/leaves.png",
+            "opencity/assets/props/trees/leaves.png"
+        ),
+        crate::game_asset!(
+            "../../assets/props/trees/bark.png",
+            "opencity/assets/props/trees/bark.png"
+        ),
+        crate::game_asset!(
+            "../../assets/props/trees/bark.png",
+            "opencity/assets/props/trees/bark.png"
+        ),
+        crate::game_asset!(
+            "../../assets/props/trees/bark-normal.png",
+            "opencity/assets/props/trees/bark-normal.png"
+        ),
+    ]
+}
 impl TreeTextures {
     pub fn layout(first: u32) -> [wgpu::BindGroupLayoutEntry; 2] {
         [
@@ -47,7 +67,7 @@ impl TreeTextures {
             usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
             view_formats: &[],
         });
-        for (layer, png) in ART.iter().enumerate() {
+        for (layer, png) in art().iter().enumerate() {
             let mut decoder = png::Decoder::new(std::io::Cursor::new(png))
                 .read_info()
                 .expect("bundled tree PNG");
@@ -120,20 +140,58 @@ pub struct TreeImpostors {
     view: wgpu::TextureView,
     sampler: wgpu::Sampler,
 }
-const IMAGES: [&[u8]; 12] = [
-    include_bytes!("../../assets/props/trees/broad-summer.png"),
-    include_bytes!("../../assets/props/trees/broad-summer.png"),
-    include_bytes!("../../assets/props/trees/upright-summer.png"),
-    include_bytes!("../../assets/props/trees/upright-summer.png"),
-    include_bytes!("../../assets/props/trees/young-summer.png"),
-    include_bytes!("../../assets/props/trees/young-summer.png"),
-    include_bytes!("../../assets/props/trees/broad-winter.png"),
-    include_bytes!("../../assets/props/trees/broad-winter.png"),
-    include_bytes!("../../assets/props/trees/upright-winter.png"),
-    include_bytes!("../../assets/props/trees/upright-winter.png"),
-    include_bytes!("../../assets/props/trees/young-winter.png"),
-    include_bytes!("../../assets/props/trees/young-winter.png"),
-];
+fn images() -> [&'static [u8]; 12] {
+    [
+        crate::game_asset!(
+            "../../assets/props/trees/broad-summer.png",
+            "opencity/assets/props/trees/broad-summer.png"
+        ),
+        crate::game_asset!(
+            "../../assets/props/trees/broad-summer.png",
+            "opencity/assets/props/trees/broad-summer.png"
+        ),
+        crate::game_asset!(
+            "../../assets/props/trees/upright-summer.png",
+            "opencity/assets/props/trees/upright-summer.png"
+        ),
+        crate::game_asset!(
+            "../../assets/props/trees/upright-summer.png",
+            "opencity/assets/props/trees/upright-summer.png"
+        ),
+        crate::game_asset!(
+            "../../assets/props/trees/young-summer.png",
+            "opencity/assets/props/trees/young-summer.png"
+        ),
+        crate::game_asset!(
+            "../../assets/props/trees/young-summer.png",
+            "opencity/assets/props/trees/young-summer.png"
+        ),
+        crate::game_asset!(
+            "../../assets/props/trees/broad-winter.png",
+            "opencity/assets/props/trees/broad-winter.png"
+        ),
+        crate::game_asset!(
+            "../../assets/props/trees/broad-winter.png",
+            "opencity/assets/props/trees/broad-winter.png"
+        ),
+        crate::game_asset!(
+            "../../assets/props/trees/upright-winter.png",
+            "opencity/assets/props/trees/upright-winter.png"
+        ),
+        crate::game_asset!(
+            "../../assets/props/trees/upright-winter.png",
+            "opencity/assets/props/trees/upright-winter.png"
+        ),
+        crate::game_asset!(
+            "../../assets/props/trees/young-winter.png",
+            "opencity/assets/props/trees/young-winter.png"
+        ),
+        crate::game_asset!(
+            "../../assets/props/trees/young-winter.png",
+            "opencity/assets/props/trees/young-winter.png"
+        ),
+    ]
+}
 impl TreeImpostors {
     pub fn layout(first: u32) -> [wgpu::BindGroupLayoutEntry; 2] {
         TreeTextures::layout(first)
@@ -153,7 +211,7 @@ impl TreeImpostors {
             usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
             view_formats: &[],
         });
-        for (layer, png) in IMAGES.iter().enumerate() {
+        for (layer, png) in images().iter().enumerate() {
             let mut decoder = png::Decoder::new(std::io::Cursor::new(png))
                 .read_info()
                 .expect("bundled tree impostor PNG");
