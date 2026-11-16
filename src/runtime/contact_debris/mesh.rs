@@ -3,6 +3,7 @@ use super::super::{Mesh, SurfaceKind, Vertex};
 use std::collections::HashMap;
 
 const CELL: f32 = 0.04;
+mod cache;
 #[cfg(test)]
 mod tests;
 const SPREAD: f32 = super::TILE_SPREAD;
@@ -13,18 +14,30 @@ struct Edge {
     outward: [f32; 2],
     drop: f32,
     texture_along: [f32; 2],
+    length: f32,
 }
 impl Edge {
     fn coordinates(self, p: [f32; 3]) -> [f32; 2] {
         let d = [self.b[0] - self.a[0], self.b[1] - self.a[1]];
-        let length = d[0].hypot(d[1]);
         [
-            (d[0] * (p[0] - self.a[0]) + d[1] * (p[1] - self.a[1])) / length,
+            (d[0] * (p[0] - self.a[0]) + d[1] * (p[1] - self.a[1])) / self.length,
             self.outward[0] * (p[0] - self.a[0]) + self.outward[1] * (p[1] - self.a[1]),
         ]
     }
     fn length(self) -> f32 {
-        (self.b[0] - self.a[0]).hypot(self.b[1] - self.a[1])
+        self.length
+    }
+    /// Reject disjoint polygons without allocating temporary coordinate vectors.
+    fn overlaps(self, poly: &[Vertex]) -> bool {
+        let mut outside = [true; 4];
+        for v in poly {
+            let p = self.coordinates(v.position);
+            outside[0] &= p[0] <= 0.;
+            outside[1] &= p[0] >= self.length;
+            outside[2] &= p[1] <= 0.;
+            outside[3] &= p[1] >= SPREAD;
+        }
+        !outside.into_iter().any(|value| value)
     }
 }
 fn cell(p: [f32; 3]) -> (i32, i32) {
@@ -91,6 +104,33 @@ fn emit(output: &mut Vec<Vertex>, poly: &[Vertex], edge: Option<Edge>) {
 /// already carry edge coordinates and are left byte-for-byte intact. Call once per mesh
 /// preparation, before GPU upload; never per frame. No decals, extra draws or collision edits.
 pub fn prepare_mesh(mesh: &mut Mesh) {
+    let prepared = cache::replacements(mesh, build_replacements);
+    if prepared.output.is_empty() {
+        return;
+    }
+    let mut replacements = prepared
+        .indices
+        .iter()
+        .enumerate()
+        .filter_map(|(ordinal, id)| {
+            prepared
+                .output
+                .get(&ordinal)
+                .map(|vertices| (*id, vertices))
+        })
+        .peekable();
+    let source = std::mem::take(&mut mesh.vertices);
+    mesh.vertices.reserve(source.len());
+    for (id, t) in source.chunks_exact(3).enumerate() {
+        if replacements.peek().is_some_and(|(index, _)| *index == id) {
+            let (_, replacement) = replacements.next().unwrap();
+            mesh.vertices.extend_from_slice(replacement);
+        } else {
+            mesh.vertices.extend_from_slice(t);
+        }
+    }
+}
+fn build_replacements(mesh: &Mesh) -> HashMap<usize, Vec<Vertex>> {
     let sidewalk = SurfaceKind::Sidewalk as u32 as f32;
     let asphalt = SurfaceKind::Asphalt as u32 as f32;
     let prop = SurfaceKind::Prop as u32 as f32;
@@ -100,7 +140,7 @@ pub fn prepare_mesh(mesh: &mut Mesh) {
             && t[0].surface[3] >= 0.
             && t[0].surface[3] <= 2.
     }) {
-        return;
+        return HashMap::new();
     }
     let mut boundaries: HashMap<[[i32; 3]; 2], (Edge, u32)> = HashMap::new();
     let mut edges = Vec::new();
@@ -134,6 +174,7 @@ pub fn prepare_mesh(mesh: &mut Mesh) {
                         outward,
                         drop: 0.0015,
                         texture_along,
+                        length,
                     },
                     1,
                 ));
@@ -159,6 +200,7 @@ pub fn prepare_mesh(mesh: &mut Mesh) {
                     outward,
                     drop: 0.,
                     texture_along,
+                    length,
                 });
                 edges.push(Edge {
                     a,
@@ -166,6 +208,7 @@ pub fn prepare_mesh(mesh: &mut Mesh) {
                     outward: outward.map(|v| -v),
                     drop: 0.,
                     texture_along,
+                    length,
                 });
             }
         }
@@ -238,12 +281,7 @@ pub fn prepare_mesh(mesh: &mut Mesh) {
         for edge in candidates.into_iter().map(|i| edges[i]) {
             let mut next = Vec::new();
             for poly in remaining {
-                let uv: Vec<_> = poly.iter().map(|v| edge.coordinates(v.position)).collect();
-                if uv.iter().all(|p| p[0] <= 0.)
-                    || uv.iter().all(|p| p[0] >= edge.length())
-                    || uv.iter().all(|p| p[1] <= 0.)
-                    || uv.iter().all(|p| p[1] >= SPREAD)
-                {
+                if !edge.overlaps(&poly) {
                     next.push(poly);
                     continue;
                 }
@@ -297,16 +335,5 @@ pub fn prepare_mesh(mesh: &mut Mesh) {
             replacements.insert(id, output);
         }
     }
-    if replacements.is_empty() {
-        return;
-    }
-    let source = std::mem::take(&mut mesh.vertices);
-    mesh.vertices.reserve(source.len());
-    for (id, t) in source.chunks_exact(3).enumerate() {
-        if let Some(replacement) = replacements.remove(&id) {
-            mesh.vertices.extend(replacement);
-        } else {
-            mesh.vertices.extend_from_slice(t);
-        }
-    }
+    replacements
 }

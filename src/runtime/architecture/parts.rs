@@ -566,6 +566,16 @@ pub(super) fn mesh(recipe: BuildingRecipe) -> Mesh {
     geometry(recipe).0
 }
 pub(super) fn geometry(recipe: BuildingRecipe) -> (Mesh, Vec<BuildingVolume>) {
+    build_geometry(recipe, Shading::Baked)
+}
+pub(super) fn picking_mesh(recipe: BuildingRecipe) -> Mesh {
+    build_geometry(recipe, Shading::Unbaked).0
+}
+enum Shading {
+    Baked,
+    Unbaked,
+}
+fn build_geometry(recipe: BuildingRecipe, shading: Shading) -> (Mesh, Vec<BuildingVolume>) {
     let unit = (recipe.floor_height / 3.25)
         .min(recipe.height / 14.)
         .min(recipe.width / 8.)
@@ -592,11 +602,13 @@ pub(super) fn geometry(recipe: BuildingRecipe) -> (Mesh, Vec<BuildingVolume>) {
     };
     kit.build();
     // Bake before world placement: exact cuboids, stable precision and rotation-independent AO.
-    super::super::ambient_occlusion::bake_cuboids_fast(
-        &mut kit.mesh,
-        recipe.floor_height * 1.25,
-        Some(0.),
-    );
+    if matches!(shading, Shading::Baked) {
+        super::super::ambient_occlusion::bake_cuboids_fast(
+            &mut kit.mesh,
+            recipe.floor_height * 1.25,
+            Some(0.),
+        );
+    }
     for v in &mut kit.mesh.vertices {
         v.position = recipe.point(v.position);
         v.normal = recipe.vector(v.normal);

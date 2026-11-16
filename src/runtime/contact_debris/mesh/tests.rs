@@ -1,5 +1,5 @@
 use super::*;
-fn specimen(curb_height: f32, road_height: f32) -> Mesh {
+pub(super) fn specimen(curb_height: f32, road_height: f32) -> Mesh {
     let mut mesh = Mesh::default();
     mesh.quad(
         [
@@ -79,4 +79,26 @@ fn authored_junction_mesh_has_contacts_without_changing_support_samples() {
     assert!(mesh.vertices.iter().any(|v| v.surface[3] < -4.));
     let after = probes.map(|p| city.surface_at(p, 1.).map(|s| (s.height, s.kind)));
     assert_eq!(before, after);
+}
+
+#[test]
+fn inserting_a_building_before_pavement_keeps_contact_vertices_identical() {
+    let mut original = specimen(0.0015, 0.);
+    let mut edited = original.clone();
+    let mut building = original.vertices[..3].to_vec();
+    for v in &mut building {
+        v.surface[0] = SurfaceKind::Facade as u32 as f32;
+        v.position[2] += 0.5;
+    }
+    edited.vertices.splice(0..0, building.clone());
+    prepare_mesh(&mut original);
+    prepare_mesh(&mut edited);
+    let expected: Vec<_> = building.into_iter().chain(original.vertices).collect();
+    assert_eq!(edited.vertices.len(), expected.len());
+    for (a, b) in edited.vertices.iter().zip(expected) {
+        assert_eq!(a.position, b.position);
+        assert_eq!(a.normal, b.normal);
+        assert_eq!(a.color, b.color);
+        assert_eq!(a.surface, b.surface);
+    }
 }

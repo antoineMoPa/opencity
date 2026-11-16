@@ -162,6 +162,11 @@ impl BuildingRecipe {
     pub fn mesh(self) -> Mesh {
         parts::mesh(self)
     }
+    /// Exact geometry for editor picking, without the render-only occlusion bake.
+    /// Rendered meshes should still use `mesh` on the background preparation worker.
+    pub fn picking_mesh(self) -> Mesh {
+        parts::picking_mesh(self)
+    }
     pub(super) fn geometry(self) -> (Mesh, Vec<BuildingVolume>) {
         parts::geometry(self)
     }
