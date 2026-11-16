@@ -102,3 +102,55 @@ fn inserting_a_building_before_pavement_keeps_contact_vertices_identical() {
         assert_eq!(a.surface, b.surface);
     }
 }
+
+#[test]
+fn in_place_contacts_preserve_vertex_order_and_reuse_spare_capacity() {
+    let mut mesh = specimen(0.0015, 0.);
+    // Include unaffected geometry on both sides of the replacement range.
+    let triangle = mesh.vertices[..3].to_vec();
+    mesh.vertices.splice(0..0, triangle.clone());
+    mesh.vertices.extend(triangle);
+    let prepared = cache::replacements(&mesh, build_replacements);
+    assert!(!prepared.output.is_empty());
+    let replacements: HashMap<_, _> = prepared
+        .indices
+        .iter()
+        .enumerate()
+        .filter_map(|(ordinal, id)| prepared.output.get(&ordinal).map(|v| (*id, v)))
+        .collect();
+    let expected: Vec<Vertex> = mesh
+        .vertices
+        .chunks_exact(3)
+        .enumerate()
+        .flat_map(|(id, t)| {
+            replacements
+                .get(&id)
+                .map_or(t, |v| v.as_slice())
+                .iter()
+                .copied()
+        })
+        .collect();
+    mesh.vertices.reserve(expected.len());
+    let allocation = mesh.vertices.as_ptr();
+    prepare_mesh(&mut mesh);
+    assert_eq!(mesh.vertices.as_ptr(), allocation);
+    assert_eq!(mesh.vertices.len(), expected.len());
+    for (actual, expected) in mesh.vertices.iter().zip(&expected) {
+        assert_eq!(
+            actual.position.map(f32::to_bits),
+            expected.position.map(f32::to_bits)
+        );
+        assert_eq!(
+            actual.normal.map(f32::to_bits),
+            expected.normal.map(f32::to_bits)
+        );
+        assert_eq!(
+            actual.color.map(f32::to_bits),
+            expected.color.map(f32::to_bits)
+        );
+        assert_eq!(
+            actual.surface.map(f32::to_bits),
+            expected.surface.map(f32::to_bits)
+        );
+    }
+}

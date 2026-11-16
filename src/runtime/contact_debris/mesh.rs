@@ -108,26 +108,37 @@ pub fn prepare_mesh(mesh: &mut Mesh) {
     if prepared.output.is_empty() {
         return;
     }
+    // Leave room for every expansion, then walk backwards so unread triangles
+    // cannot be overwritten. Empty replacements leave a prefix removed at the end.
+    let extra: usize = prepared
+        .output
+        .values()
+        .map(|v| v.len().saturating_sub(3))
+        .sum();
+    let original_len = mesh.vertices.len();
+    mesh.vertices.reserve_exact(extra);
+    mesh.vertices.resize(original_len + extra, mesh.vertices[0]);
+    let mut end = mesh.vertices.len();
     let mut replacements = prepared
         .indices
         .iter()
         .enumerate()
-        .filter_map(|(ordinal, id)| {
-            prepared
-                .output
-                .get(&ordinal)
-                .map(|vertices| (*id, vertices))
-        })
+        .filter_map(|(ordinal, id)| prepared.output.get(&ordinal).map(|v| (*id, v)))
+        .rev()
         .peekable();
-    let source = std::mem::take(&mut mesh.vertices);
-    mesh.vertices.reserve(source.len());
-    for (id, t) in source.chunks_exact(3).enumerate() {
+    for id in (0..original_len / 3).rev() {
         if replacements.peek().is_some_and(|(index, _)| *index == id) {
-            let (_, replacement) = replacements.next().unwrap();
-            mesh.vertices.extend_from_slice(replacement);
+            let (_, vertices) = replacements.next().unwrap();
+            end -= vertices.len();
+            mesh.vertices[end..end + vertices.len()].copy_from_slice(vertices);
         } else {
-            mesh.vertices.extend_from_slice(t);
+            end -= 3;
+            mesh.vertices.copy_within(id * 3..id * 3 + 3, end);
         }
+    }
+    if end > 0 {
+        mesh.vertices.copy_within(end.., 0);
+        mesh.vertices.truncate(original_len + extra - end);
     }
 }
 fn build_replacements(mesh: &Mesh) -> HashMap<usize, Vec<Vertex>> {
