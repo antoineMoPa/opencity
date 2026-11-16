@@ -366,8 +366,11 @@ pub fn propose(program: &Program, end: &End, options: Options) -> Vec<Proposal> 
         Kind::ThreeWay,
         Kind::FourWay,
     ] {
-        if !matches!(kind, Kind::Stop | Kind::ThreeWay | Kind::FourWay)
-            && length <= width(&end.road) * 2.
+        // Straight extensions do not need room for a turn or a lane transition.
+        if !matches!(
+            kind,
+            Kind::Stop | Kind::Continue | Kind::Rise | Kind::Fall | Kind::ThreeWay | Kind::FourWay
+        ) && length <= width(&end.road) * 2.
         {
             continue;
         }

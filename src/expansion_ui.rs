@@ -540,6 +540,13 @@ impl Picker {
         }
         ui.separator();
         let junction = matches!(kind, expansion::Kind::ThreeWay | expansion::Kind::FourWay);
+        let previous = (
+            self.length,
+            self.junction_extension,
+            self.curve_degrees,
+            self.grade,
+            self.element,
+        );
         let mut changed = if junction {
             let mut metres = self.junction_extension * 100.;
             let changed = ui
@@ -618,12 +625,26 @@ impl Picker {
         }
         if changed {
             if let Some(index) = self.end {
+                let selected = self.selected;
+                let proposals = std::mem::take(&mut self.proposals);
                 self.choose_end(program, index);
-                self.selected = self
-                    .proposals
-                    .iter()
-                    .position(|p| p.kind == kind)
-                    .unwrap_or(0);
+                if let Some(selected) = self.proposals.iter().position(|p| p.kind == kind) {
+                    self.selected = selected;
+                } else {
+                    // Invalid sizing must not silently select "End here" and
+                    // remove the field the user needs to correct it.
+                    (
+                        self.length,
+                        self.junction_extension,
+                        self.curve_degrees,
+                        self.grade,
+                        self.element,
+                    ) = previous;
+                    self.proposals = proposals;
+                    self.selected = selected;
+                    self.message =
+                        "That size cannot fit this extension; previous size kept.".into();
+                }
             }
         }
     }

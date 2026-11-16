@@ -37,71 +37,99 @@ fn value_rect(shape: &egui::Shape, suffix: &str) -> Option<egui::Rect> {
 
 #[test]
 fn typing_length_through_zero_preserves_preview_until_committed() {
-    for growth in [false, true] {
-        for commit_with_enter in [false, true] {
-            let mut program =
-                crate::parse("road street: carlane carlane; end a=street(0,0,1,0);").unwrap();
-            let before = program.clone();
-            let mut picker = Picker::default();
-            picker.start();
-            picker.refresh(&program);
-            picker.choose_end(&program, 1);
-            picker.selected = picker
-                .proposals
-                .iter()
-                .position(|p| p.kind == expansion::Kind::CurveLeft)
-                .unwrap();
-            picker.growth = growth;
-            let ctx = egui::Context::default();
-            let shapes = frame(&mut picker, &ctx, &mut program, vec![]);
-            let pos = shapes
-                .iter()
-                .find_map(|s| value_rect(&s.shape, " u"))
-                .unwrap()
-                .center();
-            let click = |pos| {
-                vec![
-                    egui::Event::PointerMoved(pos),
-                    egui::Event::PointerButton {
-                        pos,
-                        button: egui::PointerButton::Primary,
-                        pressed: true,
-                        modifiers: Default::default(),
-                    },
-                    egui::Event::PointerButton {
-                        pos,
-                        button: egui::PointerButton::Primary,
-                        pressed: false,
-                        modifiers: Default::default(),
-                    },
-                ]
-            };
-            frame(&mut picker, &ctx, &mut program, click(pos));
-            frame(&mut picker, &ctx, &mut program, vec![]);
-            assert!(ctx.memory(|m| m.focused().is_some()));
-            for events in [
-                tests::key(egui::Key::Backspace),
-                vec![egui::Event::Text("0".into())],
-                vec![egui::Event::Text(".5".into())],
-            ] {
-                frame(&mut picker, &ctx, &mut program, events);
-                assert_eq!(picker.length, 1.);
-                assert_eq!(picker.selected().unwrap().kind, expansion::Kind::CurveLeft);
-                assert_eq!(picker.end, Some(1));
-                assert!(picker.open);
-                assert_eq!(picker.growth, growth);
-                assert_eq!(program, before);
+    for (profile, kind, fits) in [
+        ("carlane carlane", expansion::Kind::CurveLeft, true),
+        (
+            "sidewalk carlane carlane carlane carlane carlane carlane sidewalk",
+            expansion::Kind::Continue,
+            true,
+        ),
+        (
+            "sidewalk carlane carlane carlane carlane carlane carlane sidewalk",
+            expansion::Kind::CurveLeft,
+            false,
+        ),
+    ] {
+        for length in ["0.25", "0.5"] {
+            for growth in [false, true] {
+                for commit_with_enter in [false, true] {
+                    let mut program =
+                        crate::parse(&format!("road street: {profile}; end a=street(0,0,1,0);"))
+                            .unwrap();
+                    let before = program.clone();
+                    let mut picker = Picker::default();
+                    picker.start();
+                    picker.refresh(&program);
+                    picker.choose_end(&program, 1);
+                    picker.selected = picker
+                        .proposals
+                        .iter()
+                        .position(|p| p.kind == kind)
+                        .unwrap();
+                    picker.growth = growth;
+                    let ctx = egui::Context::default();
+                    let shapes = frame(&mut picker, &ctx, &mut program, vec![]);
+                    let pos = shapes
+                        .iter()
+                        .find_map(|s| value_rect(&s.shape, " u"))
+                        .unwrap()
+                        .center();
+                    let click = |pos| {
+                        vec![
+                            egui::Event::PointerMoved(pos),
+                            egui::Event::PointerButton {
+                                pos,
+                                button: egui::PointerButton::Primary,
+                                pressed: true,
+                                modifiers: Default::default(),
+                            },
+                            egui::Event::PointerButton {
+                                pos,
+                                button: egui::PointerButton::Primary,
+                                pressed: false,
+                                modifiers: Default::default(),
+                            },
+                        ]
+                    };
+                    frame(&mut picker, &ctx, &mut program, click(pos));
+                    frame(&mut picker, &ctx, &mut program, vec![]);
+                    assert!(ctx.memory(|m| m.focused().is_some()));
+                    for events in std::iter::once(tests::key(egui::Key::Backspace)).chain(
+                        length
+                            .chars()
+                            .map(|c| vec![egui::Event::Text(c.to_string())]),
+                    ) {
+                        frame(&mut picker, &ctx, &mut program, events);
+                        assert_eq!(picker.length, 1.);
+                        assert_eq!(picker.selected().unwrap().kind, kind);
+                        assert_eq!(picker.end, Some(1));
+                        assert!(picker.open);
+                        assert_eq!(picker.growth, growth);
+                        assert_eq!(program, before);
+                    }
+                    let events = if commit_with_enter {
+                        tests::key(egui::Key::Enter)
+                    } else {
+                        click(egui::pos2(1200., 100.))
+                    };
+                    frame(&mut picker, &ctx, &mut program, events);
+                    frame(&mut picker, &ctx, &mut program, vec![]);
+                    assert_eq!(
+                        picker.length,
+                        if fits || growth {
+                            length.parse().unwrap()
+                        } else {
+                            1.
+                        }
+                    );
+                    assert_eq!(picker.selected().unwrap().kind, kind);
+                    assert_eq!(picker.end, Some(1));
+                    if !fits && !growth {
+                        assert!(picker.message.contains("previous size kept"));
+                    }
+                    assert_eq!(program, before, "committing input must not place a road");
+                }
             }
-            let events = if commit_with_enter {
-                tests::key(egui::Key::Enter)
-            } else {
-                click(egui::pos2(1200., 100.))
-            };
-            frame(&mut picker, &ctx, &mut program, events);
-            frame(&mut picker, &ctx, &mut program, vec![]);
-            assert_eq!(picker.length, 0.5);
-            assert_eq!(picker.selected().unwrap().kind, expansion::Kind::CurveLeft);
-            assert_eq!(program, before, "committing input must not place a road");
         }
     }
 }
