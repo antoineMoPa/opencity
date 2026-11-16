@@ -6,13 +6,20 @@ impl City {
     /// North-up SVG of authored terrain, footprints and vector roads.
     /// The viewBox uses map bounds; world Y is reflected into SVG Y once.
     pub fn minimap_svg(&self) -> Result<String, String> {
+        self.navigation_svg(true)
+    }
+    /// Elevation shading beneath the game's resolution-independent map paths.
+    pub fn minimap_background_svg(&self) -> Result<String, String> {
+        self.navigation_svg(false)
+    }
+    fn navigation_svg(&self, geometry: bool) -> Result<String, String> {
         let [x, y, right, top] = self.bounds;
         let width = (right - x).max(0.001);
         let height = (top - y).max(0.001);
         let mut svg = format!(
             "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"1024\" \
                 height=\"{}\" viewBox=\"{x} {y} {width} \
-                {height}\"><title>OpenCity navigation map</title><rect x=\"{x}\" \
+                {height}\"><title>OpenCity navigation map</title><rect id=\"navigation-ocean\" x=\"{x}\" \
                 y=\"{y}\" width=\"{width}\" height=\"{height}\" \
                 fill=\"#173e55\"/><g transform=\"translate(0,{}) scale(1,-1)\">",
             1024. * height / width,
@@ -59,6 +66,10 @@ impl City {
                     {data}\"/>"
             )
             .unwrap();
+        }
+        if !geometry {
+            svg.push_str("</g></svg>");
+            return Ok(svg);
         }
         for f in &self.landscape {
             let color = match f.kind {
