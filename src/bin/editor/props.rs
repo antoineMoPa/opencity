@@ -59,6 +59,7 @@ pub(super) struct Editor {
     draft: Option<Entry>,
     gesture: Option<Gesture>,
     error: String,
+    sign_draft: Option<(usize, opencity::props::SignDesign)>,
     last: Option<egui::Pos2>,
 }
 impl Default for Editor {
@@ -75,6 +76,7 @@ impl Default for Editor {
             draft: None,
             gesture: None,
             error: String::new(),
+            sign_draft: None,
             last: None,
         }
     }
@@ -103,6 +105,7 @@ impl Editor {
             return;
         }
         self.cancel();
+        self.sign_draft = None;
         match opencity::props::read(program) {
             Ok(entries) => {
                 self.entries = entries;
@@ -137,17 +140,11 @@ impl Editor {
             .unwrap()
     }
     fn samples(&self, city: &City) -> Vec<Sample> {
-        self.entries
-            .iter()
-            .enumerate()
-            .flat_map(|(entry, e)| {
-                e.placements(city)
-                    .unwrap_or_default()
-                    .into_iter()
-                    .map(move |(index, placement)| Sample {
-                        member: Member { entry, index },
-                        placement,
-                    })
+        opencity::props::visible_placements(&self.entries, city)
+            .into_iter()
+            .map(|(entry, index, placement)| Sample {
+                member: Member { entry, index },
+                placement,
             })
             .collect()
     }
@@ -632,6 +629,52 @@ impl RoadEditor {
                                         state.delete(&mut self.program, city);
                                     }
                                 });
+                                let index = state
+                                    .row
+                                    .or_else(|| (members.len() == 1).then(|| members[0].entry));
+                                if let Some(index) = index {
+                                    if let Some(current) = state.entries[index].sign_mut().cloned()
+                                    {
+                                        if state
+                                            .sign_draft
+                                            .as_ref()
+                                            .is_none_or(|(i, _)| *i != index)
+                                        {
+                                            state.sign_draft = Some((index, current.clone()));
+                                        }
+                                        let draft = &mut state.sign_draft.as_mut().unwrap().1;
+                                        let apply = ui
+                                            .horizontal_wrapped(|ui| {
+                                                draft.edit(ui);
+                                                let error = draft.validate().err();
+                                                let apply = ui
+                                                    .add_enabled(
+                                                        *draft != current && error.is_none(),
+                                                        egui::Button::new("Apply sign"),
+                                                    )
+                                                    .clicked();
+                                                if let Some(error) = error {
+                                                    ui.colored_label(
+                                                        ui.visuals().error_fg_color,
+                                                        error,
+                                                    );
+                                                }
+                                                apply
+                                            })
+                                            .inner;
+                                        if apply {
+                                            let before = state.entries.clone();
+                                            *state.entries[index].sign_mut().unwrap() =
+                                                draft.clone();
+                                            state.commit(&mut self.program, city, before);
+                                            state.sign_draft = None;
+                                        }
+                                    } else {
+                                        state.sign_draft = None;
+                                    }
+                                } else {
+                                    state.sign_draft = None;
+                                }
                             });
                         });
                     })
@@ -807,6 +850,7 @@ impl Editor {
                                 kind: self.kind,
                                 position: p,
                                 heading: 0.,
+                                sign: opencity::props::SignDesign::for_kind(self.kind),
                             }),
                         });
                         self.selected = vec![Member {
@@ -839,6 +883,7 @@ impl Editor {
                                         heading: 0.,
                                         offsets: BTreeMap::new(),
                                         hidden: BTreeSet::new(),
+                                        sign: opencity::props::SignDesign::for_kind(self.kind),
                                     },
                                 },
                             });
@@ -1108,7 +1153,11 @@ impl Editor {
         } else {
             Vec::new()
         };
-        for mut p in ghost.into_iter().take(32) {
+        for mut p in ghost
+            .into_iter()
+            .filter(|p| !p.sign_overlaps_building(city))
+            .take(32)
+        {
             p.position = display_position(city, p.position);
             for part in p.parts() {
                 for tri in part.mesh.vertices.chunks_exact(3) {
@@ -1144,35 +1193,31 @@ pub(super) fn append_scene(scene: &mut scene3d::Scene, program: &Program, base: 
     let Ok(city) = city(program, base) else {
         return;
     };
-    for entry in entries {
-        if let Ok(placements) = entry.placements(&city) {
-            for (_, mut p) in placements {
-                p.position = display_position(&city, p.position);
-                for part in p.parts() {
-                    for vertex in &part.mesh.vertices {
-                        let world = part
-                            .transform
-                            .transform_point3(Vec3::from_array(vertex.position));
-                        scene.vertices.push(scene3d::WorldVertex {
-                            point: WorldPoint {
-                                x: world.x,
-                                y: world.y,
-                            },
-                            height: world.z,
-                            depth_bias: -0.001,
-                            color: Color32::from_rgb(
-                                (vertex.color[0].clamp(0., 1.) * 255.) as u8,
-                                (vertex.color[1].clamp(0., 1.) * 255.) as u8,
-                                (vertex.color[2].clamp(0., 1.) * 255.) as u8,
-                            ),
-                            surface: if p.kind.is_tree() {
-                                vertex.surface
-                            } else {
-                                [0.; 4]
-                            },
-                        });
-                    }
-                }
+    for (_, _, mut p) in opencity::props::visible_placements(&entries, &city) {
+        p.position = display_position(&city, p.position);
+        for part in p.parts() {
+            for vertex in &part.mesh.vertices {
+                let world = part
+                    .transform
+                    .transform_point3(Vec3::from_array(vertex.position));
+                scene.vertices.push(scene3d::WorldVertex {
+                    point: WorldPoint {
+                        x: world.x,
+                        y: world.y,
+                    },
+                    height: world.z,
+                    depth_bias: -0.001,
+                    color: Color32::from_rgb(
+                        (vertex.color[0].clamp(0., 1.) * 255.) as u8,
+                        (vertex.color[1].clamp(0., 1.) * 255.) as u8,
+                        (vertex.color[2].clamp(0., 1.) * 255.) as u8,
+                    ),
+                    surface: if p.kind.is_tree() {
+                        vertex.surface
+                    } else {
+                        [0.; 4]
+                    },
+                });
             }
         }
     }

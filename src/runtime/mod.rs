@@ -518,6 +518,41 @@ impl City {
     ) -> (Mesh, Vec<Mesh>) {
         self.building_detail_parts_matching(region, cfg, |_| true)
     }
+    /// Conservative visual overlap test, including non-collidable model buildings.
+    /// Uses the existing building grid; broad queries fall back to the inventory.
+    pub fn building_bounds_overlap(&self, min: [f32; 3], max: [f32; 3]) -> bool {
+        if !(0..3).all(|i| min[i].is_finite() && max[i].is_finite() && min[i] <= max[i]) {
+            return false;
+        }
+        let overlaps = |id: usize| {
+            let f = &self.landscape[id];
+            if f.kind != LandscapeKind::Building
+                || f.elevation >= max[2]
+                || f.elevation + f.height.unwrap_or(0.) <= min[2]
+            {
+                return false;
+            }
+            let b = geometry::bounds(f.points.iter().copied());
+            b[0] < max[0] && b[2] > min[0] && b[1] < max[1] && b[3] > min[1]
+        };
+        let lo = geometry::cell([min[0], min[1]]);
+        let hi = geometry::cell([max[0], max[1]]);
+        if hi.0 as i64 - lo.0 as i64 > 64 || hi.1 as i64 - lo.1 as i64 > 64 {
+            return (0..self.landscape.len()).any(overlaps);
+        }
+        for x in lo.0..=hi.0 {
+            for y in lo.1..=hi.1 {
+                if self
+                    .building_cells
+                    .get(&(x, y))
+                    .is_some_and(|ids| ids.iter().any(|&id| overlaps(id)))
+                {
+                    return true;
+                }
+            }
+        }
+        false
+    }
     /// Circle/footprint overlap plus vertical interval for vehicle collision checks.
     pub fn building_collision(&self, point: [f32; 2], radius: f32, bottom: f32, top: f32) -> bool {
         let collides = |id: usize| {

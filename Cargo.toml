@@ -8,11 +8,13 @@ default-run = "editor"
 
 [lib]
 path = "src/lib.rs"
-crate-type = ["rlib", "cdylib"]
+# Keep native feature/profile variants in separate, hashed Cargo artifacts.
+# scripts/build-web.sh explicitly requests cdylib output for WebAssembly.
+crate-type = ["rlib"]
 
 [features]
 expansion-ui = ["dep:egui"]
-game-runtime = ["dep:earcutr", "dep:base64", "dep:glam", "dep:gltf"]
+game-runtime = ["dep:earcutr", "dep:base64", "dep:glam", "dep:gltf", "dep:ttf-parser"]
 external-web-assets = ["game-runtime"]
 render-materials = ["game-runtime", "dep:wgpu"]
 default = ["editor"]
@@ -40,6 +42,8 @@ png = "0.17"
 wgpu = { version = "30.0.1", optional = true }
 glam = { version = "0.29", optional = true }
 gltf = { version = "1.4.1", default-features = false, features = ["utils", "names"], optional = true }
+
+ttf-parser = { version = "0.25.1", optional = true }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 muda = { version = "0.19", default-features = false, optional = true }

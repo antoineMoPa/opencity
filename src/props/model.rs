@@ -1,6 +1,21 @@
 use super::*;
 use std::sync::OnceLock;
 pub(super) fn parts(kind: Kind) -> &'static [Arc<Mesh>] {
+    if SignDesign::for_kind(kind).is_some() {
+        static SIGNS: OnceLock<[Vec<Arc<Mesh>>; 6]> = OnceLock::new();
+        let models = SIGNS.get_or_init(|| {
+            [
+                Kind::StopSign,
+                Kind::SpeedSign,
+                Kind::OneWaySign,
+                Kind::YieldSign,
+                Kind::CurveSign,
+                Kind::HighwaySign,
+            ]
+            .map(|kind| SignDesign::for_kind(kind).unwrap().parts())
+        });
+        return &models[index(kind) - 11];
+    }
     static MODELS: OnceLock<[Vec<Arc<Mesh>>; 11]> = OnceLock::new();
     &MODELS.get_or_init(|| {
         [
@@ -117,6 +132,12 @@ fn index(kind: Kind) -> usize {
         Kind::Lamp => 8,
         Kind::TrashCan => 9,
         Kind::BusStopSign => 10,
+        Kind::StopSign => 11,
+        Kind::SpeedSign => 12,
+        Kind::OneWaySign => 13,
+        Kind::YieldSign => 14,
+        Kind::CurveSign => 15,
+        Kind::HighwaySign => 16,
     }
 }
 fn bus_stop_sign() -> Mesh {

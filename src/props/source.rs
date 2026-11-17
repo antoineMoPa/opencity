@@ -58,10 +58,15 @@ pub fn read(program: &Program) -> Result<Vec<Entry>, String> {
         };
         if options
             .iter()
-            .any(|(key, _)| !allowed.contains(&key.as_str()))
+            .any(|(key, _)| !allowed.contains(&key.as_str()) && !signs::option_allowed(kind, key))
         {
             return Err("Unknown prop option".into());
         }
+        let mut seen = BTreeSet::new();
+        if options.iter().any(|(key, _)| !seen.insert(key)) {
+            return Err("Duplicate prop option".into());
+        }
+        let sign = signs::read(kind, options)?;
         let values: Vec<_> = c.args[1..count]
             .iter()
             .map(number)
@@ -73,6 +78,7 @@ pub fn read(program: &Program) -> Result<Vec<Entry>, String> {
                 kind,
                 position: Vec3::new(values[0], values[1], elevation),
                 heading,
+                sign: sign.clone(),
             })
         } else {
             let mut row = Row {
@@ -84,6 +90,7 @@ pub fn read(program: &Program) -> Result<Vec<Entry>, String> {
                 heading,
                 offsets: BTreeMap::new(),
                 hidden: BTreeSet::new(),
+                sign,
             };
             for key in ["offsets", "hidden"] {
                 if let Some(value) = get(options, key) {
@@ -182,6 +189,13 @@ pub fn write(entry: &Entry) -> Call {
             "prop_row"
         }
     };
+    let sign = match &entry.shape {
+        Shape::Single(p) => &p.sign,
+        Shape::Row { row, .. } => &row.sign,
+    };
+    if let Some(design) = sign {
+        signs::write(design, &mut options);
+    }
     args.push(A::Object(options));
     Call {
         assigns: vec![entry.name.clone()],

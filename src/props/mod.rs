@@ -1,8 +1,12 @@
 //! Game-owned prop catalogue and ordinary `.road` placement calls.
 mod model;
+mod signs;
+mod visibility;
+pub use visibility::visible_placements;
 mod source;
 use glam::{Mat4, Vec2, Vec3};
 use opencity::runtime::{City, Mesh, SurfaceKind};
+pub use signs::{SignArrow, SignDesign, SignPartProfile};
 pub use source::{apply, read, write};
 use std::{
     collections::{BTreeMap, BTreeSet},
@@ -24,16 +28,39 @@ pub enum Kind {
     TrashCan,
     Lamp,
     BusStopSign,
+    StopSign,
+    SpeedSign,
+    OneWaySign,
+    YieldSign,
+    CurveSign,
+    HighwaySign,
 }
 impl Kind {
-    pub const ALL: [Self; 6] = [
+    pub const ALL: [Self; 12] = [
         Self::Cone,
         Self::RandomTree,
         Self::Bench,
         Self::TrashCan,
         Self::Lamp,
         Self::BusStopSign,
+        Self::StopSign,
+        Self::SpeedSign,
+        Self::OneWaySign,
+        Self::YieldSign,
+        Self::CurveSign,
+        Self::HighwaySign,
     ];
+    pub const fn is_road_sign(self) -> bool {
+        matches!(
+            self,
+            Self::StopSign
+                | Self::SpeedSign
+                | Self::OneWaySign
+                | Self::YieldSign
+                | Self::CurveSign
+                | Self::HighwaySign
+        )
+    }
     pub fn is_tree(self) -> bool {
         matches!(
             self,
@@ -77,6 +104,12 @@ impl Kind {
             Self::TrashCan => "trash_can",
             Self::Lamp => "lamp",
             Self::BusStopSign => "bus_stop_sign",
+            Self::HighwaySign => "highway_sign",
+            Self::CurveSign => "curve_sign",
+            Self::YieldSign => "yield_sign",
+            Self::OneWaySign => "one_way_sign",
+            Self::SpeedSign => "speed_sign",
+            Self::StopSign => "stop_sign",
         }
     }
     pub fn label(self) -> &'static str {
@@ -93,6 +126,12 @@ impl Kind {
             Self::TrashCan => "Trash Can",
             Self::Lamp => "Lamp",
             Self::BusStopSign => "Bus stop sign",
+            Self::HighwaySign => "Autoroute / exit / destination",
+            Self::CurveSign => "Curve indicator",
+            Self::YieldSign => "Cédez le passage",
+            Self::OneWaySign => "Sens unique",
+            Self::SpeedSign => "Maximum speed",
+            Self::StopSign => "Arrêt",
         }
     }
     pub fn from_keyword(s: &str) -> Option<Self> {
@@ -109,6 +148,12 @@ impl Kind {
             "trash_can" => Some(Self::TrashCan),
             "lamp" => Some(Self::Lamp),
             "bus_stop_sign" => Some(Self::BusStopSign),
+            "highway_sign" => Some(Self::HighwaySign),
+            "curve_sign" => Some(Self::CurveSign),
+            "yield_sign" => Some(Self::YieldSign),
+            "one_way_sign" => Some(Self::OneWaySign),
+            "speed_sign" => Some(Self::SpeedSign),
+            "stop_sign" => Some(Self::StopSign),
             _ => None,
         }
     }
@@ -126,6 +171,12 @@ impl Kind {
             Self::TrashCan => 0.004,
             Self::Lamp => 0.0025,
             Self::BusStopSign => 0.0025,
+            Self::HighwaySign => 0.025,
+            Self::StopSign
+            | Self::SpeedSign
+            | Self::OneWaySign
+            | Self::YieldSign
+            | Self::CurveSign => 0.005,
         }
     }
     pub fn spacing(self) -> f32 {
@@ -142,6 +193,12 @@ impl Kind {
             Self::TrashCan => 2.,
             Self::Lamp => 8.,
             Self::BusStopSign => 12.,
+            Self::HighwaySign => 20.,
+            Self::StopSign
+            | Self::SpeedSign
+            | Self::OneWaySign
+            | Self::YieldSign
+            | Self::CurveSign => 8.,
         }
     }
     pub fn parts(self) -> &'static [Arc<Mesh>] {
@@ -155,11 +212,20 @@ impl Kind {
     }
 }
 #[derive(Clone)]
+pub struct Instance {
+    pub kind: Kind,
+    pub index: usize,
+    pub mesh: Arc<Mesh>,
+    pub transform: Mat4,
+    pub automatic: bool,
+}
+#[derive(Clone)]
 pub struct Part {
     pub mesh: Arc<Mesh>,
     pub transform: Mat4,
     pub template: Option<(Kind, usize)>,
     pub automatic: bool,
+    pub sign_profile: Option<SignPartProfile>,
 }
 impl Part {
     pub fn baked(mesh: Mesh) -> Self {
@@ -168,6 +234,7 @@ impl Part {
             transform: Mat4::IDENTITY,
             template: None,
             automatic: false,
+            sign_profile: None,
         }
     }
     pub fn vertex(&self, mut v: opencity::runtime::Vertex) -> opencity::runtime::Vertex {
@@ -187,6 +254,7 @@ pub struct Placement {
     pub kind: Kind,
     pub position: Vec3,
     pub heading: f32,
+    pub sign: Option<SignDesign>,
 }
 impl Placement {
     pub fn transform(&self) -> Mat4 {
@@ -200,8 +268,19 @@ impl Placement {
             Kind::RandomTree => Kind::street_tree(self.position.to_array()),
             concrete => concrete,
         };
-        model_kind
-            .parts()
+        let design = self
+            .sign
+            .clone()
+            .or_else(|| SignDesign::for_kind(model_kind));
+        let profiles = design
+            .as_ref()
+            .map(SignDesign::profiles)
+            .unwrap_or_default();
+        let meshes = design
+            .as_ref()
+            .map(SignDesign::parts)
+            .unwrap_or_else(|| model_kind.parts().to_vec());
+        meshes
             .iter()
             .enumerate()
             .map(|(index, mesh)| Part {
@@ -209,6 +288,7 @@ impl Placement {
                 transform: self.transform(),
                 template: Some((model_kind, index)),
                 automatic: false,
+                sign_profile: profiles.get(index).copied(),
             })
             .collect()
     }
@@ -223,6 +303,7 @@ pub struct Row {
     pub heading: f32,
     pub offsets: BTreeMap<usize, Vec3>,
     pub hidden: BTreeSet<usize>,
+    pub sign: Option<SignDesign>,
 }
 impl Row {
     pub fn point(&self, t: f32) -> Vec2 {
@@ -318,12 +399,24 @@ impl Entry {
                                 kind: *kind,
                                 position: p.extend(surface.height),
                                 heading,
+                                sign: row.sign.clone(),
                             },
                         ))
                     })
                     .collect()
             }
         }
+    }
+    pub fn sign_mut(&mut self) -> Option<&mut SignDesign> {
+        let kind = self.kind();
+        let value = match &mut self.shape {
+            Shape::Single(p) => &mut p.sign,
+            Shape::Row { row, .. } => &mut row.sign,
+        };
+        if value.is_none() {
+            *value = SignDesign::for_kind(kind);
+        }
+        value.as_mut()
     }
     pub fn translate(&mut self, delta: Vec2) {
         match &mut self.shape {
@@ -411,12 +504,14 @@ mod tests {
             kind: Kind::Cone,
             position: Vec3::ZERO,
             heading: 0.,
+            sign: None,
         }
         .parts();
         let b = Placement {
             kind: Kind::Cone,
             position: Vec3::X,
             heading: 31.,
+            sign: None,
         }
         .parts();
         assert!(Arc::ptr_eq(&a[0].mesh, &b[0].mesh));
