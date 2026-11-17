@@ -1,6 +1,7 @@
 //! Renderer-independent game data. Map coordinates are X east, Y north, Z up.
 //! A map unit is deliberately not assigned a physical length; consumers choose a scale.
 //! Load once, query borrowed structured records, and request camera-local triangle meshes.
+mod bike_markings;
 mod bridges;
 pub mod contact_debris;
 mod geometry;

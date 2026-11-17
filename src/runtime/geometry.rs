@@ -209,6 +209,7 @@ pub(super) fn compile(
             .ok_or_else(|| format!("missing road {}", seg.road_name))?;
         let rows = geometry.cross_sections(id);
         let start = city.triangles.len();
+        super::bike_markings::build(city, id, road, rows);
         let mut distance = 0.;
         let mut paving_distances = vec![0.; road.elements.len()];
         for (row_index, pair) in rows.windows(2).enumerate() {
@@ -301,7 +302,8 @@ pub(super) fn compile(
                     continue;
                 }
                 let both = is_lane(left) && is_lane(right);
-                if both && distance % 0.09 > 0.035 {
+                let bike_separator = (left == K::BikeLane) != (right == K::BikeLane);
+                if both && !bike_separator && distance % 0.09 > 0.035 {
                     continue;
                 }
                 let stripe = |row: &crate::road_geometry::CrossSection, sign: f32| {
