@@ -34,9 +34,10 @@ pub enum Kind {
     YieldSign,
     CurveSign,
     HighwaySign,
+    ParkingSign,
 }
 impl Kind {
-    pub const ALL: [Self; 12] = [
+    pub const ALL: [Self; 13] = [
         Self::Cone,
         Self::RandomTree,
         Self::Bench,
@@ -49,6 +50,7 @@ impl Kind {
         Self::YieldSign,
         Self::CurveSign,
         Self::HighwaySign,
+        Self::ParkingSign,
     ];
     pub const fn is_road_sign(self) -> bool {
         matches!(
@@ -59,6 +61,7 @@ impl Kind {
                 | Self::YieldSign
                 | Self::CurveSign
                 | Self::HighwaySign
+                | Self::ParkingSign
         )
     }
     pub fn is_tree(self) -> bool {
@@ -105,6 +108,7 @@ impl Kind {
             Self::Lamp => "lamp",
             Self::BusStopSign => "bus_stop_sign",
             Self::HighwaySign => "highway_sign",
+            Self::ParkingSign => "parking_sign",
             Self::CurveSign => "curve_sign",
             Self::YieldSign => "yield_sign",
             Self::OneWaySign => "one_way_sign",
@@ -127,6 +131,7 @@ impl Kind {
             Self::Lamp => "Lamp",
             Self::BusStopSign => "Bus stop sign",
             Self::HighwaySign => "Autoroute / exit / destination",
+            Self::ParkingSign => "Stationnement / parking",
             Self::CurveSign => "Curve indicator",
             Self::YieldSign => "Cédez le passage",
             Self::OneWaySign => "Sens unique",
@@ -149,6 +154,7 @@ impl Kind {
             "lamp" => Some(Self::Lamp),
             "bus_stop_sign" => Some(Self::BusStopSign),
             "highway_sign" => Some(Self::HighwaySign),
+            "parking_sign" => Some(Self::ParkingSign),
             "curve_sign" => Some(Self::CurveSign),
             "yield_sign" => Some(Self::YieldSign),
             "one_way_sign" => Some(Self::OneWaySign),
@@ -172,6 +178,7 @@ impl Kind {
             Self::Lamp => 0.0025,
             Self::BusStopSign => 0.0025,
             Self::HighwaySign => 0.025,
+            Self::ParkingSign => 0.003,
             Self::StopSign
             | Self::SpeedSign
             | Self::OneWaySign
@@ -194,6 +201,7 @@ impl Kind {
             Self::Lamp => 8.,
             Self::BusStopSign => 12.,
             Self::HighwaySign => 20.,
+            Self::ParkingSign => 45.,
             Self::StopSign
             | Self::SpeedSign
             | Self::OneWaySign

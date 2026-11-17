@@ -42,6 +42,9 @@ impl SignArrow {
 }
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum SignDesign {
+    Parking {
+        permit: bool,
+    },
     Stop {
         cluster: bool,
     },
@@ -74,6 +77,7 @@ impl SignDesign {
     pub fn for_kind(kind: Kind) -> Option<Self> {
         Some(match kind {
             Kind::StopSign => Self::Stop { cluster: false },
+            Kind::ParkingSign => Self::Parking { permit: false },
             Kind::SpeedSign => Self::Speed { limit: 50 },
             Kind::OneWaySign => Self::OneWay {
                 arrow: SignArrow::Right,
@@ -83,8 +87,8 @@ impl SignDesign {
                 arrow: SignArrow::Right,
             },
             Kind::HighwaySign => Self::Highway {
-                destination: "Québec".into(),
-                secondary: "Centre-ville".into(),
+                destination: "Downtown".into(),
+                secondary: "Saint-Laurent".into(),
                 exit: "12".into(),
                 arrow: SignArrow::ExitRight,
             },
@@ -94,6 +98,7 @@ impl SignDesign {
     pub fn kind(&self) -> Kind {
         match self {
             Self::Stop { .. } => Kind::StopSign,
+            Self::Parking { .. } => Kind::ParkingSign,
             Self::Speed { .. } => Kind::SpeedSign,
             Self::OneWay { .. } => Kind::OneWaySign,
             Self::Yield => Kind::YieldSign,

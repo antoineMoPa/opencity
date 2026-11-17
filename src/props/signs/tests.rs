@@ -1,5 +1,25 @@
 use super::*;
 #[test]
+fn curve_symbols_are_centered_mirrored_and_clear_of_the_diamond_border() {
+    let right = geometry::curve_symbol(SignArrow::Right);
+    let left = geometry::curve_symbol(SignArrow::Left);
+    let mut min = Vec2::splat(f32::INFINITY);
+    let mut max = Vec2::splat(f32::NEG_INFINITY);
+    for (r, l) in right.iter().zip(&left) {
+        assert_eq!(*l, [-r[0], r[1]]);
+        min = min.min(Vec2::from_array(*r));
+        max = max.max(Vec2::from_array(*r));
+        assert!(
+            r[0].abs() + r[1].abs() < 0.45 * 0.88 - 0.02,
+            "arrow needs clearance inside the inner diamond"
+        );
+    }
+    assert!(
+        (min + max).abs().max_element() < 1e-6,
+        "symbol bounds must be centered"
+    );
+}
+#[test]
 fn coincident_signs_and_building_overlaps_are_filtered_before_rendering() {
     let program=crate::parse("road r: carlane; end r(-1,0,1,0); land(-2,-2,2,-2,2,2,-2,2); house=building(0.06,{collision:none},0.018,-0.03,0.025,-0.03,0.025,0.03,0.018,0.03); a=prop(highway_sign,0,0); b=prop(highway_sign,0,0,{heading:90}); c=prop(highway_sign,0,0,{elevation:0.1}); d=prop(stop_sign,0.1,0); e=prop(stop_sign,0.1,0,{heading:360}); f=prop(speed_sign,0.1,0);").unwrap();
     let city = City::from_program(&program, None).unwrap();
@@ -79,6 +99,7 @@ fn all_sign_options_round_trip_including_rows_accents_and_quotes() {
     let source = r#"
 road r: carlane; end r(-1,0,1,0);
 stop=prop(stop_sign,0,0,{cluster:true});
+parking=prop(parking_sign,0.07,0,{permit:true});
 speed=prop(speed_sign,0.1,0,{limit:90});
 one=prop(one_way_sign,0.2,0,{arrow:left});
 yield_a=prop(yield_sign,0.3,0);
@@ -152,6 +173,7 @@ fn sign_meshes_share_geometry_and_keep_designs_distinct() {
         Kind::YieldSign,
         Kind::CurveSign,
         Kind::HighwaySign,
+        Kind::ParkingSign,
     ] {
         let design = SignDesign::for_kind(kind).unwrap();
         design.validate().unwrap();

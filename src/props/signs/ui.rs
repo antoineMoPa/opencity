@@ -7,6 +7,9 @@ impl SignDesign {
             Self::Stop { cluster } => {
                 ui.checkbox(cluster, "Parking cluster");
             }
+            Self::Parking { permit } => {
+                ui.checkbox(permit, "Permit sector 54");
+            }
             Self::Speed { limit } => {
                 ui.label("Maximum");
                 ui.add(egui::DragValue::new(limit).range(10..=130).speed(10.));

@@ -28,6 +28,10 @@ pub(super) fn profiles(design: &SignDesign) -> Vec<SignPartProfile> {
             profile(0., 1.4, 0.07, 2.8, true, 9.),
             profile(0., 2.4, 0.75, 0.75, false, 2.2),
         ],
+        SignDesign::Parking { .. } => vec![
+            profile(0., 1.35, 0.07, 2.7, true, 9.),
+            profile(0., 2.3, 0.42, 0.56, false, 1.2),
+        ],
         SignDesign::Speed { .. } => vec![
             profile(0., 1.5, 0.07, 3., true, 10.),
             profile(0., 2.52, 0.6, 0.9, false, 2.4),
@@ -60,6 +64,34 @@ pub(super) fn octagon(width: f32) -> Vec<[f32; 2]> {
         [-r, a],
         [-r, -a],
     ]
+}
+/// Both directions have the same centered silhouette and stay inside the border.
+pub(super) fn curve_symbol(direction: SignArrow) -> Vec<[f32; 2]> {
+    let side = match direction {
+        SignArrow::Right => 1.,
+        SignArrow::Left => -1.,
+        _ => unreachable!("curve direction validated"),
+    };
+    [
+        [-0.18, -0.22],
+        [-0.10, -0.22],
+        [-0.10, -0.04],
+        [-0.085, 0.005],
+        [-0.055, 0.03],
+        [0., 0.04],
+        [0.025, 0.04],
+        [0.025, -0.06],
+        [0.18, 0.08],
+        [0.025, 0.22],
+        [0.025, 0.12],
+        [0., 0.12],
+        [-0.075, 0.11],
+        [-0.13, 0.08],
+        [-0.165, 0.03],
+        [-0.18, -0.02],
+    ]
+    .map(|p| [p[0] * 0.9 * side, p[1] * 0.9])
+    .to_vec()
 }
 fn rectangle(w: f32, h: f32) -> Vec<[f32; 2]> {
     vec![
@@ -284,6 +316,10 @@ pub(super) fn build(design: &SignDesign) -> Vec<Mesh> {
             parts.push(mesh);
             continue;
         }
+        if let SignDesign::Parking { permit } = design {
+            parts.push(parking(p, *permit));
+            continue;
+        }
         if matches!(design, SignDesign::Stop { cluster: true }) && i >= 2 {
             parts.push(parking(p, i == 3));
             continue;
@@ -307,6 +343,7 @@ pub(super) fn build(design: &SignDesign) -> Vec<Mesh> {
         };
         let mut mesh = panel(&shape, p, color);
         match design {
+            SignDesign::Parking { .. } => unreachable!("parking face handled above"),
             SignDesign::Stop { .. } => {
                 framed(&mut mesh, &shape, z, [0.95, 0.88], [RED, WHITE, RED]);
                 text::draw(&mut mesh, "ARRÊT", [0., z], 0.18, 0.62, -0.018, WHITE);
@@ -341,23 +378,7 @@ pub(super) fn build(design: &SignDesign) -> Vec<Mesh> {
             }
             SignDesign::Curve { arrow: direction } => {
                 framed(&mut mesh, &shape, z, [0.92, 0.88], [color, BLACK, color]);
-                let d = if *direction == SignArrow::Right {
-                    1.
-                } else {
-                    -1.
-                };
-                let points = [
-                    [-0.065, -0.24],
-                    [0.055, -0.24],
-                    [0.055, -0.02],
-                    [0.13, 0.08],
-                    [0.13, -0.015],
-                    [0.32, 0.14],
-                    [0.13, 0.29],
-                    [0.13, 0.19],
-                    [-0.065, 0.04],
-                ];
-                let points: Vec<_> = points.iter().map(|p| [p[0] * d, p[1]]).collect();
+                let points = curve_symbol(*direction);
                 flat(&mut mesh, &points, 0., z, -0.018, BLACK);
             }
             SignDesign::Highway {

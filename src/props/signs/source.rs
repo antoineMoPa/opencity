@@ -3,6 +3,7 @@ use crate::Argument as A;
 pub(crate) fn option_allowed(kind: Kind, key: &str) -> bool {
     match kind {
         Kind::StopSign => key == "cluster",
+        Kind::ParkingSign => key == "permit",
         Kind::SpeedSign => key == "limit",
         Kind::OneWaySign | Kind::CurveSign => key == "arrow",
         Kind::HighwaySign => matches!(key, "destination" | "secondary" | "exit" | "arrow"),
@@ -41,7 +42,8 @@ pub(crate) fn read(kind: Kind, options: &[(String, A)]) -> Result<Option<SignDes
             continue;
         }
         match (&mut design, key.as_str()) {
-            (SignDesign::Stop { cluster }, "cluster") => {
+            (SignDesign::Stop { cluster }, "cluster")
+            | (SignDesign::Parking { permit: cluster }, "permit") => {
                 *cluster = match value {
                     A::Identifier(s) if s == "true" => true,
                     A::Identifier(s) if s == "false" => false,
@@ -86,6 +88,7 @@ pub(crate) fn write(design: &SignDesign, options: &mut Vec<(String, A)>) {
     let mut push = |key: &str, value: A| options.push((key.into(), value));
     match design {
         SignDesign::Stop { cluster } => push("cluster", A::Identifier(cluster.to_string())),
+        SignDesign::Parking { permit } => push("permit", A::Identifier(permit.to_string())),
         SignDesign::Speed { limit } => push("limit", A::Number(limit.to_string())),
         SignDesign::OneWay { arrow } | SignDesign::Curve { arrow } => {
             push("arrow", A::Identifier(arrow.keyword().into()))
