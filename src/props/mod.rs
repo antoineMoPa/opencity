@@ -165,7 +165,7 @@ impl Kind {
     }
     pub fn radius(self) -> f32 {
         match self {
-            Self::Cone => 0.0026,
+            Self::Cone => 0.0052,
             Self::RandomTree
             | Self::Tree
             | Self::TreeMaple2
@@ -530,9 +530,11 @@ mod tests {
             lo = lo.min(p);
             hi = hi.max(p);
         }
-        assert!((hi.z * UNITS - 1.).abs() < 1e-5);
-        assert!(((hi.x - lo.x) * UNITS - 0.5).abs() < 1e-5);
-        for (low, high) in [(0.4, 0.55), (0.68, 0.83)] {
+        assert!((hi.z * UNITS - 2.).abs() < 1e-5);
+        assert!(((hi.x - lo.x) * UNITS - 1.).abs() < 1e-5);
+        assert!(((hi.y - lo.y) * UNITS - 1.).abs() < 1e-5);
+        assert_eq!(lo.z, 0.);
+        for (low, high) in [(0.8, 1.1), (1.36, 1.66)] {
             let band: Vec<_> = a[0]
                 .mesh
                 .vertices

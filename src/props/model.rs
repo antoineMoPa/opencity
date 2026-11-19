@@ -293,7 +293,7 @@ fn cone() -> Mesh {
         );
     }
     for v in &mut mesh.vertices {
-        v.position = v.position.map(|x| x / UNITS);
+        v.position = v.position.map(|x| x * 2. / UNITS);
     }
     mesh
 }
