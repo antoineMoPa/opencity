@@ -62,3 +62,65 @@ fn support_index_preserves_legacy_queries_across_terrain_decks_and_facades() {
         );
     }
 }
+
+#[test]
+fn shore_profile_follows_the_bed_on_both_faces_and_excludes_dry_cuts() {
+    let program = crate::parse(
+        "elevation_map(\"ramp\",-2,-2,4,4,-0.1,0.1); water_level(0.01);
+         terrain_cut(-0.2,-0.73,-0.31,0.61,-0.31,0.61,0.47,-0.73,0.47);",
+    )
+    .unwrap();
+    let mut bytes = Vec::new();
+    {
+        let mut encoder = png::Encoder::new(&mut bytes, 1024, 1024);
+        encoder.set_color(png::ColorType::Grayscale);
+        encoder.set_depth(png::BitDepth::Sixteen);
+        let samples: Vec<_> = (0..1024 * 1024)
+            .flat_map(|i| ((i % 1024 * 37 + i / 1024 * 23) as u16).to_be_bytes())
+            .collect();
+        encoder
+            .write_header()
+            .unwrap()
+            .write_image_data(&samples)
+            .unwrap();
+    }
+    let city = City::from_program_with_elevation_loader(&program, |spec| {
+        ElevationMap::from_png(spec.clone(), &bytes)
+    })
+    .unwrap();
+    let elevation = city.elevation.as_ref().unwrap();
+    let mut seen = [false; 3];
+    for t in city
+        .mesh(Region::WholeMap, 0.32)
+        .unwrap()
+        .vertices
+        .chunks_exact(3)
+    {
+        let center = [0, 1].map(|i| t.iter().map(|v| v.position[i]).sum::<f32>() / 3.);
+        let kind = t[0].surface[0];
+        if kind != SurfaceKind::Water as u32 as f32 && kind != SurfaceKind::Grass as u32 as f32 {
+            continue;
+        }
+        if elevation.cut_at(center).is_some() {
+            assert_eq!(kind, SurfaceKind::Grass as u32 as f32);
+            assert_eq!(t[0].surface[3], 0.);
+            seen[0] = true;
+            continue;
+        }
+        for v in t {
+            let [x, y, z] = v.position;
+            let bed = elevation.original_height_at([x, y]).unwrap();
+            assert_eq!(v.surface[3], Vertex::SHORE_PROFILE);
+            assert!((v.surface[1] - (bed - 0.01)).abs() < 1e-5);
+            assert!((v.surface[2] - 23_f32.atan2(37.)).abs() < 1e-4);
+            if kind == SurfaceKind::Water as u32 as f32 {
+                assert!((z - 0.01).abs() < 1e-6);
+                seen[1] = true;
+            } else {
+                assert!((z - bed).abs() < 1e-5);
+                seen[2] = true;
+            }
+        }
+    }
+    assert_eq!(seen, [true; 3]);
+}

@@ -6,6 +6,8 @@ use std::collections::HashSet;
 /// Room panes use [Window, U, V, 16 * (1 + seed % 256) + width / height].
 /// UVs are interpolated, with U increasing along (normal.y, -normal.x, 0).
 /// Aspect is clamped to 0.125..15; zero metadata retains legacy glass rendering.
+/// Elevation terrain with a water level uses [Grass/Water, bed Z minus water level,
+/// uphill angle in radians, 3]. Bed height interpolates across matching land and water faces.
 /// Entrance paving uses [Sidewalk, local X / unit, local Y / unit, 1].
 /// Road bands use [kind, distance along band, distance across band, packed pavement].
 /// Pavement bits: layout (2=sidewalk, 3=road), width in cm (12 bits), then two 5-bit edges.
@@ -23,6 +25,10 @@ pub struct Vertex {
     pub normal: [f32; 3],
     pub color: [f32; 3],
     pub surface: [f32; 4],
+}
+impl Vertex {
+    /// Material metadata tag shared by the terrain bed and its water surface.
+    pub const SHORE_PROFILE: f32 = 3.;
 }
 #[derive(Default, Clone)]
 pub struct Mesh {
@@ -276,23 +282,58 @@ impl City {
                         e.point(right, top),
                         e.point(x, top),
                     ];
-                    for triangle in [[p[0], p[1], p[2]], [p[0], p[2], p[3]]] {
-                        e.cut_triangle(triangle, false, |t| {
-                            mesh.triangle(t, [0.12, 0.23, 0.075], SurfaceKind::Grass, [0.; 3])
-                        });
-                    }
-                    if let Some(level) = e.spec.water_level {
-                        if p.iter().any(|p| p[2] < level) {
-                            for ids in [[0, 1, 2], [0, 2, 3]] {
-                                e.cut_triangle(ids.map(|i| [p[i][0], p[i][1], level]), true, |t| {
-                                    mesh.triangle(
-                                        t,
-                                        [0.025, 0.15, 0.20],
-                                        SurfaceKind::Water,
-                                        [0.; 3],
-                                    )
-                                });
+                    let width = p[1][0] - p[0][0];
+                    let depth = p[3][1] - p[0][1];
+                    for (ids, grade_x, grade_y) in [
+                        (
+                            [0, 1, 2],
+                            (p[1][2] - p[0][2]) / width,
+                            (p[2][2] - p[1][2]) / depth,
+                        ),
+                        (
+                            [0, 2, 3],
+                            (p[2][2] - p[3][2]) / width,
+                            (p[3][2] - p[0][2]) / depth,
+                        ),
+                    ] {
+                        let bed = ids.map(|i| p[i]);
+                        let Some(water_level) = e.spec.water_level else {
+                            e.cut_triangle(bed, false, |t| {
+                                mesh.triangle(t, [0.12, 0.23, 0.075], SurfaceKind::Grass, [0.; 3])
+                            });
+                            continue;
+                        };
+                        let heading = grade_y.atan2(grade_x);
+                        e.cut_triangle(bed, false, |t| {
+                            let center =
+                                [0, 1].map(|axis| t.iter().map(|p| p[axis]).sum::<f32>() / 3.);
+                            let start = mesh.vertices.len();
+                            mesh.triangle(t, [0.12, 0.23, 0.075], SurfaceKind::Grass, [0.; 3]);
+                            if e.cut_at(center).is_none() {
+                                for v in &mut mesh.vertices[start..] {
+                                    v.surface[1..].copy_from_slice(&[
+                                        v.position[2] - water_level,
+                                        heading,
+                                        Vertex::SHORE_PROFILE,
+                                    ]);
+                                }
                             }
+                        });
+                        if bed.iter().any(|p| p[2] < water_level) {
+                            e.cut_triangle(bed.map(|[x, y, _]| [x, y, water_level]), true, |t| {
+                                let start = mesh.vertices.len();
+                                mesh.triangle(t, [0.025, 0.15, 0.20], SurfaceKind::Water, [0.; 3]);
+                                for v in &mut mesh.vertices[start..] {
+                                    let height = bed[0][2] - water_level
+                                        + grade_x * (v.position[0] - bed[0][0])
+                                        + grade_y * (v.position[1] - bed[0][1]);
+                                    v.surface[1..].copy_from_slice(&[
+                                        height,
+                                        heading,
+                                        Vertex::SHORE_PROFILE,
+                                    ]);
+                                }
+                            });
                         }
                     }
                     y = top;

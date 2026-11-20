@@ -80,7 +80,7 @@ fn fence_coverage(uv:vec2<f32>,style:f32,footprint:vec2<f32>)->f32 {
 struct ShadowOutput { @builtin(position) clip:vec4<f32>, @location(0) fence_uv:vec2<f32>, @location(1) @interpolate(flat) kind_pattern:vec2<f32> };
 @vertex fn vs_shadow(v:Input)->ShadowOutput {
     var o:ShadowOutput;var world=v.position;if v.surface.x>=15.0 && v.surface.x<=23.0 {world=tree_vertex(world,vec3<f32>(world.xy,v.surface.w));}o.clip=camera.light_view_projection*vec4<f32>(world,1.0);
-    o.fence_uv=v.surface.yz;o.kind_pattern=v.surface.xw;return o;
+    o.fence_uv=select(v.surface.yz,world.xy,v.surface.x==4.0);o.kind_pattern=v.surface.xw;return o;
 }
 @fragment fn fs_shadow(v:ShadowOutput) {
     let footprint=fwidth(v.fence_uv);
