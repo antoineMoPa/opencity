@@ -27,10 +27,10 @@ are transformed explicitly rather than inferred from discontinuous random offset
 
 A second color layer samples the scan at 0.071× UV scale (about 28 m for concrete,
 42 m for asphalt). It is low-pass filtered to avoid enlarged stones, then combined
-with smooth, world-fixed macro variation. The broad layer survives distant detail
-fading, so the material does not become a featureless average. Contrast compensation
-around measured scan means reduces washed-out patch junctions; this is an approximate
-variance correction, not full histogram-preserving synthesis.
+with smooth, world-fixed noise at every distance. The coarse color layer fades out
+across the near-to-middle transition and returns over 12–20 cm/pixel as fine detail
+fades. Contrast compensation around measured scan means reduces washed-out patch
+junctions.
 
 For barycentric coordinates `b`, scan mean `mu`, and three patch samples `C_i`:
 
@@ -43,11 +43,12 @@ C_surface = mix(mu, C_fine, resolved_detail) * coarse_variation
 Each patch uses `textureSampleGrad` with its rotated/scaled original gradients.
 Color, packed normal/roughness and their blend weights share one patch identity.
 
-The nearby path uses seven logical texture samples: three albedo, three packed
-normal/roughness, and one coarse color sample. Beyond 20 cm/pixel it smoothly reaches
-a one-sample path using measured material means plus broad variation. No added
-textures, draw calls, per-frame CPU work, or temporal randomness. Actual GPU cost
-depends on resolution, anisotropic filtering and visible pavement coverage.
+Nearby pixels use three albedo samples, three packed normal/roughness samples,
+and one coarse color sample. Over 3–5 mm/pixel the shader crossfades the color, tangent-space
+normal and roughness to one world-fixed scan. A smooth UV offset breaks up the tile grid.
+Its derivatives also transform the texture gradients and normal slopes. The middle tier
+uses two texture samples up to 12 cm/pixel. Beyond 20 cm/pixel a single coarse color
+sample supplies the broad variation. These tiers share the same textures and draw calls.
 
 Technique background: [triangular stochastic tiling and
 blending](https://unity-grenoble.github.io/website/publication/2019/06/01/publication-stochastic-texturing.html)

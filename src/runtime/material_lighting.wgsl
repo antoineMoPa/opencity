@@ -1,5 +1,8 @@
 struct PavementMaterial { color:vec3<f32>, normal:vec3<f32>, roughness:f32 };
 struct PavementPatch { color:vec3<f32>, bump:vec3<f32>, roughness:f32 };
+// Metres of pavement covered by a screen pixel along its larger derivative.
+const PAVEMENT_MIDDLE_START:f32=0.003;
+const PAVEMENT_MIDDLE_END:f32=0.005;
 fn pavement_seed(cell:vec2<f32>)->u32 {
     let p=bitcast<vec2<u32>>(vec2<i32>(cell));
     var h=p.x*374761393u+p.y*668265263u;
@@ -47,31 +50,7 @@ fn pavement_lane_color(scan:vec3<f32>,authored:vec3<f32>)->vec3<f32> {
 fn pavement_scan_color(scan:vec3<f32>,layer:i32)->vec3<f32> {
     return select(scan*1.10+vec3<f32>(0.012),mix(vec3<f32>(0.27,0.265,0.245),scan*1.32,0.60),layer==1);
 }
-// A consumer supplies map units in metres and derivatives before divergent masks.
-// OpenGL normals: image rows run down, the material bitangent runs up.
-fn scanned_pavement(world:vec3<f32>,dx:vec3<f32>,dy:vec3<f32>,n:vec3<f32>,layer:i32)->PavementMaterial {
-    var tangent=vec3<f32>(1.0,0.0,0.0);
-    if abs(n.z)<0.5 {tangent=vec3<f32>(-n.y,n.x,0.0);}
-    else {tangent-=n*dot(tangent,n);}
-    tangent*=inverseSqrt(max(dot(tangent,tangent),0.000001));
-    let bitangent=cross(n,tangent);
-    let meters=select(3.0,2.0,layer==1);
-    let uv=vec2<f32>(dot(world,tangent),-dot(world,bitangent))/meters;
-    let du=vec2<f32>(dot(dx,tangent),-dot(dx,bitangent))/meters;
-    let dv=vec2<f32>(dot(dy,tangent),-dot(dy,bitangent))/meters;
-    let footprint=max(length(dx),length(dy));
-    let resolved=1.0-smoothstep(0.025,0.20,footprint);
-    let average=select(vec3<f32>(0.112067,0.110354,0.098331),vec3<f32>(0.201036,0.169243,0.114603),layer==1);
-    let average_roughness=select(0.770377,0.517200,layer==1);
-    let roughness_base=select(0.54,0.62,layer==1);
-    let macro_lod=max(6.0,log2(max(max(length(du),length(dv))*0.071*1024.0,0.00001)));
-    let coarse=textureSampleLevel(pavement_color,pavement_sampler,uv*0.071+vec2<f32>(0.37,0.61),layer,macro_lod).rgb;
-    let broad=pavement_macro_noise(uv*0.045+vec2<f32>(13.0,7.0));
-    let coarse_variation=1.0+clamp(dot(coarse-average,vec3<f32>(0.2126,0.7152,0.0722))*1.2,-0.10,0.10)+(broad-0.5)*0.10;
-    if resolved<=0.0 {
-        // Far surfaces retain broad variation with one sample, no fine patches.
-        return PavementMaterial(pavement_scan_color(average*coarse_variation,layer),n,clamp(roughness_base+average_roughness*0.30+(1.0-coarse_variation)*0.12,0.58,0.96));
-    }
+fn pavement_fine_patch(uv:vec2<f32>,du:vec2<f32>,dv:vec2<f32>,layer:i32,average:vec3<f32>)->PavementPatch {
     // Three shared vertices per triangular cell give seamless, world-fixed
     // patch blends. A vertex always has the same transform on either side.
     let grid=vec2<f32>(uv.x,(-uv.x+2.0*uv.y)*0.577350269)*0.65;
@@ -89,12 +68,71 @@ fn scanned_pavement(world:vec3<f32>,dx:vec3<f32>,dy:vec3<f32>,n:vec3<f32>,layer:
     let c=pavement_patch(uv,du,dv,ids[2],layer);
     let sampled=a.color*weights.x+b.color*weights.y+c.color*weights.z;
     let bump=a.bump*weights.x+b.bump*weights.y+c.bump*weights.z;
-    let source_roughness=mix(average_roughness,a.roughness*weights.x+b.roughness*weights.y+c.roughness*weights.z,resolved);
     // Approximate variance compensation prevents three blended scans turning
     // into flat gray at patch junctions; no histogram LUT or new assets needed.
     let contrast=inverseSqrt(dot(weights,weights));
     let fine=max(average+(sampled-average)*contrast,vec3<f32>(0.0));
-    let scan=mix(average,fine,resolved)*coarse_variation;
+    return PavementPatch(fine,bump,a.roughness*weights.x+b.roughness*weights.y+c.roughness*weights.z);
+}
+// World-fixed, smoothly offset UVs keep the single scan from repeating on the tile grid.
+fn pavement_middle_patch(uv:vec2<f32>,du:vec2<f32>,dv:vec2<f32>,layer:i32)->PavementPatch {
+    let frequency=vec2<f32>(0.93,1.17);
+    let phase=uv.yx*frequency;
+    let coord=uv+0.38*sin(phase);
+    let slope=0.38*frequency*cos(phase);
+    let dx=du+slope*du.yx;let dy=dv+slope*dv.yx;
+    let color=textureSampleGrad(pavement_color,pavement_sampler,coord,layer,dx,dy).rgb;
+    let detail=textureSampleGrad(pavement_detail,pavement_sampler,coord,layer,dx,dy);
+    let bump=detail.xyz*2.0-1.0;
+    // Transform normal slopes back to the original tangent frame (OpenGL Y points up).
+    return PavementPatch(color,vec3<f32>(bump.xy-slope.yx*bump.yx,bump.z),detail.w);
+}
+// A consumer supplies map units in metres and derivatives before divergent masks.
+// OpenGL normals: image rows run down, the material bitangent runs up.
+fn scanned_pavement(world:vec3<f32>,dx:vec3<f32>,dy:vec3<f32>,n:vec3<f32>,layer:i32)->PavementMaterial {
+    var tangent=vec3<f32>(1.0,0.0,0.0);
+    if abs(n.z)<0.5 {tangent=vec3<f32>(-n.y,n.x,0.0);}
+    else {tangent-=n*dot(tangent,n);}
+    tangent*=inverseSqrt(max(dot(tangent,tangent),0.000001));
+    let bitangent=cross(n,tangent);
+    let meters=select(3.0,2.0,layer==1);
+    let uv=vec2<f32>(dot(world,tangent),-dot(world,bitangent))/meters;
+    let du=vec2<f32>(dot(dx,tangent),-dot(dx,bitangent))/meters;
+    let dv=vec2<f32>(dot(dy,tangent),-dot(dy,bitangent))/meters;
+    let footprint=max(length(dx),length(dy));
+    let resolved=1.0-smoothstep(0.025,0.20,footprint);
+    let average=select(vec3<f32>(0.112067,0.110354,0.098331),vec3<f32>(0.201036,0.169243,0.114603),layer==1);
+    let average_roughness=select(0.770377,0.517200,layer==1);
+    let roughness_base=select(0.54,0.62,layer==1);
+    // Fade the large-scale scan out for the middle tier and back in for the far tier.
+    // World-fixed noise supplies broad variation throughout both transitions.
+    let middle=smoothstep(PAVEMENT_MIDDLE_START,PAVEMENT_MIDDLE_END,footprint);
+    let macro_weight=1.0-middle*(1.0-smoothstep(0.12,0.20,footprint));
+    let broad=pavement_macro_noise(uv*0.045+vec2<f32>(13.0,7.0));
+    var coarse_variation=1.0+(broad-0.5)*0.10;
+    if macro_weight>0.0 {
+        let macro_lod=max(6.0,log2(max(max(length(du),length(dv))*0.071*1024.0,0.00001)));
+        let coarse=textureSampleLevel(pavement_color,pavement_sampler,uv*0.071+vec2<f32>(0.37,0.61),layer,macro_lod).rgb;
+        coarse_variation+=macro_weight*clamp(dot(coarse-average,vec3<f32>(0.2126,0.7152,0.0722))*1.2,-0.10,0.10);
+    }
+    if resolved<=0.0 {
+        // Far surfaces retain broad variation with one sample, no fine patches.
+        return PavementMaterial(pavement_scan_color(average*coarse_variation,layer),n,clamp(roughness_base+average_roughness*0.30+(1.0-coarse_variation)*0.12,0.58,0.96));
+    }
+    var grain:PavementPatch;
+    if middle>=1.0 {
+        grain=pavement_middle_patch(uv,du,dv,layer);
+    } else {
+        grain=pavement_fine_patch(uv,du,dv,layer,average);
+        if middle>0.0 {
+            let mid=pavement_middle_patch(uv,du,dv,layer);
+            grain=PavementPatch(mix(grain.color,mid.color,middle),
+                mix(grain.bump,mid.bump,middle),mix(grain.roughness,mid.roughness,middle));
+        }
+    }
+    let bump=grain.bump;
+    let source_roughness=mix(average_roughness,grain.roughness,resolved);
+    let scan=mix(average,grain.color,resolved)*coarse_variation;
     // Match the approved material study: retain mineral detail without baking
     // the scan's capture contrast into every large concrete surface.
     let albedo=pavement_scan_color(scan,layer);
