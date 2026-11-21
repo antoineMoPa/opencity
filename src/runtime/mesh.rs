@@ -10,9 +10,12 @@ use std::collections::HashSet;
 /// uphill angle in radians, 3]. Bed height interpolates across matching land and water faces.
 /// Entrance paving uses [Sidewalk, local X / unit, local Y / unit, 1].
 /// Road bands use [kind, distance along band, distance across band, packed pavement].
-/// Pavement bits: layout (2=sidewalk, 3=road), width in cm (12 bits), then two 5-bit edges.
-/// Edge 0=flush, 1=exposed; 2..30=raised contact with height (edge-1) cm.
+/// Pavement bits: layout (0=turf, 2=sidewalk, 3=road), width in cm (12 bits), then two 5-bit edges.
+/// Edge 0=flush, 1=exposed, 2=turf contact, 3=raised curb lip.
+/// Edges 4..30 encode the height of a raised neighbor in cm as (edge-1).
 /// Edge 31=automatic guard wall: its face extends 20 cm inward from the band edge.
+/// Runway faces use [Asphalt, local across, local along, runway_layout(width, length)].
+/// Runway paint uses [Marking, across fraction, 0, 1].
 /// Legacy junction tops retain [Sidewalk, distance along band, 0, 2].
 /// Infrastructure concrete uses [kind, world horizontal coordinate, height above foot, -2].
 /// Clipped junction contacts use [kind, edge texture distance, distance from contact, -4-length].
@@ -29,6 +32,13 @@ pub struct Vertex {
 impl Vertex {
     /// Material metadata tag shared by the terrain bed and its water surface.
     pub const SHORE_PROFILE: f32 = 3.;
+
+    /// Pack a rectangular airfield surface in layout 1. Dimensions are in map units.
+    pub fn runway_layout(width: f32, length: f32) -> f32 {
+        let width_dm = (width * 1000.).round().clamp(1., 1023.) as u32;
+        let length_m = (length * 100.).round().clamp(1., 4095.) as u32;
+        (1 | width_dm << 2 | length_m << 12) as f32
+    }
 }
 #[derive(Default, Clone)]
 pub struct Mesh {

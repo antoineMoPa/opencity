@@ -7,6 +7,8 @@ use crate::{road_geometry::CrossSection, RoadDefinition};
 enum Edge {
     Flush,
     Exposed,
+    TurfContact,
+    CurbLip,
     Raised(f32),
     Wall,
 }
@@ -15,7 +17,9 @@ impl Edge {
         match self {
             Self::Flush => 0,
             Self::Exposed => 1,
-            Self::Raised(height) => 1 + (height * 10000.).round().clamp(1., 29.) as u32,
+            Self::TurfContact => 2,
+            Self::CurbLip => 3,
+            Self::Raised(height) => 1 + (height * 10000.).round().clamp(3., 29.) as u32,
             Self::Wall => 31,
         }
     }
@@ -33,6 +37,14 @@ fn edge(kind: K, neighbor: Option<K>) -> Edge {
     let Some(neighbor) = neighbor else {
         return Edge::Exposed;
     };
+    let surface = geometry::kind(kind);
+    let other = geometry::kind(neighbor);
+    if (surface == SurfaceKind::Grass) != (other == SurfaceKind::Grass) {
+        return Edge::TurfContact;
+    }
+    if surface == SurfaceKind::Sidewalk && other == SurfaceKind::Asphalt {
+        return Edge::CurbLip;
+    }
     let height = raised(neighbor) - raised(kind);
     if height > 0.00005 {
         Edge::Raised(height)
@@ -46,6 +58,18 @@ fn packed(width: f32, layout: u32, left: Edge, right: Edge) -> f32 {
     let width = (width * 10000.).round().clamp(1., 4095.) as u32;
     (layout | width << 2 | left.bits() << 14 | right.bits() << 19) as f32
 }
+pub(super) fn grass_shoulder(triangles: &mut [Triangle]) {
+    // The first two corners touch pavement. The other two meet the terrain.
+    let width = 0.035;
+    let metadata = packed(width, 0, Edge::TurfContact, Edge::Flush);
+    for (triangle, across) in triangles
+        .iter_mut()
+        .zip([[0., 0., width], [0., width, width]])
+    {
+        triangle.data[2] = metadata;
+        triangle.facade_uv = Some(across.map(|v| [0., v]));
+    }
+}
 pub(super) fn band(
     triangles: &mut [Triangle],
     road: &RoadDefinition,
@@ -54,8 +78,9 @@ pub(super) fn band(
     distance: f32,
     length: f32,
     walls: [bool; 2],
+    material: impl Fn(K) -> K,
 ) {
-    let Some(data) = band_coordinates(road, rows, band, distance, length, walls) else {
+    let Some(data) = band_coordinates(road, rows, band, distance, length, walls, material) else {
         return;
     };
     for (t, ids) in triangles.iter_mut().zip([[0, 1, 2], [0, 2, 3]]) {
@@ -63,18 +88,20 @@ pub(super) fn band(
         t.facade_uv = Some(ids.map(|i| [data[i][0], data[i][1]]));
     }
 }
-pub(super) fn band_coordinates(
+pub fn band_coordinates(
     road: &RoadDefinition,
     rows: &[CrossSection],
     band: usize,
     distance: f32,
     length: f32,
     walls: [bool; 2],
+    material: impl Fn(K) -> K,
 ) -> Option<[[f32; 3]; 4]> {
-    let kind = road.elements[band].kind;
+    let kind = material(road.elements[band].kind);
     let layout = match geometry::kind(kind) {
         SurfaceKind::Sidewalk => 2,
         SurfaceKind::Asphalt => 3,
+        SurfaceKind::Grass => 0,
         _ => return None,
     };
     let width = |row: &CrossSection| {
@@ -86,12 +113,15 @@ pub(super) fn band_coordinates(
     let left = if band == 0 && walls[0] {
         Edge::Wall
     } else {
-        edge(kind, band.checked_sub(1).map(|i| road.elements[i].kind))
+        edge(
+            kind,
+            band.checked_sub(1).map(|i| material(road.elements[i].kind)),
+        )
     };
     let right = if band + 1 == road.elements.len() && walls[1] {
         Edge::Wall
     } else {
-        edge(kind, road.elements.get(band + 1).map(|e| e.kind))
+        edge(kind, road.elements.get(band + 1).map(|e| material(e.kind)))
     };
     let metadata = packed(w, layout, left, right);
     let uv = [

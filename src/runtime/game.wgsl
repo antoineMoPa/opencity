@@ -187,6 +187,12 @@ fn prepare_surface(v:Output)->SurfaceData {
 @fragment fn fs_opaque(v:Output,@builtin(front_facing) front:bool)->@location(0) vec4<f32> {
     return shade_surface(v,front,1.0,prepare_surface(v));
 }
+// Rectangular airfield layout stores width in decimetres and length in metres.
+fn runway_rim_distance(uv:vec2<f32>,bits:u32)->f32 {
+    let size=vec2<f32>(f32((bits>>2u)&1023u)*0.001,f32(bits>>12u)*0.01);
+    let rim=min(uv,size-uv);
+    return min(rim.x,rim.y);
+}
 fn shade_surface(v:Output,front:bool,coverage:f32,surface:SurfaceData)->vec4<f32> {
     return shade_surface_lit(v,front,coverage,surface,vec3<f32>(0.0));
 }
@@ -214,12 +220,22 @@ fn shade_surface_lit(v:Output,front:bool,coverage:f32,surface:SurfaceData,local:
     if (kind>0.5&&kind<1.5) || (kind>=4.5&&kind<5.5) {grain=mix(0.5,noise(p*1600.0),detail);}
     if kind>0.5&&kind<1.5 {broad=noise(p*28.0)*0.65+noise(p*83.0)*0.35;}
     if kind<0.5 { // Scanned aggregate plus existing authored road contact masks.
-        let edge=pavement_edges(v.fence_uv.y,v.surface.w);
-        base=pavement_weather(p,surface.world_footprint.xy,base,true,edge,0.0);
-        base=seasonal_pavement_deposits(base,v.fence_uv,surface.paving_footprint,v.surface.w,camera.daylight_sky.z);
+        let bits=u32(max(0.0,round(v.surface.w)));
+        if (bits&3u)==1u && bits>3u {
+            let distance=runway_rim_distance(v.fence_uv,bits);
+            let shoulder=1.0-smoothstep(0.014,0.020,distance);
+            base=mix(base,base*vec3<f32>(1.20,1.14,1.06),shoulder);
+            base=broken_surface_edge(base,p,surface.world_footprint.xy,distance,2u,false);
+        } else {
+            let edge=pavement_edges(v.fence_uv.y,v.surface.w);
+            base=road_band_edge(base,p,surface.world_footprint.xy,v.fence_uv,v.surface.w,false);
+            base=pavement_weather(p,surface.world_footprint.xy,base,true,edge,0.0);
+            base=seasonal_pavement_deposits(base,v.fence_uv,surface.paving_footprint,v.surface.w,camera.daylight_sky.z);
+        }
     } else if kind<1.5 { // Multi-scale grass cover, soil and blades.
         base=mix(base,vec3<f32>(0.18,0.22,0.15),0.45);
         base=mix(base*0.72,base*1.22,broad)*(0.90+0.18*grain);
+        base=road_band_edge(base,p,surface.world_footprint.xy,v.fence_uv,v.surface.w,true);
     } else if kind<2.5 {
         // Only authored top surfaces carry joints. Curb faces stay plain.
         var joint_coverage=0.0;
@@ -237,6 +253,7 @@ fn shade_surface_lit(v:Output,front:bool,coverage:f32,surface:SurfaceData,local:
             if abs(n.z)<0.5 {base=seasonal_contact_deposits(base,v.fence_uv,surface.paving_footprint,true,camera.daylight_sky.z);}
         } else {
             let edge=select(vec2<f32>(0.0),pavement_edges(v.fence_uv.y,v.surface.w),paving_style==2u);
+            base=road_band_edge(base,p,surface.world_footprint.xy,v.fence_uv,v.surface.w,false);
             base*=mix(1.0,0.65,joint_coverage);
             base=pavement_weather(p,surface.world_footprint.xy,base,false,edge,joint_coverage);
             base=seasonal_pavement_deposits(base,v.fence_uv,surface.paving_footprint,v.surface.w,camera.daylight_sky.z);
@@ -274,6 +291,15 @@ fn shade_surface_lit(v:Output,front:bool,coverage:f32,surface:SurfaceData,local:
         n=vec3<f32>(0.08*cos(p.x*120.0+camera.eye_time.w*1.2),0.08*cos(p.y*190.0-camera.eye_time.w*0.7),1.0);
         n/=length(n);base*=0.92+wave*0.04;
     } else if kind<5.5 {base*=0.86+0.25*grain;}
+    else if kind==6.0 && v.surface.w==1.0 {
+        // Airfield paint breaks at its margins and wears through in small patches.
+        let aa=surface.world_footprint.xy;
+        let grain_mask=architecture_noise(p*3800.0,aa*3800.0,103.0);
+        let abrasion=architecture_noise(p*160.0,aa*160.0,131.0);
+        let edge=1.0-smoothstep(0.0,0.20,min(v.fence_uv.x,1.0-v.fence_uv.x));
+        let missing=smoothstep(0.49,0.78,grain_mask*0.44+abrasion*0.56+edge*0.16);
+        base=mix(base*0.93,vec3<f32>(0.095,0.10,0.105),missing);
+    }
     else if kind>6.5&&kind<7.5&&v.surface.w== -2.0 {
         base=concrete_weather(v.world,surface.world_footprint,v.fence_uv.y,n,base);
         if abs(n.z)<0.5 {base=seasonal_contact_deposits(base,v.fence_uv,surface.paving_footprint,true,camera.daylight_sky.z);}

@@ -126,6 +126,12 @@ fn bed_height(point: vec2<f32>) -> f32 {
     let panel = 0.5 + 0.5 * cos(across * 180.0);
     let brick_row = floor(floor_position * 7.0);
     let brick = 0.5 + 0.5*cos(across*340.0 + (brick_row % 2.0)*3.141593);
+    let edge_aa=abs(world_dx.xy)+abs(world_dy.xy);
+    if input.material.x==10.0 {
+        let linear=pow(max(color,vec3<f32>(0.0)),vec3<f32>(2.2));
+        let turf=road_band_edge(linear,input.world.xy,edge_aa,input.surface.yz,input.material.y,true);
+        return vec4<f32>(pow(turf,vec3<f32>(1.0/2.2)),input.color.a);
+    }
     // Editor IDs 7/8 are pavement, 9 is infrastructure concrete. Other IDs stay unchanged.
     if input.material.x>6.5&&input.material.x<9.5 {
         let eye=editor_eye(input.world);let view=eye/max(length(eye),0.00001);
@@ -134,7 +140,9 @@ fn bed_height(point: vec2<f32>) -> f32 {
         var shaded=pavement_lane_color(scan.color,pow(max(color,vec3<f32>(0.0)),vec3<f32>(2.2)));
         if input.material.x>8.5 {
             if abs(normal.z)<0.5 {shaded=contact_deposits(shaded,input.surface.yz,facade_aa,true);}
-        } else {shaded=pavement_deposits(shaded,input.surface.yz,facade_aa,input.material.y);}
+        } else {
+            shaded=road_band_edge(shaded,input.world.xy,edge_aa,input.surface.yz,input.material.y,false);
+            shaded=pavement_deposits(shaded,input.surface.yz,facade_aa,input.material.y);}
         let diffuse=textureSampleLevel(editor_environment,editor_sky_sampler,scan.normal,7.0).rgb*0.55;
         let reflection=textureSampleLevel(editor_environment,editor_sky_sampler,reflect(-view,scan.normal),scan.roughness*6.0).rgb;
         let lit=material_environment(shaded,scan.normal,view,scan.roughness,0.0,diffuse,reflection)

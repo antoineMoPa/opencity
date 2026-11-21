@@ -264,6 +264,7 @@ pub(super) fn compile(
                     along,
                     length,
                     wall_edges,
+                    |kind| geometry.surface_element(id, kind),
                 );
                 // Vertical curb faces share the pavement's subdivision and slopes.
                 if k == SurfaceKind::Sidewalk {
@@ -368,17 +369,27 @@ pub(super) fn compile(
                             .water_level
                             .is_none_or(|level| ha > level && hb > level);
                         if dry && (a.height - ha).abs() < 0.015 && (b.height - hb).abs() < 0.015 {
-                            shoulders.push([
-                                [a.point.x, a.point.y, a.height],
-                                [b.point.x, b.point.y, b.height],
-                                [pb[0], pb[1], hb],
-                                [pa[0], pa[1], ha],
-                            ]);
+                            shoulders.push((
+                                side,
+                                [
+                                    [a.point.x, a.point.y, a.height],
+                                    [b.point.x, b.point.y, b.height],
+                                    [pb[0], pb[1], hb],
+                                    [pa[0], pa[1], ha],
+                                ],
+                            ));
                         }
                     }
                 }
-                for p in shoulders {
+                for (side, p) in shoulders {
+                    let start = city.triangles.len();
                     quad(city, p, SurfaceKind::Grass, Some(id), [92, 127, 70]);
+                    let band = if side == 0 { 0 } else { side - 1 };
+                    if !wall_edges[usize::from(side != 0)]
+                        && kind(road.elements[band].kind) != SurfaceKind::Grass
+                    {
+                        super::surface_weathering::grass_shoulder(&mut city.triangles[start..]);
+                    }
                 }
             }
         }

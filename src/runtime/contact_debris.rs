@@ -3,6 +3,7 @@ use crate::road_geometry::{CrossSection, Wall};
 use std::collections::HashSet;
 use std::sync::OnceLock;
 mod mesh;
+pub use super::surface_weathering::band_coordinates as resolved_band_coordinates;
 pub use mesh::prepare_mesh;
 
 /// Explicit mapping of authored road-band geometry to the shared material metadata.
@@ -50,7 +51,13 @@ pub fn pavement_band_with_walls(
     length: f32,
     walls: [bool; 2],
 ) -> Option<[[f32; 3]; 4]> {
-    super::surface_weathering::band_coordinates(road, rows, band, distance, length, walls)
+    if matches!(
+        road.elements[band].kind,
+        crate::RoadElementKind::Verge | crate::RoadElementKind::Middle
+    ) {
+        return None;
+    }
+    resolved_band_coordinates(road, rows, band, distance, length, walls, |kind| kind)
 }
 
 pub const WIDTH: u32 = 1024;

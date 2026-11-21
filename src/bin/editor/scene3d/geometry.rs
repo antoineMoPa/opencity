@@ -187,15 +187,21 @@ pub(super) fn add_resolved_road_surface(
                 kind_color(geometry.surface_element(index, element.kind), palette.theme),
                 0.0,
             );
-            if let Some(metadata) = opencity::runtime::contact_debris::pavement_band_with_walls(
-                road, pair, band, along, length, wall_edges,
+            if let Some(metadata) = opencity::runtime::contact_debris::resolved_band_coordinates(
+                road,
+                pair,
+                band,
+                along,
+                length,
+                wall_edges,
+                |kind| geometry.surface_element(index, kind),
             ) {
-                let id = match element.kind {
+                let id = match geometry.surface_element(index, element.kind) {
                     RoadElementKind::Sidewalk
                     | RoadElementKind::BusStop
                     | RoadElementKind::BuildingEdge
                     | RoadElementKind::Barrier => 8.,
-                    RoadElementKind::Verge | RoadElementKind::Middle => continue,
+                    RoadElementKind::Verge | RoadElementKind::Middle => 10.,
                     _ => 7.,
                 };
                 for (v, i) in scene.vertices[start..].iter_mut().zip([0, 1, 2, 0, 2, 3]) {

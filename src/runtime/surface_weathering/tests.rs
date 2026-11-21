@@ -108,3 +108,30 @@ fn concrete_soffit_normals_face_downward() {
     concrete_mesh(&mut mesh.vertices, |_| 0.);
     assert!(mesh.vertices.iter().all(|v| v.normal[2] < -0.99));
 }
+
+#[test]
+fn grass_contacts_mark_both_sides_and_curbs_distinguish_the_lip_from_the_gutter() {
+    let city = City::from_program(
+        &parse("road street: verge sidewalk carlane carlane verge; end street(0,0,1,0);").unwrap(),
+        None,
+    )
+    .unwrap();
+    let mesh = city.mesh(Region::WholeMap, 0.04).unwrap();
+    let fields: std::collections::HashSet<_> = mesh
+        .vertices
+        .iter()
+        .map(|v| {
+            let bits = v.surface[3] as u32;
+            (v.surface[0] as u32, (bits >> 14) & 31, (bits >> 19) & 31)
+        })
+        .collect();
+    for (kind, left, right) in [
+        (SurfaceKind::Grass, 1, 2),
+        (SurfaceKind::Sidewalk, 2, 3),
+        (SurfaceKind::Asphalt, 16, 0),
+        (SurfaceKind::Asphalt, 0, 2),
+        (SurfaceKind::Grass, 2, 1),
+    ] {
+        assert!(fields.contains(&(kind as u32, left, right)), "{fields:?}");
+    }
+}
