@@ -1,6 +1,28 @@
 use super::*;
 
 #[test]
+fn raised_sidewalks_have_no_painted_edge() {
+    let program =
+        crate::parse("road street: sidewalk carlane carlane sidewalk; end street(0,0,1,0);")
+            .unwrap();
+    let city = City::from_program(&program, None).unwrap();
+    let markings: Vec<_> = city
+        .triangles
+        .iter()
+        .filter(|t| t.kind == SurfaceKind::Marking)
+        .collect();
+    assert!(
+        !markings.is_empty(),
+        "the lane divider must still be painted"
+    );
+    // On this symmetric eastbound road, only the center divider is painted.
+    assert!(markings
+        .iter()
+        .flat_map(|t| t.points)
+        .all(|p| p[1].abs() <= 0.00051));
+}
+
+#[test]
 fn support_index_preserves_legacy_queries_across_terrain_decks_and_facades() {
     let program = crate::parse(include_str!("../../tests/fixtures/runtime_support.road")).unwrap();
     let spec = ElevationMapSpec::from_program(&program).unwrap().unwrap();

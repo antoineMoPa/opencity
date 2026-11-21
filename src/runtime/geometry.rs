@@ -297,6 +297,10 @@ pub(super) fn compile(
             for edge in 1..road.elements.len() {
                 let left = road.elements[edge - 1].kind;
                 let right = road.elements[edge].kind;
+                // The raised curb itself marks the edge of the carriageway.
+                if kind(left) == SurfaceKind::Sidewalk || kind(right) == SurfaceKind::Sidewalk {
+                    continue;
+                }
                 let is_lane =
                     |k| matches!(k, K::CarLane | K::BusLane | K::ParkingLane | K::BikeLane);
                 if !is_lane(left) && !is_lane(right) {
