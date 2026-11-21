@@ -1,6 +1,30 @@
 //! Guard the exposed side of roads beside an authored excavation.
 use super::*;
 
+/// Require drivable terrain across the shoulder, clear of excavations and drops.
+pub(super) fn level_shoulder(wall: &Wall, map: &crate::heightmap::ElevationMap) -> bool {
+    let dx = wall.end.point.x - wall.start.point.x;
+    let dy = wall.end.point.y - wall.start.point.y;
+    let length = dx.hypot(dy);
+    if length < 1e-8 {
+        return false;
+    }
+    [wall.start, mix(wall.start, wall.end, 0.5), wall.end]
+        .iter()
+        .all(|v| {
+            [-0.2, -0.1, 0., 0.1, 0.2].iter().all(|offset| {
+                let p = [
+                    v.point.x - dy / length * offset,
+                    v.point.y + dx / length * offset,
+                ];
+                map.cut_at(p).is_none()
+                    && map
+                        .original_height_at(p)
+                        .is_some_and(|h| (h - v.height).abs() <= 0.005)
+            })
+        })
+}
+
 pub(super) fn cut_drop(
     wall: &Wall,
     segment: &Segment,

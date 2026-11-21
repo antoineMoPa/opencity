@@ -91,11 +91,16 @@ struct Surface {
     pavement: Vec<Triangle>,
     edges: [Vec<Vertex>; 2],
 }
+struct EdgeWall {
+    wall: Wall,
+    access_candidate: bool,
+}
+
 pub struct RoadGeometry {
     pub walls: Vec<Wall>,
     pub safety_walls: Vec<Wall>,
     paved_edges: Vec<bool>,
-    edge_walls: Vec<Wall>,
+    edge_walls: Vec<EdgeWall>,
     protected_junctions: std::collections::HashSet<String>,
     /// Curves that could not be resolved within the subdivision budget.
     pub unresolved: Vec<usize>,
@@ -395,14 +400,20 @@ impl RoadGeometry {
         self.safety_walls = self
             .edge_walls
             .iter()
-            .copied()
-            .filter(|w| {
-                protected(w.segment)
+            .filter_map(|edge| {
+                let w = edge.wall;
+                if edge.access_candidate
+                    && elevation.is_some_and(|map| safety::level_shoulder(&w, map))
+                {
+                    return None;
+                }
+                (protected(w.segment)
                     || elevation.is_some_and(|map| {
-                        safety::cut_drop(w, &projection.segments[w.segment], map)
+                        safety::cut_drop(&w, &projection.segments[w.segment], map)
                     })
                     || (w.start.height - ground(w.start) > SAFETY_CLEARANCE
-                        && w.end.height - ground(w.end) > SAFETY_CLEARANCE)
+                        && w.end.height - ground(w.end) > SAFETY_CLEARANCE))
+                    .then_some(w)
             })
             .collect();
         self.paved_edges = self
@@ -681,9 +692,17 @@ impl RoadGeometry {
         }
         let mut walls = Vec::new();
         for (index, surface) in surfaces.iter().enumerate() {
+            let highway = definition(program, &projection.segments[index])
+                .is_some_and(|road| road.role == RoadRole::Highway);
             for edge in &surface.edges {
+                let mut traveled = 0.;
                 for pair in edge.windows(2) {
                     let (a, b) = (pair[0], pair[1]);
+                    let span = distance(a.point, b.point);
+                    // Mark roughly 12 m of shoulder every 150 m, measured along each edge.
+                    let access_candidate =
+                        highway && ((traveled + span * 0.5) % 1.5 - 0.75).abs() < 0.06;
+                    traveled += span;
                     let mut cuts = Vec::new();
                     for &other in &connections[index] {
                         for triangle in &surfaces[other].pavement {
@@ -698,31 +717,38 @@ impl RoadGeometry {
                     let mut cursor = 0.0;
                     for (lo, hi) in cuts {
                         if lo > cursor + 1e-6 {
-                            walls.push(Wall {
-                                segment: index,
-                                start: mix(a, b, cursor),
-                                end: mix(a, b, lo),
+                            walls.push(EdgeWall {
+                                wall: Wall {
+                                    segment: index,
+                                    start: mix(a, b, cursor),
+                                    end: mix(a, b, lo),
+                                },
+                                access_candidate,
                             });
                         }
                         cursor = cursor.max(hi);
                     }
                     if cursor < 1.0 - 1e-6 {
-                        walls.push(Wall {
-                            segment: index,
-                            start: mix(a, b, cursor),
-                            end: b,
+                        walls.push(EdgeWall {
+                            wall: Wall {
+                                segment: index,
+                                start: mix(a, b, cursor),
+                                end: b,
+                            },
+                            access_candidate,
                         });
                     }
                 }
             }
         }
         Self {
-            edge_walls: walls.clone(),
             protected_junctions: Default::default(),
             walls: walls
-                .into_iter()
+                .iter()
+                .map(|edge| edge.wall)
                 .filter(|w| w.start.height.max(w.end.height) > 0.)
                 .collect(),
+            edge_walls: walls,
             safety_walls: Vec::new(),
             paved_edges: vec![false; surfaces.len()],
             unresolved,
