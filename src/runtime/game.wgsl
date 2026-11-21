@@ -2,6 +2,14 @@
 // Group 0 binding 0: matrices, eye/time, sun/exposure, daylight/reserved, inverse view, sun RGB/intensity.
 // Group 1: 2048-square depth shadow texture (0), comparison sampler (1).
 struct Camera { view_projection: mat4x4<f32>, light_view_projection: mat4x4<f32>, eye_time: vec4<f32>, sun_exposure: vec4<f32>, daylight_sky: vec4<f32>, inverse_view_projection: mat4x4<f32>, sun_color: vec4<f32>, star_params: vec4<f32>, star_color: vec4<f32> };
+// A zero distance scale selects the default visibility for existing camera uniforms.
+fn world_fog(eye_distance: f32) -> f32 {
+    let scale = camera.daylight_sky.w;
+    let distance = eye_distance * select(1.0, scale, scale > 0.0);
+    return (1.0 - exp(-distance * 0.025) * (1.0 - smoothstep(5.8, 7.6, distance)))
+        * (1.0 - camera.daylight_sky.y);
+}
+
 @group(0) @binding(0) var<uniform> camera: Camera;
 @group(1) @binding(0) var shadow_map: texture_depth_2d;
 @group(1) @binding(1) var shadow_sampler: sampler_comparison;
@@ -198,6 +206,7 @@ fn shade_surface(v:Output,front:bool,coverage:f32,surface:SurfaceData)->vec4<f32
 }
 // Consumers supply local diffuse irradiance before exposure, fog and tone mapping.
 fn shade_surface_lit(v:Output,front:bool,coverage:f32,surface:SurfaceData,local:vec3<f32>)->vec4<f32> {
+    var opacity=coverage;
     var base=v.color;let p=v.world.xy;let kind=v.surface.x;var facade_glow=0.0;
     // Only imported building models opt into these local weathering coordinates.
     if kind>6.5&&kind<7.5&&(v.surface.w== -1.0 || (v.surface.w== -3.0&&v.snow_control.y==0.0)) {
@@ -298,7 +307,8 @@ fn shade_surface_lit(v:Output,front:bool,coverage:f32,surface:SurfaceData,local:
         let abrasion=architecture_noise(p*160.0,aa*160.0,131.0);
         let edge=1.0-smoothstep(0.0,0.20,min(v.fence_uv.x,1.0-v.fence_uv.x));
         let missing=smoothstep(0.49,0.78,grain_mask*0.44+abrasion*0.56+edge*0.16);
-        base=mix(base*0.93,vec3<f32>(0.095,0.10,0.105),missing);
+        base*=0.93;
+        opacity*=1.0-missing;
     }
     else if kind>6.5&&kind<7.5&&v.surface.w== -2.0 {
         base=concrete_weather(v.world,surface.world_footprint,v.fence_uv.y,n,base);
@@ -382,8 +392,8 @@ fn shade_surface_lit(v:Output,front:bool,coverage:f32,surface:SurfaceData,local:
             lit+=vec3<f32>(1.3,0.85,0.4)*darkness;
         }
     }
-    let distance=length(eye);let fog=(1.0-exp(-distance*0.025)*(1.0-smoothstep(5.8,7.6,distance)))*(1.0-camera.daylight_sky.y);
+    let fog=world_fog(length(eye));
     // Exposure and filmic compression. Surface target is sRGB.
     let sky=textureSampleLevel(sky_environment,sky_sampler,-view,0.0).rgb;
-    return vec4<f32>(filmic_display(mix(lit,sky,fog)*camera.sun_exposure.w),coverage);
+    return vec4<f32>(filmic_display(mix(lit,sky,fog)*camera.sun_exposure.w),opacity);
 }
