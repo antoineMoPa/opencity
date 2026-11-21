@@ -123,7 +123,7 @@ impl TerrainCut {
             + self.slope[1] * (p[1] - self.points[0][1])
     }
 
-    fn overlaps(&self, polygon: &[[f32; 3]]) -> bool {
+    pub(super) fn overlaps(&self, polygon: &[[f32; 3]]) -> bool {
         (0..2).all(|axis| {
             polygon.iter().any(|p| p[axis] >= self.bounds[axis])
                 && polygon.iter().any(|p| p[axis] <= self.bounds[axis + 2])

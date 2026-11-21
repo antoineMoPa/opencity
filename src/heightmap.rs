@@ -294,9 +294,7 @@ impl ElevationMap {
         );
     }
 
-    /// Conservative cell maximum over a world rectangle, including its rim.
-    /// Road placement uses this to detect narrow peaks between cross sections.
-    pub fn maximum_in(&self, min: [f32; 2], max: [f32; 2]) -> Option<f32> {
+    fn pixel_bounds(&self, min: [f32; 2], max: [f32; 2]) -> Option<[usize; 4]> {
         if (0..2).any(|i| !min[i].is_finite() || !max[i].is_finite() || min[i] > max[i]) {
             return None;
         }
@@ -312,6 +310,31 @@ impl ElevationMap {
         let x1 = pixel(max[0], 0).ceil() as usize;
         let y0 = pixel(min[1], 1).floor() as usize;
         let y1 = pixel(max[1], 1).ceil() as usize;
+        Some([x0, y0, x1, y1])
+    }
+
+    /// Conservative footing depth, including terrain dips between building corners.
+    #[cfg(feature = "game-runtime")]
+    pub(crate) fn minimum_in(&self, min: [f32; 2], max: [f32; 2]) -> Option<f32> {
+        let [x0, y0, x1, y1] = self.pixel_bounds(min, max)?;
+        let bed = (y0..=y1)
+            .flat_map(|y| (x0..=x1).map(move |x| self.point(x, y)[2]))
+            .fold(f32::INFINITY, f32::min);
+        let corners = [min, [max[0], min[1]], max, [min[0], max[1]]];
+        let floor = self
+            .spec
+            .cuts
+            .iter()
+            .filter(|cut| cut.overlaps(&[[min[0], min[1], 0.], [max[0], max[1], 0.]]))
+            .flat_map(|cut| corners.map(|p| cut.height_at(p)))
+            .fold(bed, f32::min);
+        Some(floor)
+    }
+
+    /// Conservative cell maximum over a world rectangle, including its rim.
+    /// Road placement uses this to detect narrow peaks between cross sections.
+    pub fn maximum_in(&self, min: [f32; 2], max: [f32; 2]) -> Option<f32> {
+        let [x0, y0, x1, y1] = self.pixel_bounds(min, max)?;
         let height = (y0..=y1)
             .flat_map(|y| (x0..=x1).map(move |x| self.samples[y * 1024 + x]))
             .fold(f32::NEG_INFINITY, f32::max);

@@ -160,6 +160,62 @@ fn polygon(
     }
     Ok(())
 }
+fn foundation(city: &mut City, id: usize, f: &LandscapeFeature) -> Result<(), String> {
+    let [x0, y0, x1, y1] = bounds(f.points.iter().copied());
+    let Some(foot) = city
+        .elevation
+        .as_ref()
+        .and_then(|map| map.minimum_in([x0, y0], [x1, y1]))
+    else {
+        return Ok(());
+    };
+    let top = f.elevation;
+    if top - foot <= 0.0001 {
+        return Ok(());
+    }
+    city.foundation_bottoms.insert(id, foot);
+    let concrete = [151, 149, 142];
+    // The cap closes recessed entries. Sink it one centimetre below the floor
+    // to avoid overlapping its horizontal faces.
+    polygon(
+        city,
+        &f.points,
+        top - 0.0001,
+        SurfaceKind::Prop,
+        concrete,
+        [0.; 3],
+    )?;
+    let first_wall = city.triangles.len();
+    let origin = f.points[0];
+    let signed_area: f32 = f
+        .points
+        .iter()
+        .zip(f.points.iter().cycle().skip(1))
+        .map(|(a, b)| {
+            (a[0] - origin[0]) * (b[1] - origin[1]) - (b[0] - origin[0]) * (a[1] - origin[1])
+        })
+        .sum();
+    for (&a, &b) in f.points.iter().zip(f.points.iter().cycle().skip(1)) {
+        let (a, b) = if signed_area < 0. { (b, a) } else { (a, b) };
+        quad(
+            city,
+            [
+                [a[0], a[1], foot],
+                [b[0], b[1], foot],
+                [b[0], b[1], top],
+                [a[0], a[1], top],
+            ],
+            SurfaceKind::Prop,
+            None,
+            concrete,
+        );
+    }
+    for t in &mut city.triangles[first_wall..] {
+        super::surface_weathering::concrete(t, |_| foot);
+    }
+    Ok(())
+}
+
 pub(super) fn compile(
     city: &mut City,
     program: &Program,
@@ -668,6 +724,12 @@ pub(super) fn compile(
         }
     }
     for (feature_id, f) in city.landscape.clone().into_iter().enumerate() {
+        // Model placements with collision disabled also represent signs and open canopies.
+        if f.kind == LandscapeKind::Building
+            && (f.model.is_none() || f.building_style.unwrap_or_default().collidable)
+        {
+            foundation(city, feature_id, &f)?;
+        }
         let first_triangle = city.triangles.len();
         if let Some(recipe) = super::architecture::BuildingRecipe::from_feature(&f) {
             let (mesh, volumes) = recipe.geometry();

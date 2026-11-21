@@ -223,6 +223,7 @@ pub struct City {
     support_cells: HashMap<(i32, i32), Vec<usize>>,
     barrier_cells: HashMap<(i32, i32), Vec<usize>>,
     building_cells: HashMap<(i32, i32), Vec<usize>>,
+    foundation_bottoms: HashMap<usize, f32>,
     building_volumes: HashMap<usize, Vec<architecture::BuildingVolume>>,
 }
 impl City {
@@ -283,6 +284,7 @@ impl City {
             support_cells: HashMap::new(),
             barrier_cells: HashMap::new(),
             building_cells: HashMap::new(),
+            foundation_bottoms: HashMap::new(),
             building_volumes: HashMap::new(),
         };
         for (i, feature) in city
@@ -518,6 +520,14 @@ impl City {
     ) -> (Mesh, Vec<Mesh>) {
         self.building_detail_parts_matching(region, cfg, |_| true)
     }
+    /// Lowest solid elevation of a building, including its concrete foundation.
+    pub fn building_bottom(&self, id: usize) -> f32 {
+        self.foundation_bottoms
+            .get(&id)
+            .copied()
+            .unwrap_or(self.landscape[id].elevation)
+    }
+
     /// Conservative visual overlap test, including non-collidable model buildings.
     /// Uses the existing building grid; broad queries fall back to the inventory.
     pub fn building_bounds_overlap(&self, min: [f32; 3], max: [f32; 3]) -> bool {
@@ -527,7 +537,7 @@ impl City {
         let overlaps = |id: usize| {
             let f = &self.landscape[id];
             if f.kind != LandscapeKind::Building
-                || f.elevation >= max[2]
+                || self.building_bottom(id) >= max[2]
                 || f.elevation + f.height.unwrap_or(0.) <= min[2]
             {
                 return false;
@@ -559,7 +569,7 @@ impl City {
             let f = &self.landscape[id];
             f.kind == LandscapeKind::Building
                 && f.building_style.unwrap_or_default().collidable
-                && f.elevation < top
+                && self.building_bottom(id) < top
                 && f.elevation + f.height.unwrap_or(0.) > bottom
                 && geometry::polygon_region(
                     &f.points,
@@ -568,11 +578,12 @@ impl City {
                         radius,
                     },
                 )
-                && self.building_volumes.get(&id).is_none_or(|parts| {
-                    parts
-                        .iter()
-                        .any(|v| v.intersects(point, radius, bottom, top))
-                })
+                && ((bottom < f.elevation && self.foundation_bottoms.contains_key(&id))
+                    || self.building_volumes.get(&id).is_none_or(|parts| {
+                        parts
+                            .iter()
+                            .any(|v| v.intersects(point, radius, bottom, top))
+                    }))
         };
         let lo = geometry::cell([point[0] - radius, point[1] - radius]);
         let hi = geometry::cell([point[0] + radius, point[1] + radius]);

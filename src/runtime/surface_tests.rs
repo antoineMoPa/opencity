@@ -146,3 +146,55 @@ fn shore_profile_follows_the_bed_on_both_faces_and_excludes_dry_cuts() {
     }
     assert_eq!(seen, [true; 3]);
 }
+
+#[test]
+fn foundations_cover_mid_edge_dips_and_survive_external_model_draws() {
+    let program = crate::parse(
+        r#"elevation_map("hill",0,0,1,1,0,1);
+           house = building(0.2,"house.glb",0.2,0.2,0.2,0.6,0.8,0.6,0.8,0.2);
+           elevation(house,1);
+           flat = building(0.2,0.01,0.1,0.1,0.1,0.1,0.2,0.01,0.2);
+           elevation(flat,1);
+           sign = building(0.2,"sign.glb",{collision:none},0.2,0.7,0.8,0.7,0.8,0.8,0.2,0.8);
+           elevation(sign,1);"#,
+    )
+    .unwrap();
+    let mut samples = vec![255; 1024 * 1024];
+    for row in samples.chunks_exact_mut(1024) {
+        row[512] = 0;
+    }
+    let mut bytes = Vec::new();
+    let mut encoder = png::Encoder::new(&mut bytes, 1024, 1024);
+    encoder.set_color(png::ColorType::Grayscale);
+    encoder.set_depth(png::BitDepth::Eight);
+    encoder
+        .write_header()
+        .unwrap()
+        .write_image_data(&samples)
+        .unwrap();
+    let city = City::from_program_with_elevation_loader(&program, |spec| {
+        ElevationMap::from_png(spec.clone(), &bytes)
+    })
+    .unwrap();
+    let mesh = city
+        .mesh_with_external_models(Region::WholeMap, 0.1)
+        .unwrap();
+    let walls: Vec<_> = mesh
+        .vertices
+        .chunks_exact(3)
+        .filter(|face| face[0].surface[3] == -2.)
+        .collect();
+    assert_eq!(walls.len(), 8, "only the house over the dip needs walls");
+    for face in walls {
+        assert!(face.iter().any(|v| v.position[2] == 0.));
+        assert!(face.iter().any(|v| v.position[2] == 1.));
+        let [x, y, _] = face[0].position;
+        let [nx, ny, _] = face[0].normal;
+        assert!(
+            nx * (x - 0.5) + ny * (y - 0.4) > 0.,
+            "outward concrete face"
+        );
+    }
+    assert!(city.building_collision([0.5, 0.4], 0., 0.1, 0.2));
+    assert!(!city.building_collision([0.05, 0.15], 0., 0.1, 0.2));
+}
