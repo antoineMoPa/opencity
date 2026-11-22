@@ -204,6 +204,20 @@ struct Triangle {
     facade_uv: Option<[[f32; 2]; 3]>,
     render_normal: Option<[f32; 3]>,
 }
+/// Game-supplied collision geometry inside a model building's authored footprint.
+pub trait ModelCollider: Send + Sync {
+    /// Outward horizontal unit normal and penetration in map units for a vertical cylinder.
+    fn contact(
+        &self,
+        point: [f32; 2],
+        radius: f32,
+        bottom: f32,
+        top: f32,
+    ) -> Option<([f32; 2], f32)>;
+    /// First surface hit along origin + direction * t, with positions in map units.
+    fn ray(&self, origin: [f32; 3], direction: [f32; 3], limit: f32) -> Option<(f32, [f32; 3])>;
+}
+
 /// Compiled snapshot. IDs are indices stable for this snapshot, never source-file offsets.
 pub struct City {
     pub roads: Vec<Road>,
@@ -216,6 +230,7 @@ pub struct City {
     pub components: Vec<network::NetworkInstance>,
     pub elevation: Option<ElevationMap>,
     cut_walls: Vec<retaining::RetainingWall>,
+    cut_wall_cells: HashMap<(i32, i32), Vec<usize>>,
     pub bounds: [f32; 4],
     triangles: Vec<Triangle>,
     cells: HashMap<(i32, i32), Vec<usize>>,
@@ -223,6 +238,7 @@ pub struct City {
     support_cells: HashMap<(i32, i32), Vec<usize>>,
     barrier_cells: HashMap<(i32, i32), Vec<usize>>,
     building_cells: HashMap<(i32, i32), Vec<usize>>,
+    pub model_colliders: HashMap<usize, Box<dyn ModelCollider>>,
     foundation_bottoms: HashMap<usize, f32>,
     building_volumes: HashMap<usize, Vec<architecture::BuildingVolume>>,
 }
@@ -277,6 +293,7 @@ impl City {
             junctions: map::intersections(program, &projection),
             components: components.instances,
             elevation,
+            cut_wall_cells: retaining::index(&cut_walls),
             cut_walls,
             bounds: [-1., -1., 1., 1.],
             triangles: Vec::new(),
@@ -284,6 +301,7 @@ impl City {
             support_cells: HashMap::new(),
             barrier_cells: HashMap::new(),
             building_cells: HashMap::new(),
+            model_colliders: HashMap::new(),
             foundation_bottoms: HashMap::new(),
             building_volumes: HashMap::new(),
         };
@@ -464,11 +482,22 @@ impl City {
         let reach = radius + crate::road_geometry::BARRIER_HALF_WIDTH;
         let a = geometry::cell([point[0] - reach, point[1] - reach]);
         let b = geometry::cell([point[0] + reach, point[1] + reach]);
-        let mut best = self
-            .cut_walls
-            .iter()
-            .filter_map(|wall| wall.contact(point, radius, bottom, top))
-            .max_by(|a, b| a.1.total_cmp(&b.1));
+        // On equal depth the original wall scan selected the later segment.
+        let mut cut_hit = None;
+        for x in a.0..=b.0 {
+            for y in a.1..=b.1 {
+                for &id in self.cut_wall_cells.get(&(x, y)).into_iter().flatten() {
+                    if let Some((normal, depth)) =
+                        self.cut_walls[id].contact(point, radius, bottom, top)
+                    {
+                        if cut_hit.is_none_or(|(d, i, _)| (depth, id) > (d, i)) {
+                            cut_hit = Some((depth, id, normal));
+                        }
+                    }
+                }
+            }
+        }
+        let mut best = cut_hit.map(|(depth, _, normal)| (normal, depth));
         for x in a.0..=b.0 {
             for y in a.1..=b.1 {
                 for &id in self.barrier_cells.get(&(x, y)).into_iter().flatten() {
@@ -528,6 +557,15 @@ impl City {
             .unwrap_or(self.landscape[id].elevation)
     }
 
+    /// Whether the query reaches the solid plinth below a building's model.
+    pub fn foundation_overlaps_height(&self, id: usize, bottom: f32, top: f32) -> bool {
+        bottom < self.landscape[id].elevation
+            && self
+                .foundation_bottoms
+                .get(&id)
+                .is_some_and(|&base| top > base)
+    }
+
     /// Conservative visual overlap test, including non-collidable model buildings.
     /// Uses the existing building grid; broad queries fall back to the inventory.
     pub fn building_bounds_overlap(&self, min: [f32; 3], max: [f32; 3]) -> bool {
@@ -567,6 +605,12 @@ impl City {
     pub fn building_collision(&self, point: [f32; 2], radius: f32, bottom: f32, top: f32) -> bool {
         let collides = |id: usize| {
             let f = &self.landscape[id];
+            if let Some(shape) = self.model_colliders.get(&id) {
+                if !self.foundation_overlaps_height(id, bottom, top) {
+                    return f.building_style.unwrap_or_default().collidable
+                        && shape.contact(point, radius, bottom, top).is_some();
+                }
+            }
             f.kind == LandscapeKind::Building
                 && f.building_style.unwrap_or_default().collidable
                 && self.building_bottom(id) < top

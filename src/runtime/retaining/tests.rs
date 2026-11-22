@@ -38,6 +38,23 @@ fn walls_support_collision_without_blocking_the_overpass_or_joined_cuts() {
     assert!(city
         .road_barrier_contact([0., 0.4], 0.01, -0.19, -0.1)
         .is_none());
+    // Compare exact normals as well as depths at segment joins and across cells.
+    for wall in &city.cut_walls {
+        for offset in [-0.005, 0., 0.005] {
+            let point = [wall.start[0] + offset, wall.start[1] - offset];
+            for radius in [0., 0.015, 0.51] {
+                let expected = city
+                    .cut_walls
+                    .iter()
+                    .filter_map(|w| w.contact(point, radius, -0.19, -0.1))
+                    .max_by(|a, b| a.1.total_cmp(&b.1));
+                assert_eq!(
+                    city.road_barrier_contact(point, radius, -0.19, -0.1),
+                    expected
+                );
+            }
+        }
+    }
     let mesh = city.mesh(Region::WholeMap, 0.005).unwrap();
     assert!(mesh
         .vertices

@@ -8,6 +8,20 @@ pub(super) struct RetainingWall {
     pub end: [f32; 4],
 }
 
+pub(super) fn index(walls: &[RetainingWall]) -> HashMap<(i32, i32), Vec<usize>> {
+    let mut cells = HashMap::<_, Vec<_>>::new();
+    for (id, wall) in walls.iter().enumerate() {
+        let lo = geometry::cell([0, 1].map(|i| wall.start[i].min(wall.end[i]) - HALF_WIDTH));
+        let hi = geometry::cell([0, 1].map(|i| wall.start[i].max(wall.end[i]) + HALF_WIDTH));
+        for x in lo.0..=hi.0 {
+            for y in lo.1..=hi.1 {
+                cells.entry((x, y)).or_default().push(id);
+            }
+        }
+    }
+    cells
+}
+
 pub(super) fn walls(map: &ElevationMap) -> Vec<RetainingWall> {
     let mut walls = Vec::new();
     for cut in &map.spec.cuts {
