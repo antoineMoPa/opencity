@@ -159,7 +159,7 @@ struct SurfaceData {
     roof_row:f32, roof_tile:f32, roof_detail:f32, paving_footprint:vec2<f32>,
     world_footprint:vec3<f32>,
     // Optional consumer-supplied coverage, applied after material detail and before lighting.
-    snow:f32,
+    snow:f32, fog:f32,
     world_dx:vec3<f32>,world_dy:vec3<f32>,finish:vec3<f32>,
 };
 fn prepare_surface(v:Output)->SurfaceData {
@@ -178,7 +178,7 @@ fn prepare_surface(v:Output)->SurfaceData {
     let roof_row=(p.x+p.y)/(roof_unit*0.15);
     let roof_tile=(p.y-p.x)/(roof_unit*0.32)+floor(roof_row)*0.5;
     let roof_detail=1.0-smoothstep(0.25,0.8,max(fwidth(roof_row),fwidth(roof_tile)));
-    return SurfaceData(n,detail,floor_position,band,brick_row,brick_coord,brick_footprint,roof_row,roof_tile,roof_detail,fwidth(v.fence_uv),max(abs(dpdx(v.world)),abs(dpdy(v.world))),0.0,dpdx(v.world),dpdy(v.world),vec3<f32>(0.75,0.0,-1.0));
+    return SurfaceData(n,detail,floor_position,band,brick_row,brick_coord,brick_footprint,roof_row,roof_tile,roof_detail,fwidth(v.fence_uv),max(abs(dpdx(v.world)),abs(dpdy(v.world))),0.0,world_fog(length(camera.eye_time.xyz-v.world)),dpdx(v.world),dpdy(v.world),vec3<f32>(0.75,0.0,-1.0));
 }
 @fragment fn fs(v:Output,@builtin(front_facing) front:bool)->@location(0) vec4<f32> {
     let fence_footprint=fwidth(v.fence_uv);
@@ -392,8 +392,7 @@ fn shade_surface_lit(v:Output,front:bool,coverage:f32,surface:SurfaceData,local:
             lit+=vec3<f32>(1.3,0.85,0.4)*darkness;
         }
     }
-    let fog=world_fog(length(eye));
     // Exposure and filmic compression. Surface target is sRGB.
     let sky=textureSampleLevel(sky_environment,sky_sampler,-view,0.0).rgb;
-    return vec4<f32>(filmic_display(mix(lit,sky,fog)*camera.sun_exposure.w),opacity);
+    return vec4<f32>(filmic_display(mix(lit,sky,surface.fog)*camera.sun_exposure.w),opacity);
 }

@@ -30,6 +30,9 @@ pub struct Vertex {
     pub surface: [f32; 4],
 }
 impl Vertex {
+    /// Elevation mesh ground without a shoreline profile.
+    pub const DRY_TERRAIN: f32 = -1.;
+
     /// Material metadata tag shared by the terrain bed and its water surface.
     pub const SHORE_PROFILE: f32 = 3.;
 
@@ -309,7 +312,12 @@ impl City {
                         let bed = ids.map(|i| p[i]);
                         let Some(water_level) = e.spec.water_level else {
                             e.cut_triangle(bed, false, |t| {
-                                mesh.triangle(t, [0.12, 0.23, 0.075], SurfaceKind::Grass, [0.; 3])
+                                mesh.triangle(
+                                    t,
+                                    [0.12, 0.23, 0.075],
+                                    SurfaceKind::Grass,
+                                    [0., 0., Vertex::DRY_TERRAIN],
+                                )
                             });
                             continue;
                         };
@@ -318,7 +326,12 @@ impl City {
                             let center =
                                 [0, 1].map(|axis| t.iter().map(|p| p[axis]).sum::<f32>() / 3.);
                             let start = mesh.vertices.len();
-                            mesh.triangle(t, [0.12, 0.23, 0.075], SurfaceKind::Grass, [0.; 3]);
+                            mesh.triangle(
+                                t,
+                                [0.12, 0.23, 0.075],
+                                SurfaceKind::Grass,
+                                [0., 0., Vertex::DRY_TERRAIN],
+                            );
                             if e.cut_at(center).is_none() {
                                 for v in &mut mesh.vertices[start..] {
                                     v.surface[1..].copy_from_slice(&[

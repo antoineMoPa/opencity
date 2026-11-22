@@ -125,7 +125,7 @@ fn shore_profile_follows_the_bed_on_both_faces_and_excludes_dry_cuts() {
         }
         if elevation.cut_at(center).is_some() {
             assert_eq!(kind, SurfaceKind::Grass as u32 as f32);
-            assert_eq!(t[0].surface[3], 0.);
+            assert_eq!(t[0].surface[3], Vertex::DRY_TERRAIN);
             seen[0] = true;
             continue;
         }
