@@ -115,7 +115,7 @@ impl SurfaceKind {
     pub fn friction(self) -> f32 {
         match self {
             Self::Asphalt => 0.95,
-            Self::Grass => 0.48,
+            Self::Grass => 0.75,
             Self::Sand => 0.38,
             Self::Water => 0.12,
             Self::Sidewalk => 0.8,
