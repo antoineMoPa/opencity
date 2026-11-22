@@ -1,18 +1,24 @@
 //! Navigation export owned by OpenCity, independently of a game's renderer.
+mod shore;
 use super::*;
+use crate::heightmap::ELEVATION_MAP_SIZE;
 use base64::Engine;
 use std::fmt::Write;
 impl City {
     /// North-up SVG of authored terrain, footprints and vector roads.
     /// The viewBox uses map bounds; world Y is reflected into SVG Y once.
     pub fn minimap_svg(&self) -> Result<String, String> {
-        self.navigation_svg(true)
+        self.navigation_svg(true, true)
     }
     /// Elevation shading beneath the game's resolution-independent map paths.
     pub fn minimap_background_svg(&self) -> Result<String, String> {
-        self.navigation_svg(false)
+        self.navigation_svg(false, true)
     }
-    fn navigation_svg(&self, geometry: bool) -> Result<String, String> {
+    /// Relief underlay for renderers that draw the vector water and roads themselves.
+    pub fn minimap_relief_svg(&self) -> Result<String, String> {
+        self.navigation_svg(false, false)
+    }
+    fn navigation_svg(&self, geometry: bool, water: bool) -> Result<String, String> {
         let [x, y, right, top] = self.bounds;
         let width = (right - x).max(0.001);
         let height = (top - y).max(0.001);
@@ -26,25 +32,16 @@ impl City {
             y + top
         );
         if let Some(e) = &self.elevation {
-            let size = 512;
+            let size = ELEVATION_MAP_SIZE;
             let mut pixels = Vec::with_capacity(size * size * 3);
-            for iy in 0..size {
-                for ix in 0..size {
-                    let px = ix * 1023 / (size - 1);
-                    let py = iy * 1023 / (size - 1);
-                    let h = e.point(px, py)[2];
-                    let water = e.spec.water_level.unwrap_or(e.spec.heights[0]);
-                    let rgb = if h <= water {
-                        [23, 62, 85]
-                    } else {
-                        let dx = e.point((px + 1).min(1023), py)[2]
-                            - e.point(px.saturating_sub(1), py)[2];
-                        let dy = e.point(px, (py + 1).min(1023))[2]
-                            - e.point(px, py.saturating_sub(1))[2];
-                        let shade = (0.92 - dx * 8. + dy * 5.).clamp(0.55, 1.25);
-                        [77., 105., 79.].map(|c| (c * shade) as u8)
-                    };
-                    pixels.extend_from_slice(&rgb);
+            for py in 0..size {
+                for px in 0..size {
+                    let dx = e.point((px + 1).min(size - 1), py)[2]
+                        - e.point(px.saturating_sub(1), py)[2];
+                    let dy = e.point(px, (py + 1).min(size - 1))[2]
+                        - e.point(px, py.saturating_sub(1))[2];
+                    let shade = (0.92 - dx * 8. + dy * 5.).clamp(0.55, 1.25);
+                    pixels.extend([77., 105., 79.].map(|c| (c * shade) as u8));
                 }
             }
             let mut png = Vec::new();
@@ -59,6 +56,8 @@ impl City {
                     .map_err(|e| e.to_string())?;
             }
             let data = base64::engine::general_purpose::STANDARD.encode(png);
+            let [x, y] = e.spec.origin;
+            let [width, height] = e.spec.size;
             write!(
                 svg,
                 "<image x=\"{x}\" y=\"{y}\" width=\"{width}\" height=\"{height}\" \
@@ -66,6 +65,9 @@ impl City {
                     {data}\"/>"
             )
             .unwrap();
+            if water {
+                shore::write_water(&mut svg, e);
+            }
         }
         if !geometry {
             svg.push_str("</g></svg>");
