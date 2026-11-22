@@ -50,7 +50,7 @@ fn pavement_lane_color(scan:vec3<f32>,authored:vec3<f32>)->vec3<f32> {
 fn pavement_scan_color(scan:vec3<f32>,layer:i32)->vec3<f32> {
     return select(scan*1.10+vec3<f32>(0.012),mix(vec3<f32>(0.27,0.265,0.245),scan*1.32,0.60),layer==1);
 }
-fn pavement_fine_patch(uv:vec2<f32>,du:vec2<f32>,dv:vec2<f32>,layer:i32,average:vec3<f32>)->PavementPatch {
+fn pavement_grain(uv:vec2<f32>,du:vec2<f32>,dv:vec2<f32>,layer:i32,average:vec3<f32>,middle:f32)->PavementPatch {
     // Three shared vertices per triangular cell give seamless, world-fixed
     // patch blends. A vertex always has the same transform on either side.
     let grid=vec2<f32>(uv.x,(-uv.x+2.0*uv.y)*0.577350269)*0.65;
@@ -61,11 +61,16 @@ fn pavement_fine_patch(uv:vec2<f32>,du:vec2<f32>,dv:vec2<f32>,layer:i32,average:
         ids=array<vec2<f32>,3>(cell+vec2<f32>(1.0),cell+vec2<f32>(0.0,1.0),cell+vec2<f32>(1.0,0.0));
         weights=vec3<f32>(f.x+f.y-1.0,1.0-f.x,1.0-f.y);
     }
+    // Narrow the overlap as pixels grow. The patch coordinates stay affine,
+    // so a straight crack in the scan stays straight at every footprint.
+    let strongest=max(weights.x,max(weights.y,weights.z));
+    weights=max(weights-vec3<f32>(0.55*middle*strongest),vec3<f32>(0.0));
     weights=weights*weights*weights;
     weights/=weights.x+weights.y+weights.z;
-    let a=pavement_patch(uv,du,dv,ids[0],layer);
-    let b=pavement_patch(uv,du,dv,ids[1],layer);
-    let c=pavement_patch(uv,du,dv,ids[2],layer);
+    var a:PavementPatch;var b:PavementPatch;var c:PavementPatch;
+    if weights.x>0.0 {a=pavement_patch(uv,du,dv,ids[0],layer);}
+    if weights.y>0.0 {b=pavement_patch(uv,du,dv,ids[1],layer);}
+    if weights.z>0.0 {c=pavement_patch(uv,du,dv,ids[2],layer);}
     let sampled=a.color*weights.x+b.color*weights.y+c.color*weights.z;
     let bump=a.bump*weights.x+b.bump*weights.y+c.bump*weights.z;
     // Approximate variance compensation prevents three blended scans turning
@@ -73,19 +78,6 @@ fn pavement_fine_patch(uv:vec2<f32>,du:vec2<f32>,dv:vec2<f32>,layer:i32,average:
     let contrast=inverseSqrt(dot(weights,weights));
     let fine=max(average+(sampled-average)*contrast,vec3<f32>(0.0));
     return PavementPatch(fine,bump,a.roughness*weights.x+b.roughness*weights.y+c.roughness*weights.z);
-}
-// World-fixed, smoothly offset UVs keep the single scan from repeating on the tile grid.
-fn pavement_middle_patch(uv:vec2<f32>,du:vec2<f32>,dv:vec2<f32>,layer:i32)->PavementPatch {
-    let frequency=vec2<f32>(0.93,1.17);
-    let phase=uv.yx*frequency;
-    let coord=uv+0.38*sin(phase);
-    let slope=0.38*frequency*cos(phase);
-    let dx=du+slope*du.yx;let dy=dv+slope*dv.yx;
-    let color=textureSampleGrad(pavement_color,pavement_sampler,coord,layer,dx,dy).rgb;
-    let detail=textureSampleGrad(pavement_detail,pavement_sampler,coord,layer,dx,dy);
-    let bump=detail.xyz*2.0-1.0;
-    // Transform normal slopes back to the original tangent frame (OpenGL Y points up).
-    return PavementPatch(color,vec3<f32>(bump.xy-slope.yx*bump.yx,bump.z),detail.w);
 }
 // A consumer supplies map units in metres and derivatives before divergent masks.
 // OpenGL normals: image rows run down, the material bitangent runs up.
@@ -119,17 +111,7 @@ fn scanned_pavement(world:vec3<f32>,dx:vec3<f32>,dy:vec3<f32>,n:vec3<f32>,layer:
         // Far surfaces retain broad variation with one sample, no fine patches.
         return PavementMaterial(pavement_scan_color(average*coarse_variation,layer),n,clamp(roughness_base+average_roughness*0.30+(1.0-coarse_variation)*0.12,0.58,0.96));
     }
-    var grain:PavementPatch;
-    if middle>=1.0 {
-        grain=pavement_middle_patch(uv,du,dv,layer);
-    } else {
-        grain=pavement_fine_patch(uv,du,dv,layer,average);
-        if middle>0.0 {
-            let mid=pavement_middle_patch(uv,du,dv,layer);
-            grain=PavementPatch(mix(grain.color,mid.color,middle),
-                mix(grain.bump,mid.bump,middle),mix(grain.roughness,mid.roughness,middle));
-        }
-    }
+    let grain=pavement_grain(uv,du,dv,layer,average,middle);
     let bump=grain.bump;
     let source_roughness=mix(average_roughness,grain.roughness,resolved);
     let scan=mix(average,grain.color,resolved)*coarse_variation;

@@ -32,7 +32,7 @@ across the near-to-middle transition and returns over 12–20 cm/pixel as fine d
 fades. Contrast compensation around measured scan means reduces washed-out patch
 junctions.
 
-For barycentric coordinates `b`, scan mean `mu`, and three patch samples `C_i`:
+For close-up barycentric coordinates `b`, scan mean `mu`, and three patch samples `C_i`:
 
 ```text
 w_i = b_i^3 / sum(b_j^3)
@@ -44,10 +44,11 @@ Each patch uses `textureSampleGrad` with its rotated/scaled original gradients.
 Color, packed normal/roughness and their blend weights share one patch identity.
 
 Nearby pixels use three albedo samples, three packed normal/roughness samples,
-and one coarse color sample. Over 3–5 mm/pixel the shader crossfades the color, tangent-space
-normal and roughness to one world-fixed scan. A smooth UV offset breaks up the tile grid.
-Its derivatives also transform the texture gradients and normal slopes. The middle tier
-uses two texture samples up to 12 cm/pixel. Beyond 20 cm/pixel a single coarse color
+and one coarse color sample. Over 3–5 mm/pixel the shader narrows the overlap between
+neighboring patches. Each patch keeps its world-fixed rotation, scale and offset, so
+long cracks retain the shape in the scan. At middle distance, a single contributing
+patch takes two texture samples. At patch borders the shader samples and blends the
+neighboring patches as their weights rise from zero. Beyond 20 cm/pixel a single coarse color
 sample supplies the broad variation. These tiers share the same textures and draw calls.
 
 Technique background: [triangular stochastic tiling and
