@@ -269,3 +269,9 @@ focus-preserving camera transition. A standalone intersection also requires a cl
 with existing road surfaces or junction bodies is rejected atomically. Use explicit source/API
 splits when converting an existing road into a junction; the palette action does not infer that
 topology.
+
+### Authored barrier policy
+
+`road_barriers(road_profile, none);` or `road_barriers(segment_id, none);` disables automatic
+safety barriers for the selected roads while preserving their routing roles, paved shoulders,
+merge clipping, and structural deck sides. With no declaration, automatic barriers remain enabled.

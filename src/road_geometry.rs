@@ -516,6 +516,35 @@ impl RoadGeometry {
                 }
             }
         }
+        // A placement or profile may opt out without changing its routing role.
+        let unprotected: std::collections::HashSet<&str> = program
+            .statements
+            .iter()
+            .filter_map(|statement| {
+                let Statement::Call(call) = statement else {
+                    return None;
+                };
+                if call.name != "road_barriers" {
+                    return None;
+                }
+                match call.args.as_slice() {
+                    [crate::Argument::Identifier(road), crate::Argument::Identifier(policy)]
+                        if policy == "none" =>
+                    {
+                        Some(road.as_str())
+                    }
+                    _ => None,
+                }
+            })
+            .collect();
+        self.safety_walls.retain(|wall| {
+            let road = &projection.segments[wall.segment];
+            !unprotected.contains(road.road_name.as_str())
+                && !road
+                    .name
+                    .as_deref()
+                    .is_some_and(|name| unprotected.contains(name))
+        });
     }
     pub fn junction_is_protected(&self, reference: &str) -> bool {
         self.protected_junctions.contains(reference)

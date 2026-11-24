@@ -56,7 +56,7 @@ pub fn set_name(program: &mut Program, source: SegmentSource, name: String) -> b
                 }
             } else if matches!(
                 call.name.as_str(),
-                "elevation" | "grade" | "road_path" | "road_routes"
+                "elevation" | "grade" | "road_path" | "road_routes" | "road_barriers"
             ) {
                 if let Some(Argument::Identifier(road)) = call.args.first_mut() {
                     if *road == old_name {
@@ -392,7 +392,7 @@ pub fn remove(program: &mut Program, source: SegmentSource) -> bool {
                      matches!(arg,
                      Argument::Identifier(road) if road == &name)))
                 || (matches!(call.name.as_str(),
-                    "elevation" | "grade" | "road_path" | "road_routes")
+                    "elevation" | "grade" | "road_path" | "road_routes" | "road_barriers")
                     &&
                          matches!(call.args.first(),
                          Some(Argument::Identifier(road)) if road == &name)))
