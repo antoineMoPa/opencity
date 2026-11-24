@@ -58,7 +58,14 @@ impl TreeTextures {
             size: wgpu::Extent3d {
                 width: 512,
                 height: 512,
-                depth_or_array_layers: 6,
+                // wgpu's GL backend infers cube targets for square arrays with
+                // a multiple of six layers. Pad these 2D arrays on WebGL.
+                depth_or_array_layers: if device.limits().max_storage_buffers_per_shader_stage == 0
+                {
+                    7
+                } else {
+                    6
+                },
             },
             mip_level_count: 1,
             sample_count: 1,
@@ -202,7 +209,12 @@ impl TreeImpostors {
             size: wgpu::Extent3d {
                 width: 1024,
                 height: 1024,
-                depth_or_array_layers: 12,
+                depth_or_array_layers: if device.limits().max_storage_buffers_per_shader_stage == 0
+                {
+                    13
+                } else {
+                    12
+                },
             },
             mip_level_count: 6,
             sample_count: 1,

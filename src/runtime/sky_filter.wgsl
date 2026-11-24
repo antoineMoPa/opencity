@@ -1,6 +1,14 @@
 @group(0) @binding(0) var source:texture_cube<f32>;
 @group(0) @binding(1) var source_sampler:sampler;
 struct Ray { @builtin(position) clip:vec4<f32>, @location(0) ray:vec3<f32>, @location(1) @interpolate(flat) level:u32 };
+// GLSL ES 3.00 has shifts but no bitfieldReverse builtin.
+fn reversed_bits(value:u32)->u32 {
+    var bits=((value>>1u)&0x55555555u)|((value&0x55555555u)<<1u);
+    bits=((bits>>2u)&0x33333333u)|((bits&0x33333333u)<<2u);
+    bits=((bits>>4u)&0x0f0f0f0fu)|((bits&0x0f0f0f0fu)<<4u);
+    bits=((bits>>8u)&0x00ff00ffu)|((bits&0x00ff00ffu)<<8u);
+    return (bits>>16u)|(bits<<16u);
+}
 fn lighting_radiance(ray:vec3<f32>,level:u32)->vec3<f32> {
     let radiance=textureSampleLevel(source,source_sampler,ray,0.0).rgb;
     let luminance=dot(radiance,vec3<f32>(0.2126,0.7152,0.0722));
@@ -30,7 +38,7 @@ fn lighting_radiance(ray:vec3<f32>,level:u32)->vec3<f32> {
     var sum=vec3(0.0);var weight=0.0;
     for(var i=0u;i<64u;i++) {
         let u=(f32(i)+0.5)/64.0;
-        let phi=6.2831853*f32(reverseBits(i))*2.3283064365386963e-10;
+        let phi=6.2831853*f32(reversed_bits(i))*2.3283064365386963e-10;
         var cosine=sqrt((1.0-u)/(1.0+(a2-1.0)*u));
         if v.level==7u {cosine=sqrt(1.0-u);}
         let sine=sqrt(max(0.0,1.0-cosine*cosine));
