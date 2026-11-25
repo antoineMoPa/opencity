@@ -2,6 +2,9 @@ use super::*;
 
 struct Kit {
     recipe: BuildingRecipe,
+    placement: BuildingRecipe,
+    output: Output,
+    bounds: [f32; 4],
     mesh: Mesh,
     volumes: Vec<BuildingVolume>,
     unit: f32,
@@ -11,20 +14,49 @@ struct Kit {
     entry: f32,
 }
 impl Kit {
+    fn cuboid(
+        &mut self,
+        min: [f32; 3],
+        max: [f32; 3],
+        color: [f32; 3],
+        family: Option<u32>,
+        street: bool,
+    ) {
+        if self.output.collisions() {
+            if let Some((lo, hi)) = self.recipe.cuboid_extents(min, max, family) {
+                for x in [lo[0], hi[0]] {
+                    for y in [lo[1], hi[1]] {
+                        for z in [lo[2], hi[2]] {
+                            let p = self.placement.point([x, y, z]);
+                            self.bounds[0] = self.bounds[0].min(p[0]);
+                            self.bounds[1] = self.bounds[1].min(p[1]);
+                            self.bounds[2] = self.bounds[2].max(p[0]);
+                            self.bounds[3] = self.bounds[3].max(p[1]);
+                        }
+                    }
+                }
+            }
+        }
+        if self.output.render() {
+            self.recipe
+                .cuboid(&mut self.mesh, min, max, color, family, street);
+        }
+    }
+
     fn piece(&mut self, min: [f32; 3], max: [f32; 3], color: [f32; 3], skin: Option<u32>) {
         let r = self.recipe;
         let min = [min[0], min[1] + self.entry, min[2]];
         let max = [max[0], max[1] + self.entry, max[2]];
         let min = std::array::from_fn(|i| min[i].clamp(0., [r.width, r.depth, r.height][i]));
         let max = std::array::from_fn(|i| max[i].clamp(0., [r.width, r.depth, r.height][i]));
-        if (0..3).all(|i| max[i] > min[i]) {
+        if self.output.collisions() && (0..3).all(|i| max[i] > min[i]) {
             self.volumes.push(BuildingVolume {
                 recipe: r,
                 min,
                 max,
             });
         }
-        r.cuboid(&mut self.mesh, min, max, color, skin, false);
+        self.cuboid(min, max, color, skin, false);
     }
     fn slab(&mut self, x: f32, y: f32, w: f32, d: f32, z: f32, h: f32, color: [f32; 3]) {
         self.piece([x, y, z], [x + w, y + d, z + h], color, None);
@@ -64,13 +96,14 @@ impl Kit {
         if top <= base {
             return;
         }
-        self.volumes.push(BuildingVolume {
-            recipe: self.recipe,
-            min: [x, y + self.entry, base],
-            max: [x + w, y + d + self.entry, top],
-        });
-        self.recipe.cuboid(
-            &mut self.mesh,
+        if self.output.collisions() {
+            self.volumes.push(BuildingVolume {
+                recipe: self.recipe,
+                min: [x, y + self.entry, base],
+                max: [x + w, y + d + self.entry, top],
+            });
+        }
+        self.cuboid(
             [x, y + self.entry, base],
             [x + w, y + d + self.entry, top],
             self.recipe.palette.color(),
@@ -563,19 +596,53 @@ impl Kit {
     }
 }
 pub(super) fn mesh(recipe: BuildingRecipe) -> Mesh {
-    geometry(recipe).0
+    build_geometry(recipe, Shading::Baked, Output::Render).0
 }
+#[cfg(test)]
 pub(super) fn geometry(recipe: BuildingRecipe) -> (Mesh, Vec<BuildingVolume>) {
-    build_geometry(recipe, Shading::Baked)
+    let (mesh, volumes, _) = build_geometry(recipe, Shading::Baked, Output::Both);
+    (mesh, volumes)
 }
 pub(super) fn picking_mesh(recipe: BuildingRecipe) -> Mesh {
-    build_geometry(recipe, Shading::Unbaked).0
+    build_geometry(recipe, Shading::Unbaked, Output::Render).0
+}
+pub(super) fn collision_geometry(recipe: BuildingRecipe) -> (Vec<BuildingVolume>, [f32; 4]) {
+    let (_, volumes, bounds) = build_geometry(recipe, Shading::Unbaked, Output::Collision);
+    (volumes, bounds)
+}
+enum Output {
+    Render,
+    Collision,
+    #[cfg(test)]
+    Both,
+}
+impl Output {
+    fn render(&self) -> bool {
+        match self {
+            Self::Render => true,
+            Self::Collision => false,
+            #[cfg(test)]
+            Self::Both => true,
+        }
+    }
+    fn collisions(&self) -> bool {
+        match self {
+            Self::Render => false,
+            Self::Collision => true,
+            #[cfg(test)]
+            Self::Both => true,
+        }
+    }
 }
 enum Shading {
     Baked,
     Unbaked,
 }
-fn build_geometry(recipe: BuildingRecipe, shading: Shading) -> (Mesh, Vec<BuildingVolume>) {
+fn build_geometry(
+    recipe: BuildingRecipe,
+    shading: Shading,
+    output: Output,
+) -> (Mesh, Vec<BuildingVolume>, [f32; 4]) {
     let unit = (recipe.floor_height / 3.25)
         .min(recipe.height / 14.)
         .min(recipe.width / 8.)
@@ -586,6 +653,14 @@ fn build_geometry(recipe: BuildingRecipe, shading: Shading) -> (Mesh, Vec<Buildi
         _ => 0.,
     };
     let mut kit = Kit {
+        placement: recipe,
+        output,
+        bounds: [
+            f32::INFINITY,
+            f32::INFINITY,
+            f32::NEG_INFINITY,
+            f32::NEG_INFINITY,
+        ],
         recipe: BuildingRecipe {
             origin: [0.; 3],
             along: [1., 0.],
@@ -621,5 +696,5 @@ fn build_geometry(recipe: BuildingRecipe, shading: Shading) -> (Mesh, Vec<Buildi
     for volume in &mut kit.volumes {
         volume.recipe = recipe;
     }
-    (kit.mesh, kit.volumes)
+    (kit.mesh, kit.volumes, kit.bounds)
 }

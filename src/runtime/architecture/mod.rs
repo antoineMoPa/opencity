@@ -167,8 +167,12 @@ impl BuildingRecipe {
     pub fn picking_mesh(self) -> Mesh {
         parts::picking_mesh(self)
     }
+    #[cfg(test)]
     pub(super) fn geometry(self) -> (Mesh, Vec<BuildingVolume>) {
         parts::geometry(self)
+    }
+    pub(super) fn collision_geometry(self) -> (Vec<BuildingVolume>, [f32; 4]) {
+        parts::collision_geometry(self)
     }
     fn point(self, p: [f32; 3]) -> [f32; 3] {
         [
@@ -195,17 +199,14 @@ impl BuildingRecipe {
             | self.section << 21
             | u32::from(self.solid_corners) << 23) as f32
     }
-    fn cuboid(
+    fn cuboid_extents(
         self,
-        mesh: &mut Mesh,
         min: [f32; 3],
         max: [f32; 3],
-        color: [f32; 3],
         family: Option<u32>,
-        street: bool,
-    ) {
+    ) -> Option<([f32; 3], [f32; 3])> {
         if (0..3).any(|i| max[i] - min[i] < 0.000001) {
-            return;
+            return None;
         }
         // Keep the facade skin behind applied stone/metal trim in both renderers.
         // The two-centimeter reveal avoids coplanar surfaces at panel edges.
@@ -219,6 +220,20 @@ impl BuildingRecipe {
         };
         let min = [min[0] + inset, min[1] + inset, min[2]];
         let max = [max[0] - inset, max[1] - inset, max[2]];
+        Some((min, max))
+    }
+    fn cuboid(
+        self,
+        mesh: &mut Mesh,
+        min: [f32; 3],
+        max: [f32; 3],
+        color: [f32; 3],
+        family: Option<u32>,
+        street: bool,
+    ) {
+        let Some((min, max)) = self.cuboid_extents(min, max, family) else {
+            return;
+        };
         let start = mesh.vertices.len();
         let normals = [
             [0., -1., 0.],

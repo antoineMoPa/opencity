@@ -1112,6 +1112,42 @@ impl City {
         cfg: &BuildingDetailConfig,
         include: impl Fn(&LandscapeFeature) -> bool,
     ) -> (Mesh, Vec<Mesh>) {
+        self.building_detail_parts_observed(region, cfg, include, |_, _, _| {})
+    }
+    #[cfg(feature = "memory-profile")]
+    pub fn building_detail_memory_matching(
+        &self,
+        region: Region,
+        cfg: &BuildingDetailConfig,
+        include: impl Fn(&LandscapeFeature) -> bool,
+    ) -> Vec<super::memory_profile::BuildingDetailMemory> {
+        let mut rows = Vec::new();
+        self.building_detail_parts_observed(
+            region,
+            cfg,
+            include,
+            |feature, scenery_vertices, props| {
+                rows.push(super::memory_profile::BuildingDetailMemory {
+                    feature,
+                    scenery_vertices,
+                    prop_vertices: props.iter().map(|m| m.vertices.len()).sum(),
+                    prop_capacity_bytes: props
+                        .iter()
+                        .map(|m| m.vertices.capacity() * std::mem::size_of::<Vertex>())
+                        .sum(),
+                    prop_meshes: props.len(),
+                });
+            },
+        );
+        rows
+    }
+    fn building_detail_parts_observed(
+        &self,
+        region: Region,
+        cfg: &BuildingDetailConfig,
+        include: impl Fn(&LandscapeFeature) -> bool,
+        mut observe: impl FnMut(usize, usize, &[Mesh]),
+    ) -> (Mesh, Vec<Mesh>) {
         let mut mesh = Mesh::default();
         let mut props = Vec::new();
         if !region.valid()
@@ -1134,7 +1170,7 @@ impl City {
         {
             return (mesh, props);
         }
-        for feature in self.landscape.iter().filter(|f| {
+        for (feature_id, feature) in self.landscape.iter().enumerate().filter(|(_, f)| {
             f.kind == LandscapeKind::Building
                 && f.model.is_none()
                 && f.building_use.allows_residential_details()
@@ -1176,8 +1212,15 @@ impl City {
                     chosen.facade = FacadeKind::Rowhouse;
                 }
             }
+            let scenery_start = mesh.vertices.len();
+            let props_start = props.len();
             make_details(
                 self, front, feature, cfg, &chosen, &mut seed, &mut mesh, &mut props,
+            );
+            observe(
+                feature_id,
+                mesh.vertices.len() - scenery_start,
+                &props[props_start..],
             );
         }
         (mesh, props)

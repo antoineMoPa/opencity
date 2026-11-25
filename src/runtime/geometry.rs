@@ -724,6 +724,8 @@ pub(super) fn compile(
         }
     }
     for (feature_id, f) in city.landscape.clone().into_iter().enumerate() {
+        #[cfg(feature = "memory-profile")]
+        let ownership_start = city.triangles.len();
         // Model placements with collision disabled also represent signs and open canopies.
         if f.kind == LandscapeKind::Building
             && (f.model.is_none() || f.building_style.unwrap_or_default().collidable)
@@ -732,33 +734,23 @@ pub(super) fn compile(
         }
         let first_triangle = city.triangles.len();
         if let Some(recipe) = super::architecture::BuildingRecipe::from_feature(&f) {
-            let (mesh, volumes) = recipe.geometry();
+            let (volumes, bounds) = recipe.collision_geometry();
             city.building_volumes.insert(feature_id, volumes);
-            for t in mesh.vertices.chunks_exact(3) {
-                let facade = t[0].surface[0] == SurfaceKind::Facade as u32 as f32
-                    || t[0].surface[0] == SurfaceKind::Masonry as u32 as f32
-                    || t[0].surface[0] == SurfaceKind::Glazing as u32 as f32;
-                city.triangles.push(Triangle {
-                    model_proxy: false,
-                    points: std::array::from_fn(|i| t[i].position),
-                    kind: if t[0].surface[0] == SurfaceKind::Masonry as u32 as f32 {
-                        SurfaceKind::Masonry
-                    } else if t[0].surface[0] == SurfaceKind::Glazing as u32 as f32 {
-                        SurfaceKind::Glazing
-                    } else if facade {
-                        SurfaceKind::Facade
-                    } else {
-                        SurfaceKind::Prop
-                    },
-                    road: None,
-                    color: std::array::from_fn(|i| t[i].color),
-                    data: [0., 0., t[0].surface[3]],
-                    paving_distance: None,
-                    facade_uv: facade
-                        .then(|| std::array::from_fn(|i| [t[i].surface[1], t[i].surface[2]])),
-                    render_normal: Some(t[0].normal),
-                });
+            city.procedural_buildings
+                .insert(feature_id, super::procedural::Building { recipe, bounds });
+            let lo = cell([bounds[0], bounds[1]]);
+            let hi = cell([bounds[2], bounds[3]]);
+            for x in lo.0..=hi.0 {
+                for y in lo.1..=hi.1 {
+                    city.procedural_cells
+                        .entry((x, y))
+                        .or_default()
+                        .push(feature_id);
+                }
             }
+            #[cfg(feature = "memory-profile")]
+            city.building_triangle_ranges
+                .push((feature_id, ownership_start..city.triangles.len()));
             continue;
         }
         let k = match f.kind {
@@ -823,25 +815,33 @@ pub(super) fn compile(
                 triangle.model_proxy = true;
             }
         }
+        #[cfg(feature = "memory-profile")]
+        if f.kind == LandscapeKind::Building {
+            city.building_triangle_ranges
+                .push((feature_id, ownership_start..city.triangles.len()));
+        }
     }
-    city.bounds = city
-        .elevation
-        .as_ref()
-        .map(|e| {
-            [
-                e.spec.origin[0],
-                e.spec.origin[1],
-                e.spec.origin[0] + e.spec.size[0],
-                e.spec.origin[1] + e.spec.size[1],
-            ]
-        })
-        .unwrap_or_else(|| {
-            bounds(
-                city.triangles
-                    .iter()
-                    .flat_map(|t| t.points.map(|p| [p[0], p[1]])),
-            )
-        });
+    city.bounds =
+        city.elevation
+            .as_ref()
+            .map(|e| {
+                [
+                    e.spec.origin[0],
+                    e.spec.origin[1],
+                    e.spec.origin[0] + e.spec.size[0],
+                    e.spec.origin[1] + e.spec.size[1],
+                ]
+            })
+            .unwrap_or_else(|| {
+                bounds(
+                    city.triangles
+                        .iter()
+                        .flat_map(|t| t.points.map(|p| [p[0], p[1]]))
+                        .chain(city.procedural_buildings.values().flat_map(|b| {
+                            [[b.bounds[0], b.bounds[1]], [b.bounds[2], b.bounds[3]]]
+                        })),
+                )
+            });
     if !city.bounds.iter().all(|v| v.is_finite()) {
         city.bounds = [-1., -1., 1., 1.];
     }

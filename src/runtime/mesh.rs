@@ -229,6 +229,7 @@ impl City {
                 }
             }
         }
+        self.append_procedural(region, &mut mesh);
         if let Some(e) = &self.elevation {
             let b = self.bounds;
             let view = match region {

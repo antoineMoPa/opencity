@@ -1,10 +1,15 @@
 //! Renderer-independent game data. Map coordinates are X east, Y north, Z up.
 //! A map unit is deliberately not assigned a physical length; consumers choose a scale.
 //! Load once, query borrowed structured records, and request camera-local triangle meshes.
+#[cfg(feature = "memory-profile")]
+mod memory_profile;
+#[cfg(feature = "memory-profile")]
+pub use memory_profile::{BuildingDetailMemory, BuildingMemory, CityMemory};
 mod bike_markings;
 mod bridges;
 pub mod contact_debris;
 mod geometry;
+mod procedural;
 mod retaining;
 pub mod surface_materials;
 mod surface_weathering;
@@ -233,6 +238,11 @@ pub struct City {
     cut_wall_cells: HashMap<(i32, i32), Vec<usize>>,
     pub bounds: [f32; 4],
     triangles: Vec<Triangle>,
+    procedural_buildings: HashMap<usize, procedural::Building>,
+    procedural_cells: HashMap<(i32, i32), Vec<usize>>,
+    building_meshes: std::sync::Mutex<procedural::MeshCache>,
+    #[cfg(feature = "memory-profile")]
+    building_triangle_ranges: Vec<(usize, std::ops::Range<usize>)>,
     cells: HashMap<(i32, i32), Vec<usize>>,
     // Tire/foot support must not traverse dense render-only facade geometry.
     support_cells: HashMap<(i32, i32), Vec<usize>>,
@@ -297,6 +307,11 @@ impl City {
             cut_walls,
             bounds: [-1., -1., 1., 1.],
             triangles: Vec::new(),
+            procedural_buildings: HashMap::new(),
+            procedural_cells: HashMap::new(),
+            building_meshes: Default::default(),
+            #[cfg(feature = "memory-profile")]
+            building_triangle_ranges: Vec::new(),
             cells: HashMap::new(),
             support_cells: HashMap::new(),
             barrier_cells: HashMap::new(),

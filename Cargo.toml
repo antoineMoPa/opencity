@@ -13,6 +13,8 @@ path = "src/lib.rs"
 crate-type = ["rlib"]
 
 [features]
+# Diagnostic ownership counters; omitted from ordinary city snapshots.
+memory-profile = ["game-runtime"]
 expansion-ui = ["dep:egui"]
 game-runtime = ["dep:earcutr", "dep:base64", "dep:glam", "dep:gltf", "dep:ttf-parser"]
 external-web-assets = ["game-runtime"]
