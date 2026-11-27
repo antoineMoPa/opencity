@@ -37,6 +37,7 @@ pub use building_details::{
 };
 pub use mesh::{Mesh, StreetFeature, StreetFeatureKind, Vertex};
 use std::{collections::HashMap, path::Path};
+pub use svg::NavigationPalette;
 
 /// Optional standalone wgpu shader: Z-up positions, linear RGB, surface metadata.
 /// Group 0: 288-byte camera/lighting/star uniform (see docs/game-runtime.md).
